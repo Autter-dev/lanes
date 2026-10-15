@@ -8,8 +8,9 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-15
 
-- `18:50` **Changed**: README restyled with a centered header, badges, a feature grid, status markers and a collapsible FAQ.
-- `18:50` **Added**: this changelog, plus a rule in `AGENTS.md` and `CONTRIBUTING.md` to keep it updated.
+- `18:53` **Fixed**: README links to [@sagnik_ghosh_11](https://x.com/sagnik_ghosh_11) on X instead of a placeholder handle.
+- `18:50` **Changed**: README restyled with a centered header, badges, a feature grid, status markers and a collapsible FAQ. (`41e651c`)
+- `18:50` **Added**: this changelog, plus a rule in `AGENTS.md` and `CONTRIBUTING.md` to keep it updated. (`41e651c`)
 - `18:41` **Added**: README footer linking to [Autter](https://autter.dev). (`026670c`)
 - `17:18` **Changed**: README says `lane login` signs in to Autter and connects the Lanes gateway. (`ffd255b`)
 - `16:34` **Added**: README covers the terminal app, optional sign-in and the anonymous install count, which `lane telemetry off` or `DO_NOT_TRACK=1` turns off. (`835c156`)
