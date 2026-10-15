@@ -39,8 +39,9 @@ Lanes gives each agent a **lane** instead.
 - A built-in MCP server, so agents can create lanes and read code in one call
 - Works in cloud agents too: one line in your setup script
 
-### See everything at once
-- `lane top`: a live view of every lane, with its agent, changed files, tests, conflicts and disk use
+### A proper terminal app
+- Run `lane` to open a full-screen app: every lane with its agent, changed files, tests, conflicts and disk use
+- Start agents, watch them work, read diffs and logs, undo steps and open PRs without leaving it
 
 ### No more collisions
 - A warning when two agents start editing the same file or function, while they're still working
@@ -61,25 +62,27 @@ Lanes gives each agent a **lane** instead.
 - Builds and tests take turns, so five agents don't freeze your machine
 - Dev servers start only when you open them
 
-### Private by default
+### Your code stays on your machine
 - Works offline
-- No account needed
-- Nothing phones home
+- Signing in with GitHub is optional
+- The only thing Lanes sends is an anonymous install count: version, OS and how you installed it. Never code, file paths or repo names. Turn it off with `lane telemetry off` or `DO_NOT_TRACK=1`
 
 ### Ready for teams
-- `lane login` connects [Autter](https://autter.dev): ask questions about your repo, get security checks while agents work, and get a safe-to-merge verdict on every PR
+- The same GitHub sign-in connects [Autter](https://autter.dev): ask questions about your repo, get security checks while agents work, and get a safe-to-merge verdict on every PR
 
 ## Status
 
 | Feature | Status |
 | --- | --- |
 | Instant lanes, `lane init`, ports and env per lane | Building now |
+| Terminal app | Building now |
+| GitHub sign-in | Next |
 | Claude Code integration, MCP server | Building now |
 | Cursor, Codex, Gemini CLI, Copilot and other agents | Next |
 | Databases and Docker Compose per lane, `*.localhost` URLs | Next |
-| `lane top`, undo, conflict warnings, `lane race`, `lane promote` | Next |
+| Undo, conflict warnings, `lane race`, `lane promote` | Next |
 | Cloud agent setup snippets, GitHub Action | Next |
-| Autter connect (`lane login`) | December |
+| Autter for teams | December |
 | Windows | Later |
 
 ## Quick start (preview)
@@ -104,13 +107,14 @@ open http://fix-auth.localhost
 | `lane list` | Lists your lanes with their ports and URLs |
 | `lane exec <name> -- <cmd>` | Runs a command inside a lane |
 | `lane run -- <agent>` | Starts any agent in a fresh lane |
-| `lane top` | Live view of every lane |
+| `lane` | Opens the terminal app |
 | `lane undo` / `lane restore` | Takes back a step, or returns to a checkpoint |
 | `lane race -n <N> "<task>"` | One task, N agents, best result wins |
 | `lane combine <a> <b>` | Tries two lanes together |
 | `lane promote <name>` | Turns a lane into one clean PR |
 | `lane rm <name>` / `lane gc` | Removes one lane, or every finished one |
-| `lane login` | Connects Autter |
+| `lane login` | Signs in with GitHub (optional) |
+| `lane telemetry off` | Turns off the anonymous install count |
 
 ## Platforms
 
@@ -122,7 +126,7 @@ macOS and Linux at launch. Windows later.
 No. Lanes works on top of the Git repo and the GitHub you already use.
 
 **Does my code leave my machine?**
-No. Lanes runs locally and calls nothing unless you run `lane login`.
+No. Lanes runs locally. The only thing it sends is an anonymous install count (version, OS and how you installed it), which you can turn off. Signing in is optional.
 
 **Is it free?**
 Yes. Lanes is open source under Apache-2.0. Autter, for teams, is a paid product.
