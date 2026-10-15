@@ -4,7 +4,7 @@
 
 Every agent gets its own instant copy of your project, with dependencies ready and its own ports, URL and database. You keep your Git repo, your GitHub and your agents. Nothing to migrate.
 
-> **Early and in active development.** We're building Lanes in public. Star or watch this repo for releases, and follow along at [@your_handle](https://x.com/your_handle).
+> **Early and in active development.** We're building Lanes in public. Star or watch this repo for releases, and follow along at [@sagnik_ghosh_11](https://x.com/sagnik_ghosh_11).
 
 ---
 
