@@ -11,6 +11,7 @@ Thanks for your interest. Lanes is early, so the most useful contributions right
 1. Open an issue first for anything larger than a small fix, so we can agree on the approach.
 2. Run `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings` and `cargo test --all`.
 3. Keep each pull request to one change.
+4. Add a line to [CHANGELOG.md](CHANGELOG.md) under today's UTC date, with the UTC time and the type of change.
 
 ## License
 

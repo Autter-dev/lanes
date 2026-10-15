@@ -27,6 +27,10 @@ Run format, lint and tests before you finish.
 
 Check a new dependency's license against `deny.toml` before adding it. Prefer fewer, well-maintained crates.
 
+## Changelog
+
+Add an entry to `CHANGELOG.md` for every notable change, newest first, under today's UTC date (`### YYYY-MM-DD`) in the Unreleased section. Each entry starts with the UTC time (`HH:MM`, from `date -u`) and a type: Added, Changed, Fixed, Removed or Security. Add the short commit hash once it exists.
+
 ## Parallel work
 
 Once `lane new` works, use lanes for parallel work on this repo: run `lane new <name>` instead of `git worktree add` or copying the repo.
