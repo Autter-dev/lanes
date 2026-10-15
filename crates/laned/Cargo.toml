@@ -1,0 +1,18 @@
+[package]
+name = "laned"
+description = "The Lanes background daemon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "laned"
+path = "src/main.rs"
+
+[dependencies]
+lane-core.workspace = true
