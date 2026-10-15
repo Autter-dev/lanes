@@ -64,11 +64,11 @@ Lanes gives each agent a **lane** instead.
 
 ### Your code stays on your machine
 - Works offline
-- Signing in with GitHub is optional
+- Signing in is optional, and connecting a repo to the gateway is always your choice
 - The only thing Lanes sends is an anonymous install count: version, OS and how you installed it. Never code, file paths or repo names. Turn it off with `lane telemetry off` or `DO_NOT_TRACK=1`
 
 ### Ready for teams
-- The same GitHub sign-in connects [Autter](https://autter.dev): ask questions about your repo, get security checks while agents work, and get a safe-to-merge verdict on every PR
+- `lane login` signs you into [Autter](https://autter.dev) and connects your lanes to the Lanes gateway on Autter: cloud agents and CI read your repo without cloning, and you get repo Q&A, security checks while agents work, and a safe-to-merge verdict on every PR
 
 ## Status
 
@@ -76,13 +76,13 @@ Lanes gives each agent a **lane** instead.
 | --- | --- |
 | Instant lanes, `lane init`, ports and env per lane | Building now |
 | Terminal app | Building now |
-| GitHub sign-in | Next |
+| Sign-in to Autter (`lane login`) | Next |
 | Claude Code integration, MCP server | Building now |
 | Cursor, Codex, Gemini CLI, Copilot and other agents | Next |
 | Databases and Docker Compose per lane, `*.localhost` URLs | Next |
 | Undo, conflict warnings, `lane race`, `lane promote` | Next |
 | Cloud agent setup snippets, GitHub Action | Next |
-| Autter for teams | December |
+| Lanes gateway on Autter | December |
 | Windows | Later |
 
 ## Quick start (preview)
@@ -113,7 +113,7 @@ open http://fix-auth.localhost
 | `lane combine <a> <b>` | Tries two lanes together |
 | `lane promote <name>` | Turns a lane into one clean PR |
 | `lane rm <name>` / `lane gc` | Removes one lane, or every finished one |
-| `lane login` | Signs in with GitHub (optional) |
+| `lane login` | Signs in to Autter and connects the Lanes gateway (optional) |
 | `lane telemetry off` | Turns off the anonymous install count |
 
 ## Platforms
@@ -126,7 +126,7 @@ macOS and Linux at launch. Windows later.
 No. Lanes works on top of the Git repo and the GitHub you already use.
 
 **Does my code leave my machine?**
-No. Lanes runs locally. The only thing it sends is an anonymous install count (version, OS and how you installed it), which you can turn off. Signing in is optional.
+Not unless you choose to connect a repo to the Lanes gateway on Autter. Otherwise Lanes runs locally, and the only thing it sends is an anonymous install count (version, OS and how you installed it), which you can turn off.
 
 **Is it free?**
 Yes. Lanes is open source under Apache-2.0. Autter, for teams, is a paid product.
