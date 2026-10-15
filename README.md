@@ -140,4 +140,11 @@ Lanes is early. Issues, ideas and benchmarks from your own repos are very welcom
 
 ## License
 
-Apache-2.0. Built by [Autter](https://autter.dev).
+Apache-2.0. See [LICENSE](LICENSE).
+
+---
+
+<p align="center">
+  Lanes is built by <a href="https://autter.dev"><b>Autter</b></a>: code Q&amp;A, security checks and safe-to-merge verdicts for teams shipping with agents.<br>
+  <a href="https://autter.dev">autter.dev</a>
+</p>
