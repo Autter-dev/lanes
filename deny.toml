@@ -1,5 +1,6 @@
 # cargo-deny: every dependency must use one of these licenses.
-# Lanes ships under Apache-2.0, so nothing copyleft gets in.
+# Lanes ships under AGPL-3.0-only. Dependencies stay permissive, so
+# nothing else's copyleft terms get mixed in.
 
 [licenses]
 allow = [
@@ -13,6 +14,12 @@ allow = [
   "Unicode-3.0",
 ]
 confidence-threshold = 0.9
+# Our own crates are AGPL-3.0-only.
+exceptions = [
+  { crate = "lane", allow = ["AGPL-3.0-only"] },
+  { crate = "laned", allow = ["AGPL-3.0-only"] },
+  { crate = "lane-core", allow = ["AGPL-3.0-only"] },
+]
 
 [bans]
 multiple-versions = "warn"

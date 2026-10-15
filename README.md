@@ -1,17 +1,16 @@
 <div align="center">
 
-# 🛣️ Lanes
-
-### Lighter agents.
+<img src="assets/hero.svg" alt="Lanes: lighter agents. Four coding agents, each driving in its own lane." width="100%">
 
 **Run as many coding agents as you want on one repo, without them getting in each other's way.**
 
 [![CI](https://github.com/autter-dev/lanes/actions/workflows/ci.yml/badge.svg)](https://github.com/autter-dev/lanes/actions/workflows/ci.yml)
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux-lightgrey.svg)
 ![Status](https://img.shields.io/badge/status-early%20development-orange.svg)
 
 [Why Lanes](#-why-lanes) •
+[How it works](#-how-it-works) •
 [Features](#-features) •
 [Status](#-status) •
 [Quick start](#-quick-start-preview) •
@@ -39,6 +38,16 @@ Running several coding agents today usually means:
 - 😬 finding out two agents edited the same function only when you merge
 
 Lanes gives each agent a **lane** instead.
+
+## 🧭 How it works
+
+<p align="center">
+  <img src="assets/how-it-works.svg" alt="Your repo feeds one lane per agent, each with its own URL, port and database. Lanes warns when two lanes edit the same file, and lane promote turns the best lane into one clean pull request." width="100%">
+</p>
+
+1. **Your repo.** Keep your Git repo, your GitHub and your agents as they are.
+2. **`lane new`.** Each agent gets an instant, ready-to-run lane with its own URL, ports and database. Lanes warns you as soon as two lanes touch the same code.
+3. **`lane promote`.** Turn the best lane into one clean pull request.
 
 ## ✨ Features
 
@@ -133,6 +142,14 @@ Lanes gives each agent a **lane** instead.
 </tr>
 </table>
 
+## 🖥️ The terminal app
+
+<p align="center">
+  <img src="assets/terminal-app.svg" alt="Mockup of the lane terminal app: four lanes with their agent, status, changes, tests and URL, and a warning that two lanes are editing the same function." width="100%">
+</p>
+
+<p align="center"><sub>A preview of the terminal app, which we're building now. Run <code>lane</code> to open it.</sub></p>
+
 ## 📍 Status
 
 | Feature | Status |
@@ -208,7 +225,7 @@ Not unless you choose to connect a repo to the Lanes gateway on Autter. Otherwis
 <summary><b>Is it free?</b></summary>
 <br>
 
-Yes. Lanes is open source under Apache-2.0. Autter, for teams, is a paid product.
+Yes. Lanes is open source under the GNU AGPL-3.0. You can use, change and share it freely. If you share a changed version, or run one as a service for others, you must publish your changes under the same license. Autter, for teams, is a paid product.
 
 </details>
 
@@ -226,9 +243,15 @@ Lanes is early. Issues, ideas and benchmarks from your own repos are very welcom
 
 ## 📄 License
 
-Apache-2.0. See [LICENSE](LICENSE).
+GNU Affero General Public License v3.0 only (AGPL-3.0-only). See [LICENSE](LICENSE).
 
 ---
+
+<p align="center">
+  <a href="https://autter.dev">
+    <img src="assets/autter-banner.jpg" alt="Autter: ship more code, not more risk." width="100%">
+  </a>
+</p>
 
 <p align="center">
   Lanes is built by <a href="https://autter.dev"><b>Autter</b></a>: code Q&amp;A, security checks and safe-to-merge verdicts for teams shipping with agents.<br>

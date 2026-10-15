@@ -8,7 +8,9 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-15
 
-- `18:53` **Fixed**: README links to [@sagnik_ghosh_11](https://x.com/sagnik_ghosh_11) on X instead of a placeholder handle.
+- `19:08` **Added**: README illustrations in `assets/`: an animated hero, a "How it works" diagram, a preview of the terminal app and an Autter banner in the footer.
+- `19:04` **Changed**: Lanes is now licensed under the GNU AGPL-3.0 (`AGPL-3.0-only`) instead of Apache-2.0. Code released before this change stays available under Apache-2.0.
+- `18:53` **Fixed**: README links to [@sagnik_ghosh_11](https://x.com/sagnik_ghosh_11) on X instead of a placeholder handle. (`c259a35`)
 - `18:50` **Changed**: README restyled with a centered header, badges, a feature grid, status markers and a collapsible FAQ. (`41e651c`)
 - `18:50` **Added**: this changelog, plus a rule in `AGENTS.md` and `CONTRIBUTING.md` to keep it updated. (`41e651c`)
 - `18:41` **Added**: README footer linking to [Autter](https://autter.dev). (`026670c`)

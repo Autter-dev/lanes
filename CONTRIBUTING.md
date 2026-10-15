@@ -15,4 +15,4 @@ Thanks for your interest. Lanes is early, so the most useful contributions right
 
 ## License
 
-By contributing, you agree that your contributions are licensed under the Apache License 2.0, the same license as the project.
+By contributing, you agree that your contributions are licensed under the GNU Affero General Public License v3.0 only (AGPL-3.0-only), the same license as the project.

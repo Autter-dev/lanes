@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 560" width="1280" height="560" role="img" aria-labelledby="t d">
+  <title id="t">The Lanes terminal app (preview)</title>
+  <desc id="d">A mockup of the lane terminal app listing four lanes with their agent, status, changes, tests and URL, and a warning that two lanes are editing the same function.</desc>
+  <rect width="1280" height="560" rx="20" fill="#060914" stroke="#222c4f"/>
+  <path d="M0 20 a20 20 0 0 1 20 -20 H1260 a20 20 0 0 1 20 20 V52 H0 Z" fill="#141d3a"/>
+  <circle cx="30" cy="26" r="7" fill="#ff5f57"/><circle cx="54" cy="26" r="7" fill="#febc2e"/><circle cx="78" cy="26" r="7" fill="#28c840"/>
+  <text x="640.0" y="31" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#aab4d4">lane — ~/code/your-repo</text>
+  <text x="44" y="98" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="24" font-weight="800" fill="#eef2ff">Lanes<tspan fill="#2cffd0">.</tspan></text>
+  <text x="140" y="98" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#aab4d4">4 lanes · 2 agents running · 1 conflict</text>
+  <text x="1236" y="98" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="13" fill="#6b7699">preview</text>
+  <line x1="44" y1="118" x2="1236" y2="118" stroke="#222c4f"/>
+  <text x="70" y="150" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" font-weight="700" fill="#6b7699" letter-spacing="1">LANE</text><text x="260" y="150" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" font-weight="700" fill="#6b7699" letter-spacing="1">AGENT</text><text x="440" y="150" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" font-weight="700" fill="#6b7699" letter-spacing="1">STATUS</text><text x="590" y="150" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" font-weight="700" fill="#6b7699" letter-spacing="1">CHANGES</text><text x="730" y="150" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" font-weight="700" fill="#6b7699" letter-spacing="1">TESTS</text><text x="860" y="150" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" font-weight="700" fill="#6b7699" letter-spacing="1">URL</text><rect x="44" y="168" width="1192" height="48" rx="10" fill="#f5a11a" fill-opacity="0.09" stroke="#f5a11a" stroke-opacity="0.35"/><text x="54" y="200" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" fill="#f5a11a">›</text><g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="17">
+      <text x="70" y="200" fill="#eef2ff" font-weight="700">fix-auth</text>
+      <text x="260" y="200" fill="#aab4d4">Claude Code</text>
+      <circle cx="446" cy="194" r="5" fill="#f5a11a"><animate attributeName="opacity" values="1;0.3;1" dur="1.6s" repeatCount="indefinite"/></circle>
+      <text x="460" y="200" fill="#f5a11a">running</text>
+      <text x="590" y="200"><tspan fill="#2cffd0">+42</tspan> <tspan fill="#ff6b6b">−7</tspan></text>
+      <text x="730" y="200" fill="#2cffd0">12/12</text>
+      <text x="860" y="200" fill="#5b8cff">fix-auth.localhost</text>
+    </g><g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="17">
+      <text x="70" y="254" fill="#eef2ff" font-weight="700">add-tests</text>
+      <text x="260" y="254" fill="#aab4d4">Codex</text>
+      <circle cx="446" cy="248" r="5" fill="#f5a11a"><animate attributeName="opacity" values="1;0.3;1" dur="1.6s" repeatCount="indefinite"/></circle>
+      <text x="460" y="254" fill="#f5a11a">running</text>
+      <text x="590" y="254"><tspan fill="#2cffd0">+188</tspan> <tspan fill="#ff6b6b">−3</tspan></text>
+      <text x="730" y="254" fill="#ff6b6b">31/32</text>
+      <text x="860" y="254" fill="#5b8cff">add-tests.localhost</text>
+    </g><g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="17">
+      <text x="70" y="308" fill="#eef2ff" font-weight="700">new-billing</text>
+      <text x="260" y="308" fill="#aab4d4">Cursor</text>
+      <circle cx="446" cy="302" r="5" fill="#6b7699"></circle>
+      <text x="460" y="308" fill="#6b7699">idle</text>
+      <text x="590" y="308"><tspan fill="#2cffd0">+96</tspan> <tspan fill="#ff6b6b">−40</tspan></text>
+      <text x="730" y="308" fill="#2cffd0">18/18</text>
+      <text x="860" y="308" fill="#5b8cff">new-billing.localhost</text>
+    </g><g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="17">
+      <text x="70" y="362" fill="#eef2ff" font-weight="700">refactor-db</text>
+      <text x="260" y="362" fill="#aab4d4">Gemini CLI</text>
+      <circle cx="446" cy="356" r="5" fill="#2cffd0"></circle>
+      <text x="460" y="362" fill="#2cffd0">done</text>
+      <text x="590" y="362"><tspan fill="#2cffd0">+12</tspan> <tspan fill="#ff6b6b">−210</tspan></text>
+      <text x="730" y="362" fill="#2cffd0">54/54</text>
+      <text x="860" y="362" fill="#5b8cff">refactor-db.localhost</text>
+    </g><g>
+      <rect x="44" y="420" width="1192" height="40" rx="10" fill="#2a1416" stroke="#ff6b6b" stroke-opacity="0.6"/>
+      <path d="M68 449 L76 434 L84 449 Z" fill="none" stroke="#ff6b6b" stroke-width="2" stroke-linejoin="round"/>
+      <text x="98" y="446" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="15" fill="#ffc2c2">fix-auth and add-tests are both editing src/auth.ts · validateSession()</text>
+    </g>
+  <line x1="44" y1="484" x2="1236" y2="484" stroke="#222c4f"/>
+  <rect x="44" y="502" width="26" height="26" rx="6" fill="#141d3a" stroke="#2a3762"/><text x="57.0" y="520" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#eef2ff">n</text><text x="78" y="520" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#aab4d4">new</text><rect x="116.6" y="502" width="26" height="26" rx="6" fill="#141d3a" stroke="#2a3762"/><text x="129.6" y="520" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#eef2ff">⏎</text><text x="150.6" y="520" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#aab4d4">open</text><rect x="197.39999999999998" y="502" width="26" height="26" rx="6" fill="#141d3a" stroke="#2a3762"/><text x="210.39999999999998" y="520" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#eef2ff">d</text><text x="231.39999999999998" y="520" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#aab4d4">diff</text><rect x="278.2" y="502" width="26" height="26" rx="6" fill="#141d3a" stroke="#2a3762"/><text x="291.2" y="520" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#eef2ff">u</text><text x="312.2" y="520" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#aab4d4">undo</text><rect x="359.0" y="502" width="26" height="26" rx="6" fill="#141d3a" stroke="#2a3762"/><text x="372.0" y="520" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#eef2ff">r</text><text x="393.0" y="520" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#aab4d4">race</text><rect x="439.8" y="502" width="26" height="26" rx="6" fill="#141d3a" stroke="#2a3762"/><text x="452.8" y="520" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#eef2ff">p</text><text x="473.8" y="520" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#aab4d4">promote</text><rect x="545.2" y="502" width="26" height="26" rx="6" fill="#141d3a" stroke="#2a3762"/><text x="558.2" y="520" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#eef2ff">q</text><text x="579.2" y="520" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#aab4d4">quit</text>
+</svg>
