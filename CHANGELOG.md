@@ -8,7 +8,8 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-15
 
-- `19:13` **Changed**: README redesigned in a minimal, editorial style: no emoji, numbered sections, and monochrome images with one mint accent, each in light and dark versions that follow the viewer's GitHub theme. The footer shows the Autter wordmark instead of the illustrated banner.
+- `19:18` **Added**: README section on the Lanes gateway: how it connects your lanes to Autter, what it gives teams, where it's going, and a diagram in light and dark. The README and FAQ now say Autter is never required, and that Lanes is maintained independently of Autter or any other product.
+- `19:13` **Changed**: README redesigned in a minimal, editorial style: no emoji, numbered sections, and monochrome images with one mint accent, each in light and dark versions that follow the viewer's GitHub theme. The footer shows the Autter wordmark instead of the illustrated banner. (`d2f7d68`)
 - `19:08` **Added**: README illustrations in `assets/`: an animated hero, a "How it works" diagram, a preview of the terminal app and an Autter banner in the footer. (`7318e17`)
 - `19:04` **Changed**: Lanes is now licensed under the GNU AGPL-3.0 (`AGPL-3.0-only`) instead of Apache-2.0. Code released before this change stays available under Apache-2.0. (`7318e17`)
 - `18:53` **Fixed**: README links to [@sagnik_ghosh_11](https://x.com/sagnik_ghosh_11) on X instead of a placeholder handle. (`c259a35`)

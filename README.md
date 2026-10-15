@@ -15,9 +15,10 @@
   <a href="#01--why-lanes">Why</a> &nbsp;·&nbsp;
   <a href="#02--how-it-works">How it works</a> &nbsp;·&nbsp;
   <a href="#03--features">Features</a> &nbsp;·&nbsp;
-  <a href="#05--status">Status</a> &nbsp;·&nbsp;
-  <a href="#06--quick-start">Quick start</a> &nbsp;·&nbsp;
-  <a href="#07--commands">Commands</a> &nbsp;·&nbsp;
+  <a href="#05--lanes-gateway">Gateway</a> &nbsp;·&nbsp;
+  <a href="#06--status">Status</a> &nbsp;·&nbsp;
+  <a href="#07--quick-start">Quick start</a> &nbsp;·&nbsp;
+  <a href="#08--commands">Commands</a> &nbsp;·&nbsp;
   <a href="CHANGELOG.md">Changelog</a>
 </p>
 
@@ -90,7 +91,7 @@ Builds and tests take turns, so five agents don't freeze your machine. Dev serve
 Works offline. Signing in is optional, and connecting a repo to the gateway is always your choice. The only thing Lanes sends is an anonymous install count: version, OS and how you installed it. Never code, file paths or repo names. Turn it off with `lane telemetry off` or `DO_NOT_TRACK=1`.
 
 **Ready for teams**<br>
-`lane login` signs you into [Autter](https://autter.dev) and connects your lanes to the Lanes gateway on Autter. Cloud agents and CI read your repo without cloning, and you get repo Q&A, security checks while agents work, and a safe-to-merge verdict on every PR.
+`lane login` signs you into [Autter](https://autter.dev) and connects your lanes to the Lanes gateway on Autter. Cloud agents and CI read your repo without cloning, and you get repo Q&A, security checks while agents work, and a safe-to-merge verdict on every PR. See [the Lanes gateway](#05--lanes-gateway).
 
 <br>
 
@@ -107,7 +108,51 @@ Run `lane` to open a full-screen app: every lane with its agent, changed files, 
 
 <br>
 
-## 05 / Status
+## 05 / Lanes gateway
+
+Lanes is free, open source and works fully offline. The Lanes gateway is the optional bridge to [Autter](https://autter.dev), for teams that want every lane checked while agents work and reachable from the cloud.
+
+> [!IMPORTANT]
+> You don't need Autter to use Lanes. Everything except the gateway itself works without an Autter account, and Lanes is, and always will be, maintained as its own project, independently of Autter or any other product.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/gateway-dark.svg">
+  <img src="assets/gateway-light.svg" alt="Lanes on your machine connect through the opt-in Lanes gateway to Autter, which gives you repo Q&amp;A, security checks while agents work, a safe-to-merge verdict on every PR, and repo access for cloud agents and CI without cloning." width="100%">
+</picture>
+
+**How it works**
+
+1. Run `lane login` to sign in to Autter.
+2. Choose which repos to connect. Nothing is shared until you do, and every other repo stays on your machine.
+3. Your lanes in connected repos reach Autter through the gateway. Cloud agents and CI read the repo through it without cloning, and Autter checks each lane as its agent works.
+
+**What you get**
+
+- **Repo Q&A.** Ask about your repo, or any change in a lane, in plain English.
+- **Security checks while agents work**, not after the PR is open.
+- **A safe-to-merge verdict on every PR**, including the ones `lane promote` opens.
+- **Cloud agents and CI without cloning.** They read the repo through the gateway.
+
+**Where it's going**
+
+The gateway arrives in December. Over time, it turns Lanes and Autter into one loop, from an agent's first step to a verified fix in production:
+
+| | |
+| --- | --- |
+| **Write** | Agents work in lanes, on your machine or in the cloud. |
+| **Check** | Autter reviews, tests and security-checks each lane while it's still in progress. |
+| **Ship** | `lane promote` opens one clean PR, and Autter's verdict says when it's safe to merge. |
+| **Fix** | When something breaks in production, Autter traces it and the fix comes back as a new lane, which goes through the same checks. |
+
+**What stays the same**
+
+- Autter is never required. Lanes stays open source under the AGPL-3.0, works fully without Autter, and is maintained independently of it.
+- Connecting is opt-in, one repo at a time.
+- Repos you don't connect never leave your machine. For them, Lanes sends only the anonymous install count, which you can turn off.
+
+<br>
+
+## 06 / Status
 
 | Feature | When |
 | --- | --- |
@@ -126,7 +171,7 @@ macOS and Linux at launch. Windows later.
 
 <br>
 
-## 06 / Quick start
+## 07 / Quick start
 
 Install commands go live with the first release.
 
@@ -141,7 +186,7 @@ open http://fix-auth.localhost
 
 <br>
 
-## 07 / Commands
+## 08 / Commands
 
 | Command | What it does |
 | --- | --- |
@@ -161,7 +206,7 @@ open http://fix-auth.localhost
 
 <br>
 
-## 08 / FAQ
+## 09 / FAQ
 
 <details>
 <summary>Does it replace Git?</summary>
@@ -176,6 +221,14 @@ No. Lanes works on top of the Git repo and the GitHub you already use.
 <br>
 
 Not unless you choose to connect a repo to the Lanes gateway on Autter. Otherwise Lanes runs locally, and the only thing it sends is an anonymous install count (version, OS and how you installed it), which you can turn off.
+
+</details>
+
+<details>
+<summary>Do I need Autter to use Lanes?</summary>
+<br>
+
+No. Autter is optional, and everything except the gateway itself works without it. Lanes is, and always will be, maintained as its own open source project, independently of Autter or any other product. The Lanes gateway is only for teams who choose to connect.
 
 </details>
 
@@ -197,11 +250,11 @@ Lanes is inspired by ideas Anthropic shared about how it scaled source control f
 
 <br>
 
-## 09 / Contributing
+## 10 / Contributing
 
 Lanes is early. Issues, ideas and benchmarks from your own repos are very welcome. Please open an issue before sending a large PR. See [CONTRIBUTING.md](CONTRIBUTING.md) for details, and [CHANGELOG.md](CHANGELOG.md) for what has changed.
 
-## 10 / License
+## 11 / License
 
 GNU Affero General Public License v3.0 only (AGPL-3.0-only). See [LICENSE](LICENSE).
 

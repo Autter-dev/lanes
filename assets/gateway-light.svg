@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 470" width="1280" height="470" role="img" aria-labelledby="t d">
+  <title id="t">The Lanes gateway</title>
+  <desc id="d">Lanes on your machine connect through the opt-in Lanes gateway to Autter, which gives you repo Q&amp;A, security checks while agents work, a safe-to-merge verdict on every PR, and repo access for cloud agents and CI without cloning.</desc>
+  <rect x="0.5" y="0.5" width="1279" height="469" rx="16" fill="#FAFAF7" stroke="#E3E1DA"/>
+<text x="48" y="56" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#0B0B0C">YOUR MACHINE</text>
+  <text x="580" y="56" text-anchor="middle" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#0B0B0C">LANES GATEWAY</text>
+  <text x="1232" y="56" text-anchor="end" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#0B0B0C">AUTTER</text>
+  <line x1="48" y1="80" x2="1232" y2="80" stroke="#E3E1DA"/>
+  <line x1="48" y1="170" x2="330" y2="170" stroke="#0B0B0C" stroke-width="1.5"/>
+  <text x="48" y="156" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86"><tspan fill="#0B0B0C">fix-auth</tspan></text>
+  <path id="in0" d="M330 170 C420 170 460 240 540 240" fill="none" stroke="#0B0B0C" stroke-width="1.5"/>
+  <circle r="4" fill="#0B0B0C"><animateMotion dur="3.2s" repeatCount="indefinite" keyPoints="0;1" keyTimes="0;1" calcMode="linear"><mpath href="#in0"/></animateMotion></circle>
+  <line x1="48" y1="240" x2="330" y2="240" stroke="#0B0B0C" stroke-width="1.5"/>
+  <text x="48" y="226" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86"><tspan fill="#0B0B0C">add-tests</tspan></text>
+  <path id="in1" d="M330 240 C420 240 460 240 540 240" fill="none" stroke="#0B0B0C" stroke-width="1.5"/>
+  <circle r="4" fill="#0B0B0C"><animateMotion dur="3.9s" repeatCount="indefinite" keyPoints="0;1" keyTimes="0;1" calcMode="linear"><mpath href="#in1"/></animateMotion></circle>
+  <line x1="48" y1="310" x2="330" y2="310" stroke="#0B0B0C" stroke-width="1.5"/>
+  <text x="48" y="296" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86"><tspan fill="#0B0B0C">new-billing</tspan></text>
+  <path id="in2" d="M330 310 C420 310 460 240 540 240" fill="none" stroke="#0B0B0C" stroke-width="1.5"/>
+  <circle r="4" fill="#0B0B0C"><animateMotion dur="4.6s" repeatCount="indefinite" keyPoints="0;1" keyTimes="0;1" calcMode="linear"><mpath href="#in2"/></animateMotion></circle>
+  <line x1="450" y1="112" x2="450" y2="368" stroke="#8C8C86" stroke-dasharray="3 6"/>
+  <text x="450" y="396" text-anchor="middle" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86">OPT-IN, PER REPO</text>
+  <circle cx="580" cy="240" r="40" fill="#FAFAF7" stroke="#0FB98F" stroke-width="1.5"/>
+  <circle cx="580" cy="240" r="8" fill="#0FB98F"><animate attributeName="r" values="8;11;8" dur="2.4s" repeatCount="indefinite"/></circle>
+  <text x="580" y="310" text-anchor="middle" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86">LANE LOGIN</text>
+  <path id="out0" d="M620 240 C700 240 700 140 780 140" fill="none" stroke="#0FB98F" stroke-width="1.5"/>
+  <circle r="4" fill="#0FB98F"><animateMotion dur="2.6s" repeatCount="indefinite"><mpath href="#out0"/></animateMotion></circle>
+  <text x="800" y="145" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86">01</text>
+  <text x="840" y="147" font-family="Inter, ui-sans-serif, -apple-system, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="20" fill="#0B0B0C">Repo Q&amp;A</text>
+  <path id="out1" d="M620 240 C700 240 700 207 780 207" fill="none" stroke="#0FB98F" stroke-width="1.5"/>
+  <circle r="4" fill="#0FB98F"><animateMotion dur="3.1s" repeatCount="indefinite"><mpath href="#out1"/></animateMotion></circle>
+  <text x="800" y="212" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86">02</text>
+  <text x="840" y="214" font-family="Inter, ui-sans-serif, -apple-system, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="20" fill="#0B0B0C">Security checks while agents work</text>
+  <path id="out2" d="M620 240 C700 240 700 274 780 274" fill="none" stroke="#0FB98F" stroke-width="1.5"/>
+  <circle r="4" fill="#0FB98F"><animateMotion dur="3.6s" repeatCount="indefinite"><mpath href="#out2"/></animateMotion></circle>
+  <text x="800" y="279" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86">03</text>
+  <text x="840" y="281" font-family="Inter, ui-sans-serif, -apple-system, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="20" fill="#0B0B0C">A safe-to-merge verdict on every PR</text>
+  <path id="out3" d="M620 240 C700 240 700 341 780 341" fill="none" stroke="#0FB98F" stroke-width="1.5"/>
+  <circle r="4" fill="#0FB98F"><animateMotion dur="4.1s" repeatCount="indefinite"><mpath href="#out3"/></animateMotion></circle>
+  <text x="800" y="346" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86">04</text>
+  <text x="840" y="348" font-family="Inter, ui-sans-serif, -apple-system, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="20" fill="#0B0B0C">Cloud agents and CI, without cloning</text>
+  <line x1="48" y1="422" x2="1232" y2="422" stroke="#E3E1DA"/>
+</svg>
