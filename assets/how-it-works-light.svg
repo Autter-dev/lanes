@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 540" width="1280" height="540" role="img" aria-labelledby="t d">
+  <title id="t">How Lanes works</title>
+  <desc id="d">Your main branch fans out into one lane per agent. The best lane merges back as one clean pull request.</desc>
+  <rect x="0.5" y="0.5" width="1279" height="539" rx="16" fill="#FAFAF7" stroke="#E3E1DA"/>
+<line x1="368" y1="48" x2="368" y2="492" stroke="#E3E1DA"/>
+  <line x1="888" y1="48" x2="888" y2="492" stroke="#E3E1DA"/>
+  <line x1="48" y1="190" x2="300" y2="190" stroke="#0B0B0C" stroke-width="1.5"/>
+  <circle cx="48" cy="190" r="5" fill="#0B0B0C"/>
+  <text x="48" y="172" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86">MAIN</text>
+  <path d="M300 190 C360 190 368 110 428 110" fill="none" stroke="#0B0B0C" stroke-width="1.5"/>
+  <line x1="428" y1="110" x2="828" y2="110" stroke="#0FB98F" stroke-width="1.5" />
+  <text x="428" y="96" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86"><tspan fill="#0B0B0C">fix-auth</tspan></text>
+  <text x="828" y="96" text-anchor="end" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86">CLAUDE CODE</text>
+  <circle cx="428" cy="110" r="4.5" fill="#0FB98F"><animate attributeName="cx" values="428;828;828" keyTimes="0;0.8;1" dur="6.0s" repeatCount="indefinite"/></circle>
+  <path d="M300 190 C360 190 368 190 428 190" fill="none" stroke="#0B0B0C" stroke-width="1.5"/>
+  <line x1="428" y1="190" x2="828" y2="190" stroke="#0B0B0C" stroke-width="1.5" opacity="0.9"/>
+  <text x="428" y="176" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86"><tspan fill="#0B0B0C">add-tests</tspan></text>
+  <text x="828" y="176" text-anchor="end" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86">CODEX</text>
+  <circle cx="428" cy="190" r="4.5" fill="#0B0B0C"><animate attributeName="cx" values="428;828;828" keyTimes="0;0.8;1" dur="8.0s" repeatCount="indefinite"/></circle>
+  <circle cx="828" cy="190" r="4.5" fill="#FAFAF7" stroke="#8C8C86" stroke-width="1.5"/>
+  <path d="M300 190 C360 190 368 270 428 270" fill="none" stroke="#0B0B0C" stroke-width="1.5"/>
+  <line x1="428" y1="270" x2="828" y2="270" stroke="#0B0B0C" stroke-width="1.5" opacity="0.9"/>
+  <text x="428" y="256" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86"><tspan fill="#0B0B0C">new-billing</tspan></text>
+  <text x="828" y="256" text-anchor="end" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86">CURSOR</text>
+  <circle cx="428" cy="270" r="4.5" fill="#0B0B0C"><animate attributeName="cx" values="428;828;828" keyTimes="0;0.8;1" dur="7.0s" repeatCount="indefinite"/></circle>
+  <circle cx="828" cy="270" r="4.5" fill="#FAFAF7" stroke="#8C8C86" stroke-width="1.5"/>
+  <path d="M828 110 C900 110 900 190 968 190 L1196 190" fill="none" stroke="#0FB98F" stroke-width="1.5"/>
+  <circle cx="1210" cy="190" r="14" fill="none" stroke="#0FB98F" stroke-width="1.5"/>
+  <path d="M1203 190 l5 5 l9 -10" fill="none" stroke="#0FB98F" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="1232" y="166" text-anchor="end" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86">PR</text>
+  <line x1="48" y1="356" x2="1232" y2="356" stroke="#E3E1DA"/>
+  <text x="48" y="396" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86">01</text>
+  <text x="48" y="440" font-family="Inter, ui-sans-serif, -apple-system, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="30" font-weight="600" letter-spacing="-0.8" fill="#0B0B0C">Your repo</text>
+  <text font-family="Inter, ui-sans-serif, -apple-system, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17" fill="#8C8C86"><tspan x="48" y="474">Keep your Git, your GitHub</tspan><tspan x="48" y="498">and your agents.</tspan></text>
+  <text x="408" y="396" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86">02</text>
+  <text x="408" y="440" font-family="Inter, ui-sans-serif, -apple-system, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="30" font-weight="600" letter-spacing="-0.8" fill="#0B0B0C">lane new</text>
+  <text font-family="Inter, ui-sans-serif, -apple-system, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17" fill="#8C8C86"><tspan x="408" y="474">One instant lane per agent, with</tspan><tspan x="408" y="498">its own URL, ports and database.</tspan></text>
+  <text x="928" y="396" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86">03</text>
+  <text x="928" y="440" font-family="Inter, ui-sans-serif, -apple-system, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="30" font-weight="600" letter-spacing="-0.8" fill="#0B0B0C">lane promote</text>
+  <text font-family="Inter, ui-sans-serif, -apple-system, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17" fill="#8C8C86"><tspan x="928" y="474">The best lane becomes</tspan><tspan x="928" y="498">one clean pull request.</tspan></text>
+</svg>

@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 520" width="1280" height="520" role="img" aria-labelledby="t d">
+  <title id="t">The Lanes terminal app (preview)</title>
+  <desc id="d">A mockup of the lane terminal app listing four lanes with their agent, status, changes, tests and URL, and a warning that two lanes are editing the same function.</desc>
+  <rect x="0.5" y="0.5" width="1279" height="519" rx="16" fill="#FAFAF7" stroke="#E3E1DA"/>
+<text x="48" y="56" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#0B0B0C">LANE — ~/CODE/YOUR-REPO</text>
+  <text x="1232" y="56" text-anchor="end" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86">PREVIEW</text>
+  <line x1="48" y1="80" x2="1232" y2="80" stroke="#E3E1DA"/>
+  <text x="48" y="124" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86">LANE</text>
+  <text x="300" y="124" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86">AGENT</text>
+  <text x="520" y="124" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86">STATUS</text>
+  <text x="700" y="124" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86">CHANGES</text>
+  <text x="860" y="124" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86">TESTS</text>
+  <text x="980" y="124" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#8C8C86">URL</text>
+  <line x1="48" y1="198" x2="1232" y2="198" stroke="#E3E1DA"/>
+  <g font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16">
+    <text x="48" y="176" fill="#0B0B0C" font-weight="700">fix-auth</text>
+    <text x="300" y="176" fill="#8C8C86">claude code</text>
+    <circle cx="525" cy="171" r="4" fill="#0FB98F"><animate attributeName="opacity" values="1;0.25;1" dur="1.6s" repeatCount="indefinite"/></circle>
+    <text x="538" y="176" fill="#0B0B0C">running</text>
+    <text x="700" y="176" fill="#0B0B0C">+42 −7</text>
+    <text x="860" y="176" fill="#0B0B0C">12/12</text>
+    <text x="980" y="176" fill="#8C8C86">fix-auth.localhost</text>
+  </g>
+  <line x1="48" y1="250" x2="1232" y2="250" stroke="#E3E1DA"/>
+  <g font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16">
+    <text x="48" y="228" fill="#0B0B0C" font-weight="700">add-tests</text>
+    <text x="300" y="228" fill="#8C8C86">codex</text>
+    <circle cx="525" cy="223" r="4" fill="#0FB98F"><animate attributeName="opacity" values="1;0.25;1" dur="1.6s" repeatCount="indefinite"/></circle>
+    <text x="538" y="228" fill="#0B0B0C">running</text>
+    <text x="700" y="228" fill="#0B0B0C">+188 −3</text>
+    <text x="860" y="228" fill="#8C8C86">31/32</text>
+    <text x="980" y="228" fill="#8C8C86">add-tests.localhost</text>
+  </g>
+  <line x1="48" y1="302" x2="1232" y2="302" stroke="#E3E1DA"/>
+  <g font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16">
+    <text x="48" y="280" fill="#0B0B0C" font-weight="700">new-billing</text>
+    <text x="300" y="280" fill="#8C8C86">cursor</text>
+    <circle cx="525" cy="275" r="4" fill="#8C8C86"></circle>
+    <text x="538" y="280" fill="#8C8C86">idle</text>
+    <text x="700" y="280" fill="#0B0B0C">+96 −40</text>
+    <text x="860" y="280" fill="#0B0B0C">18/18</text>
+    <text x="980" y="280" fill="#8C8C86">new-billing.localhost</text>
+  </g>
+  <line x1="48" y1="354" x2="1232" y2="354" stroke="#E3E1DA"/>
+  <g font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16">
+    <text x="48" y="332" fill="#0B0B0C" font-weight="700">refactor-db</text>
+    <text x="300" y="332" fill="#8C8C86">gemini cli</text>
+    <circle cx="525" cy="327" r="4" fill="#0B0B0C"></circle>
+    <text x="538" y="332" fill="#0B0B0C">done</text>
+    <text x="700" y="332" fill="#0B0B0C">+12 −210</text>
+    <text x="860" y="332" fill="#0B0B0C">54/54</text>
+    <text x="980" y="332" fill="#8C8C86">refactor-db.localhost</text>
+  </g>
+  <circle cx="54" cy="393" r="4" fill="none" stroke="#0FB98F" stroke-width="1.5"/>
+  <text x="70" y="398" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" fill="#0B0B0C">fix-auth and add-tests are both editing <tspan fill="#0FB98F">src/auth.ts · validateSession()</tspan></text>
+  <line x1="48" y1="444" x2="1232" y2="444" stroke="#E3E1DA"/>
+  <text x="48" y="480" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" letter-spacing="1.2"><tspan fill="#0B0B0C">N</tspan><tspan fill="#8C8C86" dx="10">NEW</tspan></text>
+  <text x="146" y="480" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" letter-spacing="1.2"><tspan fill="#0B0B0C">↵</tspan><tspan fill="#8C8C86" dx="10">OPEN</tspan></text>
+  <text x="254" y="480" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" letter-spacing="1.2"><tspan fill="#0B0B0C">D</tspan><tspan fill="#8C8C86" dx="10">DIFF</tspan></text>
+  <text x="362" y="480" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" letter-spacing="1.2"><tspan fill="#0B0B0C">U</tspan><tspan fill="#8C8C86" dx="10">UNDO</tspan></text>
+  <text x="470" y="480" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" letter-spacing="1.2"><tspan fill="#0B0B0C">R</tspan><tspan fill="#8C8C86" dx="10">RACE</tspan></text>
+  <text x="578" y="480" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" letter-spacing="1.2"><tspan fill="#0B0B0C">P</tspan><tspan fill="#8C8C86" dx="10">PROMOTE</tspan></text>
+  <text x="716" y="480" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" letter-spacing="1.2"><tspan fill="#0B0B0C">Q</tspan><tspan fill="#8C8C86" dx="10">QUIT</tspan></text>
+</svg>

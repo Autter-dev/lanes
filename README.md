@@ -1,174 +1,134 @@
-<div align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/hero-dark.svg">
+  <img src="assets/hero-light.svg" alt="Lanes. Lighter agents: every agent gets its own lane on your repo." width="100%">
+</picture>
 
-<img src="assets/hero.svg" alt="Lanes: lighter agents. Four coding agents, each driving in its own lane." width="100%">
+<br>
+<br>
 
-**Run as many coding agents as you want on one repo, without them getting in each other's way.**
+<p align="center">
+  Run as many coding agents as you want on one repo,<br>
+  without them getting in each other's way.
+</p>
 
-[![CI](https://github.com/autter-dev/lanes/actions/workflows/ci.yml/badge.svg)](https://github.com/autter-dev/lanes/actions/workflows/ci.yml)
-[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
-![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux-lightgrey.svg)
-![Status](https://img.shields.io/badge/status-early%20development-orange.svg)
+<p align="center">
+  <a href="#01--why-lanes">Why</a> &nbsp;·&nbsp;
+  <a href="#02--how-it-works">How it works</a> &nbsp;·&nbsp;
+  <a href="#03--features">Features</a> &nbsp;·&nbsp;
+  <a href="#05--status">Status</a> &nbsp;·&nbsp;
+  <a href="#06--quick-start">Quick start</a> &nbsp;·&nbsp;
+  <a href="#07--commands">Commands</a> &nbsp;·&nbsp;
+  <a href="CHANGELOG.md">Changelog</a>
+</p>
 
-[Why Lanes](#-why-lanes) •
-[How it works](#-how-it-works) •
-[Features](#-features) •
-[Status](#-status) •
-[Quick start](#-quick-start-preview) •
-[Commands](#-commands) •
-[FAQ](#-faq) •
-[Changelog](CHANGELOG.md)
+<p align="center">
+  <a href="https://github.com/autter-dev/lanes/actions/workflows/ci.yml"><img src="https://github.com/autter-dev/lanes/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-0b0b0c?style=flat-square" alt="License: AGPL-3.0"></a>
+  <img src="https://img.shields.io/badge/macOS%20%C2%B7%20Linux-0b0b0c?style=flat-square" alt="macOS and Linux">
+  <img src="https://img.shields.io/badge/early%20preview-0fb98f?style=flat-square" alt="Early preview">
+</p>
 
-</div>
+<br>
 
----
-
-Every agent gets its own instant copy of your project, with dependencies ready and its own ports, URL and database. You keep your Git repo, your GitHub and your agents. **Nothing to migrate.**
+Every agent gets its own instant copy of your project, with dependencies ready and its own ports, URL and database. You keep your Git repo, your GitHub and your agents. Nothing to migrate.
 
 > [!NOTE]
-> **Early and in active development.** We're building Lanes in public. Star or watch this repo for releases, and follow along at [@sagnik_ghosh_11](https://x.com/sagnik_ghosh_11).
+> Lanes is early and in active development. We're building it in public: star or watch this repo for releases, and follow along at [@sagnik_ghosh_11](https://x.com/sagnik_ghosh_11).
 
-## 🤔 Why Lanes
+<br>
+
+## 01 / Why Lanes
 
 Running several coding agents today usually means:
 
-- 📦 a full copy of your repo for every agent
-- ⏳ a fresh `npm install` (or `cargo build`, or `pip install`) for every copy
-- 🔌 five dev servers fighting over port 3000
-- 💥 agents breaking each other's database with their migrations
-- 😬 finding out two agents edited the same function only when you merge
+- a full copy of your repo for every agent
+- a fresh `npm install` (or `cargo build`, or `pip install`) for every copy
+- five dev servers fighting over port 3000
+- agents breaking each other's database with their migrations
+- finding out two agents edited the same function only when you merge
 
 Lanes gives each agent a **lane** instead.
 
-## 🧭 How it works
+<br>
 
-<p align="center">
-  <img src="assets/how-it-works.svg" alt="Your repo feeds one lane per agent, each with its own URL, port and database. Lanes warns when two lanes edit the same file, and lane promote turns the best lane into one clean pull request." width="100%">
-</p>
+## 02 / How it works
 
-1. **Your repo.** Keep your Git repo, your GitHub and your agents as they are.
-2. **`lane new`.** Each agent gets an instant, ready-to-run lane with its own URL, ports and database. Lanes warns you as soon as two lanes touch the same code.
-3. **`lane promote`.** Turn the best lane into one clean pull request.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/how-it-works-dark.svg">
+  <img src="assets/how-it-works-light.svg" alt="Your main branch fans out into one lane per agent. The best lane merges back as one clean pull request." width="100%">
+</picture>
 
-## ✨ Features
+<br>
 
-<table>
-<tr>
-<td width="50%" valign="top">
+## 03 / Features
 
-#### ⚡ Instant lanes
-- A ready-to-run copy of your project for each agent, with dependencies included
-- Uses almost no extra disk space
-- A lane is a normal folder, so your editor, compiler and test runner all just work
+**Instant lanes**<br>
+A ready-to-run copy of your project for each agent, dependencies included, using almost no extra disk space. A lane is a normal folder, so your editor, compiler and test runner all just work.
 
-</td>
-<td width="50%" valign="top">
+**Every lane is a live app**<br>
+Its own ports and URL, like `fix-auth.localhost`. Its own `.env`, its own database copy (Postgres, SQLite) and its own Docker Compose project. Open five versions of your app side by side.
 
-#### 🌐 Every lane is a live app
-- Its own ports and its own URL, like `fix-auth.localhost`
-- Its own `.env`
-- Its own database copy (Postgres, SQLite) and its own Docker Compose project
-- Open five versions of your app side by side
+**Works with the agents you already use**<br>
+Claude Code, Cursor, Codex, Gemini CLI, GitHub Copilot, Conductor, Amp, OpenCode, Cline and Aider. When any of them creates a Git worktree, it becomes a lane automatically, so your agents don't need to learn anything new. A built-in MCP server lets agents create lanes and read code in one call, and cloud agents need one line in their setup script.
 
-</td>
-</tr>
-<tr>
-<td valign="top">
+**No more collisions**<br>
+A warning when two agents start editing the same file or function, while they're still working.
 
-#### 🤝 Works with the agents you already use
-- Claude Code, Cursor, Codex, Gemini CLI, GitHub Copilot, Conductor, Amp, OpenCode, Cline and Aider
-- When any of them creates a Git worktree, it becomes a lane automatically. Your agents don't need to learn anything new.
-- A built-in MCP server, so agents can create lanes and read code in one call
-- Works in cloud agents too: one line in your setup script
+**Undo anything**<br>
+A checkpoint after every agent step. `lane undo` takes back any step; `lane restore` jumps back to any checkpoint.
 
-</td>
-<td valign="top">
+**Best of N**<br>
+`lane race -n 3 "fix the flaky checkout test"` gives one task to three agents, runs the tests in each and shows a scoreboard. You keep the best one. `lane combine a b` lets you try two lanes together before merging either.
 
-#### 🖥️ A proper terminal app
-- Run `lane` to open a full-screen app: every lane with its agent, changed files, tests, conflicts and disk use
-- Start agents, watch them work, read diffs and logs, undo steps and open PRs without leaving it
+**Ship clean PRs**<br>
+`lane promote` turns an agent's work into one clean pull request, with who (and which agent) wrote what. Protected paths, like `migrations/` or CI config, need a human to sign off.
 
-</td>
-</tr>
-<tr>
-<td valign="top">
+**Kind to your laptop**<br>
+Builds and tests take turns, so five agents don't freeze your machine. Dev servers start only when you open them.
 
-#### 🚦 No more collisions
-- A warning when two agents start editing the same file or function, while they're still working
+**Your code stays on your machine**<br>
+Works offline. Signing in is optional, and connecting a repo to the gateway is always your choice. The only thing Lanes sends is an anonymous install count: version, OS and how you installed it. Never code, file paths or repo names. Turn it off with `lane telemetry off` or `DO_NOT_TRACK=1`.
 
-#### ↩️ Undo anything
-- A checkpoint after every agent step
-- `lane undo` takes back any step; `lane restore` jumps back to any checkpoint
+**Ready for teams**<br>
+`lane login` signs you into [Autter](https://autter.dev) and connects your lanes to the Lanes gateway on Autter. Cloud agents and CI read your repo without cloning, and you get repo Q&A, security checks while agents work, and a safe-to-merge verdict on every PR.
 
-</td>
-<td valign="top">
+<br>
 
-#### 🏁 Best of N
-- `lane race -n 3 "fix the flaky checkout test"` gives one task to three agents, runs the tests in each and shows a scoreboard. You keep the best one.
-- `lane combine a b` lets you try two lanes together before merging either
+## 04 / The terminal app
 
-</td>
-</tr>
-<tr>
-<td valign="top">
+Run `lane` to open a full-screen app: every lane with its agent, changed files, tests, conflicts and disk use. Start agents, watch them work, read diffs and logs, undo steps and open PRs without leaving it.
 
-#### 🚀 Ship clean PRs
-- `lane promote` turns an agent's work into one clean pull request, with who (and which agent) wrote what
-- Protected paths, like `migrations/` or CI config, need a human to sign off
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/terminal-app-dark.svg">
+  <img src="assets/terminal-app-light.svg" alt="Mockup of the lane terminal app: four lanes with their agent, status, changes, tests and URL, and a warning that two lanes are editing the same function." width="100%">
+</picture>
 
-</td>
-<td valign="top">
+<p align="center"><sub>Preview. The terminal app is being built now.</sub></p>
 
-#### 🍃 Kind to your laptop
-- Builds and tests take turns, so five agents don't freeze your machine
-- Dev servers start only when you open them
+<br>
 
-</td>
-</tr>
-<tr>
-<td valign="top">
+## 05 / Status
 
-#### 🔒 Your code stays on your machine
-- Works offline
-- Signing in is optional, and connecting a repo to the gateway is always your choice
-- The only thing Lanes sends is an anonymous install count: version, OS and how you installed it. Never code, file paths or repo names. Turn it off with `lane telemetry off` or `DO_NOT_TRACK=1`
-
-</td>
-<td valign="top">
-
-#### 👥 Ready for teams
-- `lane login` signs you into [Autter](https://autter.dev) and connects your lanes to the Lanes gateway on Autter: cloud agents and CI read your repo without cloning, and you get repo Q&A, security checks while agents work, and a safe-to-merge verdict on every PR
-
-</td>
-</tr>
-</table>
-
-## 🖥️ The terminal app
-
-<p align="center">
-  <img src="assets/terminal-app.svg" alt="Mockup of the lane terminal app: four lanes with their agent, status, changes, tests and URL, and a warning that two lanes are editing the same function." width="100%">
-</p>
-
-<p align="center"><sub>A preview of the terminal app, which we're building now. Run <code>lane</code> to open it.</sub></p>
-
-## 📍 Status
-
-| Feature | Status |
+| Feature | When |
 | --- | --- |
-| Instant lanes, `lane init`, ports and env per lane | 🟢 Building now |
-| Terminal app | 🟢 Building now |
-| Claude Code integration, MCP server | 🟢 Building now |
-| Sign-in to Autter (`lane login`) | 🔵 Next |
-| Cursor, Codex, Gemini CLI, Copilot and other agents | 🔵 Next |
-| Databases and Docker Compose per lane, `*.localhost` URLs | 🔵 Next |
-| Undo, conflict warnings, `lane race`, `lane promote` | 🔵 Next |
-| Cloud agent setup snippets, GitHub Action | 🔵 Next |
-| Lanes gateway on Autter | 🗓️ December |
-| Windows | ⚪ Later |
+| Instant lanes, `lane init`, ports and env per lane | ● Now |
+| Terminal app | ● Now |
+| Claude Code integration, MCP server | ● Now |
+| Sign-in to Autter (`lane login`) | ○ Next |
+| Cursor, Codex, Gemini CLI, Copilot and other agents | ○ Next |
+| Databases and Docker Compose per lane, `*.localhost` URLs | ○ Next |
+| Undo, conflict warnings, `lane race`, `lane promote` | ○ Next |
+| Cloud agent setup snippets, GitHub Action | ○ Next |
+| Lanes gateway on Autter | ○ December |
+| Windows | ○ Later |
 
-## 🚀 Quick start (preview)
+macOS and Linux at launch. Windows later.
 
-> [!IMPORTANT]
-> Install commands go live with the first release.
+<br>
+
+## 06 / Quick start
+
+Install commands go live with the first release.
 
 ```sh
 brew install lane            # or: cargo install lane / npm i -g <package>
@@ -179,7 +139,9 @@ lane exec fix-auth -- npm run dev
 open http://fix-auth.localhost
 ```
 
-## 🧰 Commands
+<br>
+
+## 07 / Commands
 
 | Command | What it does |
 | --- | --- |
@@ -197,16 +159,12 @@ open http://fix-auth.localhost
 | `lane login` | Signs in to Autter and connects the Lanes gateway (optional) |
 | `lane telemetry off` | Turns off the anonymous install count |
 
-## 💻 Platforms
+<br>
 
-| macOS | Linux | Windows |
-| :---: | :---: | :---: |
-| ✅ At launch | ✅ At launch | ⏳ Later |
-
-## ❓ FAQ
+## 08 / FAQ
 
 <details>
-<summary><b>Does it replace Git?</b></summary>
+<summary>Does it replace Git?</summary>
 <br>
 
 No. Lanes works on top of the Git repo and the GitHub you already use.
@@ -214,7 +172,7 @@ No. Lanes works on top of the Git repo and the GitHub you already use.
 </details>
 
 <details>
-<summary><b>Does my code leave my machine?</b></summary>
+<summary>Does my code leave my machine?</summary>
 <br>
 
 Not unless you choose to connect a repo to the Lanes gateway on Autter. Otherwise Lanes runs locally, and the only thing it sends is an anonymous install count (version, OS and how you installed it), which you can turn off.
@@ -222,7 +180,7 @@ Not unless you choose to connect a repo to the Lanes gateway on Autter. Otherwis
 </details>
 
 <details>
-<summary><b>Is it free?</b></summary>
+<summary>Is it free?</summary>
 <br>
 
 Yes. Lanes is open source under the GNU AGPL-3.0. You can use, change and share it freely. If you share a changed version, or run one as a service for others, you must publish your changes under the same license. Autter, for teams, is a paid product.
@@ -230,30 +188,35 @@ Yes. Lanes is open source under the GNU AGPL-3.0. You can use, change and share 
 </details>
 
 <details>
-<summary><b>Is this related to Anthropic's Scion?</b></summary>
+<summary>Is this related to Anthropic's Scion?</summary>
 <br>
 
 Lanes is inspired by ideas Anthropic shared about how it scaled source control for agents. We are not affiliated with Anthropic.
 
 </details>
 
-## 🤲 Contributing
+<br>
+
+## 09 / Contributing
 
 Lanes is early. Issues, ideas and benchmarks from your own repos are very welcome. Please open an issue before sending a large PR. See [CONTRIBUTING.md](CONTRIBUTING.md) for details, and [CHANGELOG.md](CHANGELOG.md) for what has changed.
 
-## 📄 License
+## 10 / License
 
 GNU Affero General Public License v3.0 only (AGPL-3.0-only). See [LICENSE](LICENSE).
 
----
+<br>
+<br>
 
 <p align="center">
   <a href="https://autter.dev">
-    <img src="assets/autter-banner.jpg" alt="Autter: ship more code, not more risk." width="100%">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="assets/autter-logo-dark.webp">
+      <img src="assets/autter-logo-light.webp" alt="Autter" width="140">
+    </picture>
   </a>
 </p>
 
 <p align="center">
-  Lanes is built by <a href="https://autter.dev"><b>Autter</b></a>: code Q&amp;A, security checks and safe-to-merge verdicts for teams shipping with agents.<br>
-  <a href="https://autter.dev">autter.dev</a>
+  <sub>Lanes is built by <a href="https://autter.dev">Autter</a>: code Q&amp;A, security checks and safe-to-merge verdicts for teams shipping with agents.</sub>
 </p>

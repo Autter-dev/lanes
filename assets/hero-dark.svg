@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 600" width="1280" height="600" role="img" aria-labelledby="t d">
+  <title id="t">Lanes</title>
+  <desc id="d">Lanes: lighter agents. Four agents move along four parallel lanes: fix-auth, add-tests, new-billing and refactor-db.</desc>
+  <rect x="0.5" y="0.5" width="1279" height="599" rx="16" fill="#0B0B0C" stroke="#26262A"/>
+<text x="48" y="56" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#F4F4EF">LANES</text>
+  <text x="640.0" y="56" text-anchor="middle" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#7A7A74">RUN MANY CODING AGENTS ON ONE REPO</text>
+  <text x="1232" y="56" text-anchor="end" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#7A7A74">EARLY PREVIEW — 2026</text>
+  <line x1="48" y1="80" x2="1232" y2="80" stroke="#26262A"/>
+  <text x="40" y="308" font-family="Inter, ui-sans-serif, -apple-system, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="232" font-weight="700" letter-spacing="-11" fill="#F4F4EF">Lanes<tspan fill="#2CFFD0">.</tspan></text>
+  <text font-family="Inter, ui-sans-serif, -apple-system, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">
+    <tspan x="1232" y="230" font-size="28" font-weight="600" fill="#F4F4EF">Lighter agents.</tspan>
+    <tspan x="1232" y="266" font-size="20" fill="#7A7A74">Every agent gets its own lane</tspan>
+    <tspan x="1232" y="292" font-size="20" fill="#7A7A74">on your repo.</tspan>
+  </text>
+  <line x1="48" y1="392" x2="1232" y2="392" stroke="#26262A"/>
+  <text x="48" y="380" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#7A7A74">01  <tspan fill="#F4F4EF">fix-auth</tspan></text>
+  <text x="1232" y="380" text-anchor="end" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#7A7A74">CLAUDE CODE</text>
+  <g>
+    <line x1="240" y1="392" x2="240" y2="392" stroke="#2CFFD0" stroke-width="1.5">
+      <animate attributeName="x2" values="240;1226;1226" keyTimes="0;0.85;1" dur="9.0s" begin="-0.90s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="1;1;0" keyTimes="0;0.85;1" dur="9.0s" begin="-0.90s" repeatCount="indefinite"/>
+    </line>
+    <circle cx="240" cy="392" r="4.5" fill="#2CFFD0">
+      <animate attributeName="cx" values="240;1226;1226" keyTimes="0;0.85;1" dur="9.0s" begin="-0.90s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="1;1;0" keyTimes="0;0.85;1" dur="9.0s" begin="-0.90s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+  <line x1="48" y1="442" x2="1232" y2="442" stroke="#26262A"/>
+  <text x="48" y="430" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#7A7A74">02  <tspan fill="#F4F4EF">add-tests</tspan></text>
+  <text x="1232" y="430" text-anchor="end" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#7A7A74">CODEX</text>
+  <g>
+    <line x1="240" y1="442" x2="240" y2="442" stroke="#F4F4EF" stroke-width="1.5">
+      <animate attributeName="x2" values="240;1226;1226" keyTimes="0;0.85;1" dur="12.5s" begin="-6.88s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="1;1;0" keyTimes="0;0.85;1" dur="12.5s" begin="-6.88s" repeatCount="indefinite"/>
+    </line>
+    <circle cx="240" cy="442" r="4.5" fill="#F4F4EF">
+      <animate attributeName="cx" values="240;1226;1226" keyTimes="0;0.85;1" dur="12.5s" begin="-6.88s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="1;1;0" keyTimes="0;0.85;1" dur="12.5s" begin="-6.88s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+  <line x1="48" y1="492" x2="1232" y2="492" stroke="#26262A"/>
+  <text x="48" y="480" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#7A7A74">03  <tspan fill="#F4F4EF">new-billing</tspan></text>
+  <text x="1232" y="480" text-anchor="end" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#7A7A74">CURSOR</text>
+  <g>
+    <line x1="240" y1="492" x2="240" y2="492" stroke="#F4F4EF" stroke-width="1.5">
+      <animate attributeName="x2" values="240;1226;1226" keyTimes="0;0.85;1" dur="7.5s" begin="-2.25s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="1;1;0" keyTimes="0;0.85;1" dur="7.5s" begin="-2.25s" repeatCount="indefinite"/>
+    </line>
+    <circle cx="240" cy="492" r="4.5" fill="#F4F4EF">
+      <animate attributeName="cx" values="240;1226;1226" keyTimes="0;0.85;1" dur="7.5s" begin="-2.25s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="1;1;0" keyTimes="0;0.85;1" dur="7.5s" begin="-2.25s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+  <line x1="48" y1="542" x2="1232" y2="542" stroke="#26262A"/>
+  <text x="48" y="530" text-anchor="start" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#7A7A74">04  <tspan fill="#F4F4EF">refactor-db</tspan></text>
+  <text x="1232" y="530" text-anchor="end" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.2" fill="#7A7A74">GEMINI CLI</text>
+  <g>
+    <line x1="240" y1="542" x2="240" y2="542" stroke="#F4F4EF" stroke-width="1.5">
+      <animate attributeName="x2" values="240;1226;1226" keyTimes="0;0.85;1" dur="11.0s" begin="-8.80s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="1;1;0" keyTimes="0;0.85;1" dur="11.0s" begin="-8.80s" repeatCount="indefinite"/>
+    </line>
+    <circle cx="240" cy="542" r="4.5" fill="#F4F4EF">
+      <animate attributeName="cx" values="240;1226;1226" keyTimes="0;0.85;1" dur="11.0s" begin="-8.80s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="1;1;0" keyTimes="0;0.85;1" dur="11.0s" begin="-8.80s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+</svg>
