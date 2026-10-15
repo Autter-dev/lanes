@@ -1,0 +1,12 @@
+# Rust build output
+/target
+**/*.rs.bk
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local Lanes state
+.lanes/
