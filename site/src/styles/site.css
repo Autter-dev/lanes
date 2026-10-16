@@ -577,3 +577,28 @@ html:not(.motion) .loop__stage { position: static; height: auto; padding-block: 
   .review__steps { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 640px) { .review__steps { grid-template-columns: 1fr; } }
+
+/* ---------- Built-in guardrails (src/components/Guardrails.astro) ---------- */
+.guard { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: var(--gutter); row-gap: 2.5rem; align-items: start; }
+.guard__rows { grid-column: 1 / span 7; margin-top: 0; }
+.guard__rows .row { grid-template-columns: 2.5rem minmax(0, 1fr); row-gap: 0.5rem; }
+.guard__rows .row__n { grid-column: 1; }
+.guard__rows .row__title { grid-column: 2; font-size: var(--t-m); }
+.guard__rows .row__text { grid-column: 2; max-width: 56ch; }
+.guard__term { grid-column: 8 / -1; margin: 0; position: sticky; top: 6rem; border-radius: var(--radius-card); background: var(--c-fg); color: var(--c-ink-fg); overflow: hidden; }
+.guard__term .term__bar { border-color: var(--c-ink-line); color: var(--c-ink-muted); }
+.guard__lines { list-style: none; margin: 0; padding: 1.1rem 1.4rem 1.25rem; display: flex; flex-direction: column; gap: 0.7rem; font-family: var(--f-mono); font-size: 0.8125rem; line-height: 1.5; min-height: 15.5rem; }
+.guard__line { display: flex; align-items: baseline; gap: 0.6rem; overflow-wrap: anywhere; }
+.guard__line code { font-size: inherit; background: none; padding: 0; color: var(--c-ink-fg); }
+.guard__who { flex: none; width: 3.4rem; font-size: 0.6875rem; color: var(--c-ink-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.guard__prompt { color: var(--c-ink-muted); }
+.guard__line.is-out { padding-left: 4rem; color: var(--c-ink-muted); }
+.guard__line.is-warn { color: #ffcf7a; }
+.guard__line.is-ok { color: var(--c-ink-accent); }
+.guard__term figcaption { padding: 0 1.4rem 1.1rem; color: var(--c-ink-muted); }
+@media (max-width: 900px) {
+  .guard__rows, .guard__term { grid-column: 1 / -1; }
+  .guard__term { position: static; }
+  .guard__line.is-out { padding-left: 0; }
+  .guard__who { width: auto; }
+}

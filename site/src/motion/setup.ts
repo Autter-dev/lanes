@@ -7,6 +7,7 @@ import { startHow } from './how';
 import { startGateway } from './gateway';
 import { startLoop } from './loop';
 import { startReview } from './review';
+import { startGuardrails } from './guardrails';
 import { SplitText } from 'gsap/SplitText';
 
 gsap.registerPlugin(ScrollTrigger, SplitText);
@@ -60,6 +61,7 @@ export function setupMotion() {
   startGateway();
   startLoop();
   startReview();
+  startGuardrails();
   footer();
   menu();
   copy();

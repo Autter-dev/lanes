@@ -1,0 +1,35 @@
+---
+// Built-in guardrails: four rules on lane rows, and a terminal that plays one approval round trip
+// (src/motion/guardrails.ts). Without motion every line of the session shows at once.
+import { guardrails } from '../data/site';
+---
+<section class="section wrap" id="guardrails" aria-labelledby="guard-title">
+  <div class="section__head">
+    <h2 class="h2" id="guard-title" data-split="lines">Built-in guardrails.</h2>
+    <p>Agents can't stop to ask. So Lanes checks every edit against the latest version, holds protected files for a person, and records which agent made each change.</p>
+  </div>
+  <div class="guard">
+    <ol class="rows guard__rows">
+      {guardrails.rows.map((r, i) => (
+        <li class="row">
+          <span class="row__n" aria-hidden="true">0{i + 1}</span>
+          <h3 class="h3 row__title">{r.title}</h3>
+          <p class="row__text">{r.text}</p>
+        </li>
+      ))}
+    </ol>
+    <figure class="guard__term" data-guard>
+      <div class="term__bar"><span>Terminal</span><span>~/your-repo</span></div>
+      <ol class="guard__lines" aria-label="Example session: an agent's promote waits for a person's approval">
+        {guardrails.terminal.map((l) => (
+          <li class:list={['guard__line', l.cmd ? 'is-cmd' : 'is-out', l.tone && `is-${l.tone}`]} data-guard-line>
+            {l.cmd
+              ? <><span class="guard__who">{l.who}</span><span class="guard__prompt" aria-hidden="true">$</span><code>{l.cmd}</code></>
+              : <span>{l.out}</span>}
+          </li>
+        ))}
+      </ol>
+      <figcaption class="label">Example session. The code expires after 10 minutes and works once.</figcaption>
+    </figure>
+  </div>
+</section>

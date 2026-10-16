@@ -1,6 +1,7 @@
 ---
 import Base from '../layouts/Base.astro';
 import HowItWorks from '../components/HowItWorks.astro';
+import Guardrails from '../components/Guardrails.astro';
 import GatewayFlow from '../components/GatewayFlow.astro';
 import AutterLoop from '../components/AutterLoop.astro';
 import ReviewFlow from '../components/ReviewFlow.astro';
@@ -89,6 +90,8 @@ import { site, race, helps, extras, agents, quickstart, photos } from '../data/s
 
   <HowItWorks />
 
+  <Guardrails />
+
   <section class="section wrap" id="start" aria-labelledby="start-title">
     <div class="start">
       <div class="start__copy">
@@ -98,7 +101,7 @@ import { site, race, helps, extras, agents, quickstart, photos } from '../data/s
           <a class="btn" href={site.repo}>Star on GitHub</a>
           <a class="btn btn--ghost" href={site.readme}>Read the README</a>
         </div>
-        <p class="label">macOS and Linux at launch. Windows later.</p>
+        <p class="label">macOS, Linux and Windows at launch.</p>
         <ul class="agents agents--paper" aria-label="Agents Lanes works with">
           {agents.map((a) => <li>{a}</li>)}
         </ul>

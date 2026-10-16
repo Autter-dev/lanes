@@ -25,7 +25,7 @@
 <p align="center">
   <a href="https://github.com/autter-dev/lanes/actions/workflows/ci.yml"><img src="https://github.com/autter-dev/lanes/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-0b0b0c?style=flat-square" alt="License: AGPL-3.0"></a>
-  <img src="https://img.shields.io/badge/macOS%20%C2%B7%20Linux-0b0b0c?style=flat-square" alt="macOS and Linux">
+  <img src="https://img.shields.io/badge/macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-0b0b0c?style=flat-square" alt="macOS, Linux and Windows">
   <img src="https://img.shields.io/badge/early%20preview-0fb98f?style=flat-square" alt="Early preview">
 </p>
 
@@ -169,9 +169,9 @@ The gateway arrives in December. Over time, it turns Lanes and Autter into one l
 | Undo, conflict warnings, `lane race`, `lane promote` | ○ Next |
 | Cloud agent setup snippets, GitHub Action | ○ Next |
 | Lanes gateway on Autter | ○ December |
-| Windows | ○ Later |
+| Windows: fast on a Windows 11 Dev Drive, regular NTFS drives supported | ○ Next |
 
-macOS and Linux at launch. Windows later.
+macOS, Linux and Windows at launch. On Windows, Lanes is fastest on a Windows 11 Dev Drive and also works on regular NTFS drives. WSL2 uses the Linux build.
 
 <br>
 

@@ -118,3 +118,28 @@ export const review = {
   checks: ['Code review', 'Security checks', 'Tests'],
   findings: ['2 review comments', 'No security issues', 'Tests pass', 'Safe to merge'],
 };
+
+// Built-in guardrails (home page). Planned features; the terminal lines are an example session.
+export const guardrails = {
+  rows: [
+    { title: 'Edits that can’t clobber', text: 'Every patch an agent sends names the version of the file it was made against. If another lane or tool changed it since, the patch is refused with the current lines, and the agent tries again. Nothing is overwritten silently.' },
+    { title: 'A person approves what matters', text: 'Agents can’t stop and ask, so Lanes asks for them. A promote that touches protected files, like migrations or CI config, waits for a short code you approve in the terminal app.' },
+    { title: 'Every agent has a name', text: 'Each lane records which agent works in it, with its model and session, all the way into the pull request. With Autter, an agent can also get its own access, limited to the repos you pick, that you can switch off at once.' },
+    { title: 'Start from any branch', text: 'Make a lane from any branch or ref with lane new --from. When another tool makes its own worktree for a task, Lanes turns it into a lane too.' },
+  ],
+  terminal: [
+    { who: 'agent', cmd: 'lane promote fix-auth' },
+    { out: 'protected: migrations/0042_sessions.sql' },
+    { out: 'needs approval · code 7KQ-2MD · expires in 10:00', tone: 'warn' },
+    { who: 'you', cmd: 'lane approve 7KQ-2MD' },
+    { out: 'approved by you · recorded in the PR', tone: 'ok' },
+    { out: 'fix-auth promoted · pull request opened', tone: 'ok' },
+  ],
+};
+
+// Coming next on the gateway (gateway page). Planned, after the gateway launches.
+export const gatewayNext = [
+  { title: 'Lanes your team can open', text: 'A connected lane’s checkpoints are kept with Autter, not pushed to GitHub. A teammate runs lane open to get your agent’s lane on their machine, with its own ports and database, before it’s a pull request.' },
+  { title: 'Agents with their own access', text: 'Register an agent by name, give it access to the repos you choose, and see its name on every change. Switch it off and its writes stop at once.' },
+  { title: 'Merged after checks', text: 'A promoted lane can merge through Autter once its checks pass. If it conflicts, you get the files and lines, and nothing is written.' },
+];
