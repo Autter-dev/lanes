@@ -1,0 +1,35 @@
+---
+// How Lanes works with Autter: four stations on one lane (write, check, ship, fix) and a return
+// line from fix back to write, because it is a loop. Scroll drives an agent along the lane while
+// the stage is pinned (src/motion/loop.ts); each station lights as the agent reaches it.
+import { gateway } from '../data/site';
+interface Props { id?: string; titleId: string; title: string; intro: string }
+const { id, titleId, title, intro } = Astro.props;
+---
+<section class="loop band--ink" id={id} data-tone="ink" data-loop aria-labelledby={titleId}>
+  <div class="loop__stage wrap">
+    <div class="loop__head">
+      <h2 class="h2" id={titleId}>{title}</h2>
+      <p>{intro}</p>
+    </div>
+    <div class="loop__track">
+      <div class="loop__rail" aria-hidden="true"><span data-loop-progress></span></div>
+      <span class="loop__agent" aria-hidden="true" data-loop-agent></span>
+      <ol class="loop__stations">
+        {gateway.loop.map((l, i) => (
+          <li class="loop__station" data-station={i}>
+            <span class="loop__dot" aria-hidden="true"></span>
+            <span class="loop__n" aria-hidden="true">{i + 1}</span>
+            <h3 class="loop__verb">{l.verb}</h3>
+            <p>{l.text}</p>
+          </li>
+        ))}
+      </ol>
+      <svg class="loop__return" viewBox="0 0 1000 80" preserveAspectRatio="none" aria-hidden="true">
+        <path d="M875 4 V40 Q875 70 845 70 H155 Q125 70 125 40 V4" data-loop-return></path>
+      </svg>
+      <p class="loop__back" data-loop-back>and back to the start: the fix is a new lane</p>
+    </div>
+    <p class="loop__note">This is a direction, not a promise of dates beyond December.</p>
+  </div>
+</section>

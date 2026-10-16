@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://lanes.autter.dev/sitemap-index.xml

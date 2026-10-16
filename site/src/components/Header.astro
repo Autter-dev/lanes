@@ -1,0 +1,32 @@
+---
+import { nav, site } from '../data/site';
+const path = Astro.url.pathname;
+const current = (href: string) => (href.includes('gateway') && path.startsWith('/gateway') ? 'page' : undefined);
+---
+<header class="site-header">
+  <div class="wrap site-header__bar">
+    <a class="wordmark" href="/" aria-label="Lanes, home">Lanes<span class="dot">.</span></a>
+    <nav class="site-nav" aria-label="Main">
+      {nav.map((item) => <a href={item.href} aria-current={current(item.href)}>{item.label}</a>)}
+    </nav>
+    <div class="site-header__actions">
+      <a class="site-header__gh" href={site.repo}>GitHub</a>
+      <a class="btn btn--sm" href="/#start">Get started</a>
+      <button class="menu-btn" type="button" aria-expanded="false" aria-controls="menu" data-menu-open>Menu</button>
+    </div>
+  </div>
+</header>
+
+<div class="menu" id="menu" role="dialog" aria-modal="true" aria-label="Menu" hidden>
+  <div class="menu__top">
+    <a class="wordmark" href="/" data-menu-link>Lanes<span class="dot">.</span></a>
+    <button class="menu-btn" type="button" style="display:inline-flex" data-menu-close>Close</button>
+  </div>
+  <ul class="menu__links">
+    {nav.map((item) => <li><a href={item.href} aria-current={current(item.href)} data-menu-link>{item.label}</a></li>)}
+  </ul>
+  <div class="menu__foot">
+    <a class="btn" href={site.repo} data-menu-link>Star on GitHub</a>
+    <a class="btn btn--ghost" href={site.readme} data-menu-link>Read the README</a>
+  </div>
+</div>

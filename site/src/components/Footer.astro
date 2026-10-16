@@ -1,0 +1,28 @@
+---
+import { site } from '../data/site';
+const year = new Date().getFullYear();
+---
+<footer class="site-footer" data-tone="ink" data-footer>
+  <div class="wrap">
+    <div class="site-footer__top">
+      <p data-split="lines">Lighter agents. Free and open source, under the AGPL-3.0.</p>
+      <nav aria-label="Footer">
+        <ul data-footer-links>
+          <li><a href={site.repo}>GitHub</a></li>
+          <li><a href={site.readme}>README</a></li>
+          <li><a href={site.changelog}>Changelog</a></li>
+          <li><a href="/gateway/">Gateway</a></li>
+          <li><a href={site.x.href}>X {site.x.label}</a></li>
+        </ul>
+      </nav>
+    </div>
+    <div class="site-footer__lanes" aria-hidden="true">
+      <span data-footer-lane></span><span data-footer-lane></span><span data-footer-lane></span><span data-footer-lane></span>
+    </div>
+    <div class="site-footer__small">
+      <span>© {year} <a class="link" href={site.maker.href}>Autter</a>. Lanes is maintained as its own project, and never needs Autter.</span>
+      <a class="link" href="#main" data-footer-top>Back to the start</a>
+    </div>
+    <div class="site-footer__word" aria-hidden="true" data-footer-word>Lanes<span class="dot">.</span></div>
+  </div>
+</footer>

@@ -1,0 +1,53 @@
+---
+// How an Autter review runs on a lane: the lane on your machine on the left, Autter's cloud on the
+// right, and two lanes between them: changes go out through the gateway, findings come back.
+// The cycle plays in order (src/motion/review.ts): changes travel, the cloud runs its checks,
+// findings travel back, and they land on the lane. Without motion every state shows at once.
+import { review } from '../data/site';
+---
+<div class="review" data-review>
+  <div class="review__panel review__panel--lane">
+    <p class="label">Your machine</p>
+    <div class="review__card">
+      <div class="review__lane"><span class="review__dot"></span><code>fix-auth</code><span class="review__agent">Claude Code</span></div>
+      <ul class="review__diff">
+        <li><code>src/auth.ts</code><span>+38 −6</span></li>
+        <li><code>src/session.ts</code><span>+4 −1</span></li>
+      </ul>
+      <p class="review__sub">Findings on this lane</p>
+      <ul class="review__findings" data-review-findings>
+        {review.findings.map((f, i) => <li class:list={[i === review.findings.length - 1 && 'is-verdict']}>{f}</li>)}
+      </ul>
+    </div>
+  </div>
+
+  <div class="review__wire" aria-hidden="true">
+    <div class="review__line review__line--out">
+      <span class="review__tag">lane changes, through the gateway</span>
+      <span class="review__packet" data-review-out></span>
+    </div>
+    <div class="review__line review__line--back">
+      <span class="review__tag">findings and verdict</span>
+      <span class="review__packet" data-review-back></span>
+    </div>
+  </div>
+
+  <div class="review__panel review__panel--cloud">
+    <p class="label">Autter cloud</p>
+    <div class="review__card review__card--cloud">
+      <p class="review__status"><span data-review-status>Review running</span></p>
+      <ul class="review__checks">
+        {review.checks.map((c) => (
+          <li data-review-check><span class="review__bar"><span></span></span><span>{c}</span></li>
+        ))}
+      </ul>
+      <p class="review__sub">Runs on Autter. Nothing runs on your machine.</p>
+    </div>
+  </div>
+</div>
+
+<ol class="review__steps">
+  {review.steps.map((s, i) => (
+    <li><span class="row__n" aria-hidden="true">{i + 1}</span><h3 class="h3">{s.title}</h3><p>{s.text}</p></li>
+  ))}
+</ol>

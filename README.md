@@ -126,6 +126,10 @@ Lanes is free, open source and works fully offline. The Lanes gateway is the opt
 2. Choose which repos to connect. Nothing is shared until you do, and every other repo stays on your machine.
 3. Your lanes in connected repos reach Autter through the gateway. Cloud agents and CI read the repo through it without cloning, and Autter checks each lane as its agent works.
 
+**How an Autter review runs on a lane**
+
+Autter's reviews are hosted entirely in Autter's cloud. The lane stays on your machine and nothing extra runs locally: for connected repos, the gateway lets the review read the lane's changes, Autter runs code review, security checks and tests on its side while the agent is still working, and the findings come back to the lane, with a safe-to-merge verdict on the PR.
+
 **What you get**
 
 - **Repo Q&A.** Ask about your repo, or any change in a lane, in plain English.

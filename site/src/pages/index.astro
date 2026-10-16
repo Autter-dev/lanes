@@ -1,0 +1,138 @@
+---
+import Base from '../layouts/Base.astro';
+import HowItWorks from '../components/HowItWorks.astro';
+import GatewayFlow from '../components/GatewayFlow.astro';
+import AutterLoop from '../components/AutterLoop.astro';
+import ReviewFlow from '../components/ReviewFlow.astro';
+import { site, race, helps, extras, agents, quickstart, photos } from '../data/site';
+---
+<Base>
+  <section class="hero" data-race aria-labelledby="hero-title">
+    <div class="hero__stage wrap">
+      <div class="hero__top">
+        <h1 class="display hero__title" id="hero-title">Every agent gets its own lane<span class="dot">.</span></h1>
+        <div class="hero__aside">
+          <p class="lede">Run as many coding agents as you want on one repo, without them getting in each other's way.</p>
+          <div class="hero__act">
+            <a class="btn" href={site.repo}>Star on GitHub</a>
+            <div class="install">
+              <span class="install__prompt" aria-hidden="true">$</span>
+              <code id="install-cmd">{site.install.command}</code>
+              <button class="install__copy" type="button" data-copy="#install-cmd" aria-label="Copy the install command">Copy</button>
+            </div>
+            <p class="install__note">Pre-release: install commands go live with the first release.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="race-wrap">
+        <ol class="race" aria-label="Four agents working on one repo, each in its own lane">
+          {race.map((r) => (
+            <li class:list={['race__lane', r.lead && 'race__lane--lead']} style={`--f0:${r.f0};--fs:${r.fs}`} data-lane>
+              <span class="race__name"><b>{r.n}</b>{r.lane}</span>
+              <span class="race__track">
+                <span class="race__line"></span>
+                <span class="race__trail" data-trail></span>
+                <span class="race__run"><span class="race__dot" data-dot></span></span>
+                {r.lead && <span class="race__warn" data-race-warn>both lanes editing validateSession()</span>}
+                {r.lead && <span class="race__promote" data-race-promote>lane promote fix-auth</span>}
+              </span>
+              <span class="race__agent">{r.agent}</span>
+            </li>
+          ))}
+          <li class="race__finish" aria-hidden="true"><span class="label">PR</span></li>
+        </ol>
+        <div class="race__caption">
+          <p data-race-caption>fix-auth and add-tests just reached the same function. Lanes flags it now, while both agents are still working, instead of at merge time.</p>
+          <span class="race__hint" aria-hidden="true">Scroll to run the agents</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section wrap" id="helps" aria-labelledby="helps-title">
+    <div class="section__head">
+      <h2 class="h2" id="helps-title" data-split="lines">Many agents. No pile-ups.</h2>
+      <p>Running several agents on one repo usually means copies, installs and clashes. A lane removes each one.</p>
+    </div>
+    <div class="ledger">
+      <div class="ledger__head" aria-hidden="true"><span>Without Lanes</span><span>With a lane per agent</span></div>
+      <ul class="ledger__list" style="list-style:none;padding:0">
+        {helps.map((h) => (
+          <li class="ledger__row">
+            <span class="ledger__today"><span class="sr-only">Without Lanes: </span>{h.today}</span>
+            <span class="ledger__lanes"><span class="sr-only">With Lanes: </span>{h.lanes}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+    <ol class="rows rows--extras">
+      {extras.map((e, i) => (
+        <li class="row">
+          <span class="row__n" aria-hidden="true">0{i + 1}</span>
+          <h3 class="h3 row__title">{e.title}</h3>
+          <p class="row__text">{e.text}</p>
+        </li>
+      ))}
+    </ol>
+  </section>
+
+  <section class="print" aria-labelledby="print-title">
+    <div class="print__frame" data-reveal="clip">
+      <img class="print__img" data-parallax="0.08" src="/photos/track-2000.webp" srcset="/photos/track-960.webp 960w, /photos/track-2000.webp 2000w" sizes="100vw" width="2000" height="1333" loading="lazy" decoding="async" alt={photos.track.alt} />
+    </div>
+    <div class="print__text">
+      <h2 class="h2" id="print-title" data-split="lines">Separate lanes. Same finish line.</h2>
+      <p class="print__credit">Photo: <a href={photos.track.href}>{photos.track.credit}</a>, Unsplash</p>
+    </div>
+  </section>
+
+  <HowItWorks />
+
+  <section class="section wrap" id="start" aria-labelledby="start-title">
+    <div class="start">
+      <div class="start__copy">
+        <h2 class="h2" id="start-title" data-split="lines">From install to your first lane.</h2>
+        <p class="lede">Lanes finds your stack and sets up the agents you already use. A lane is a normal folder, so your editor, compiler and test runner all just work.</p>
+        <div class="start__actions">
+          <a class="btn" href={site.repo}>Star on GitHub</a>
+          <a class="btn btn--ghost" href={site.readme}>Read the README</a>
+        </div>
+        <p class="label">macOS and Linux at launch. Windows later.</p>
+        <ul class="agents agents--paper" aria-label="Agents Lanes works with">
+          {agents.map((a) => <li>{a}</li>)}
+        </ul>
+      </div>
+      <div class="start__term" data-reveal="up">
+        <div class="term__bar"><span>Terminal</span><span>~/your-repo</span></div>
+        <ol class="term__steps">
+          {quickstart.map((q, i) => (
+            <li><span class="n">{i + 1}</span><span>{q.cmd}<small>{q.note}</small></span></li>
+          ))}
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section class="section wrap" id="gateway" aria-labelledby="gateway-title">
+    <div class="section__head">
+      <h2 class="h2" id="gateway-title" data-split="lines">The Lanes gateway.</h2>
+      <p>An optional bridge for teams, arriving in December. Run <code>lane login</code>, choose which repos to connect, and their lanes reach Autter through the gateway.</p>
+    </div>
+    <GatewayFlow />
+    <div class="gw-foot">
+      <p class="note"><strong>You never need Autter to use Lanes.</strong> Lanes is, and always will be, maintained as its own open source project. Repos you don't connect never leave your machine.</p>
+      <a class="btn btn--ghost" href="/gateway/">More about the gateway</a>
+    </div>
+  </section>
+
+  <section class="section wrap" id="review" aria-labelledby="review-title" style="padding-top:0">
+    <div class="section__head">
+      <h2 class="h2" id="review-title" data-split="lines">How an Autter review runs on a lane.</h2>
+      <p>Autter's reviews are hosted entirely in its cloud. Your lane stays on your machine, and the gateway lets the review read what changed.</p>
+    </div>
+    <ReviewFlow />
+  </section>
+
+  <AutterLoop id="autter" titleId="autter-title" title="How it works with Autter." intro="Lanes keeps agents apart while they work. Autter checks what they make. Together they close the loop from an agent's first step to a verified fix in production." />
+</Base>

@@ -1,0 +1,53 @@
+---
+// The Lanes gateway as a flow: lanes on your machine cross the opt-in line into the gateway,
+// and Autter's four checks come out the other side. Drawn on scroll, then work keeps flowing
+// along the lines (src/motion/gateway.ts). Phones get the same story as a vertical stack.
+import { gateway } from '../data/site';
+
+const lanes = [
+  { name: 'fix-auth', y: 110 },
+  { name: 'add-tests', y: 210 },
+  { name: 'new-billing', y: 310 },
+];
+const outs = gateway.gets.map((g, i) => ({ ...g, y: 80 + i * 86 }));
+const GX = 610, GY = 210;
+---
+<figure class="gwflow" data-gwflow>
+  <div class="gwflow__heads" aria-hidden="true">
+    <span>Your machine</span><span>Lanes gateway</span><span>Autter</span>
+  </div>
+  <svg class="gwflow__svg" viewBox="0 0 1200 420" role="img" aria-labelledby="gwflow-title gwflow-desc">
+    <title id="gwflow-title">The Lanes gateway</title>
+    <desc id="gwflow-desc">Lanes on your machine connect through the opt-in Lanes gateway to Autter, which gives you repo Q&amp;A, security checks while agents work, a safe-to-merge verdict on every PR, and repo access for cloud agents and CI without cloning.</desc>
+
+    {lanes.map((l, i) => (
+      <g>
+        <text x="40" y={l.y - 14} class="t-mono">{l.name}</text>
+        <path id={`gw-in-${i}`} d={`M40 ${l.y} H360 C470 ${l.y} 500 ${GY} ${GX - 36} ${GY}`} class="s-ink" data-draw></path>
+        <circle r="5" class="f-ink" data-flow-dot={`gw-in-${i}`}></circle>
+      </g>
+    ))}
+
+    <path d="M470 50 V370" class="s-boundary" data-draw></path>
+    <text x="470" y="398" text-anchor="middle" class="t-mono t-muted">opt-in, per repo</text>
+
+    <circle cx={GX} cy={GY} r="36" class="s-accent f-ground" data-gw-node></circle>
+    <circle cx={GX} cy={GY} r="9" class="f-accent" data-gw-core></circle>
+    <text x={GX} y={GY + 66} text-anchor="middle" class="t-mono t-muted">lane login</text>
+
+    {outs.map((o, i) => (
+      <g>
+        <path id={`gw-out-${i}`} d={`M${GX + 36} ${GY} C${GX + 140} ${GY} ${GX + 130} ${o.y} ${GX + 220} ${o.y}`} class="s-accent" data-draw></path>
+        <circle r="4.5" class="f-accent" data-flow-dot={`gw-out-${i}`}></circle>
+        <text x={GX + 236} y={o.y + 5} class="t-mono t-muted">{String.fromCharCode(65 + i)}</text>
+        <text x={GX + 262} y={o.y + 7} class="t-sans">{o.title}</text>
+      </g>
+    ))}
+  </svg>
+
+  <ol class="gwflow__stack">
+    <li><span class="label">Your machine</span><strong>Your lanes</strong><span>fix-auth, add-tests, new-billing</span></li>
+    <li class="is-gate"><span class="label">Opt-in, per repo</span><strong>Lanes gateway</strong><span><code>lane login</code>, then choose repos</span></li>
+    <li class="is-autter"><span class="label">Autter</span><strong>Checks every lane</strong><span>{gateway.gets.map((g) => g.title).join(', ')}</span></li>
+  </ol>
+</figure>

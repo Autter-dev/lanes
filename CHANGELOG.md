@@ -6,9 +6,16 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ## Unreleased
 
+### 2026-10-16
+
+- `04:57` **Added**: website segments for the Lanes gateway (an animated flow from your lanes, through the opt-in gateway, to Autter's checks), how an Autter review runs on a lane, and how Lanes works with Autter (a pinned write, check, ship, fix loop). The README now explains that Autter reviews run entirely in Autter's cloud: the lane stays on your machine and the gateway lets the review read its changes.
+- `04:57` **Changed**: website type is now Supreme and Martian Mono; the footer animates as you reach it; the hero puts "Star on GitHub" first and marks the install command as pre-release; hero headlines no longer wait for an animation to appear.
+- `04:57` **Fixed**: the gateway flow animation now runs in order (lanes reach the gateway before anything leaves it), and the gateway page headline can no longer stay hidden when the page loads in a background tab.
+
 ### 2026-10-15
 
-- `19:18` **Added**: README section on the Lanes gateway: how it connects your lanes to Autter, what it gives teams, where it's going, and a diagram in light and dark. The README and FAQ now say Autter is never required, and that Lanes is maintained independently of Autter or any other product.
+- `20:44` **Added**: the Lanes website in `site/` (Astro, GSAP, Lenis): a grainy, minimal home page where scrolling runs four agents in their own lanes, a pinned "How it works" diagram drawn by scroll in four chapters, grayscale lane photography, a gateway page, a designed 404, and full reduced-motion and keyboard support.
+- `19:18` **Added**: README section on the Lanes gateway: how it connects your lanes to Autter, what it gives teams, where it's going, and a diagram in light and dark. The README and FAQ now say Autter is never required, and that Lanes is maintained independently of Autter or any other product. (`f5c6ba2`)
 - `19:13` **Changed**: README redesigned in a minimal, editorial style: no emoji, numbered sections, and monochrome images with one mint accent, each in light and dark versions that follow the viewer's GitHub theme. The footer shows the Autter wordmark instead of the illustrated banner. (`d2f7d68`)
 - `19:08` **Added**: README illustrations in `assets/`: an animated hero, a "How it works" diagram, a preview of the terminal app and an Autter banner in the footer. (`7318e17`)
 - `19:04` **Changed**: Lanes is now licensed under the GNU AGPL-3.0 (`AGPL-3.0-only`) instead of Apache-2.0. Code released before this change stays available under Apache-2.0. (`7318e17`)

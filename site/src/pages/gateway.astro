@@ -1,0 +1,76 @@
+---
+import Base from '../layouts/Base.astro';
+import GatewayFlow from '../components/GatewayFlow.astro';
+import AutterLoop from '../components/AutterLoop.astro';
+import ReviewFlow from '../components/ReviewFlow.astro';
+import { gateway, photos, site } from '../data/site';
+---
+<Base title="The Lanes gateway on Autter" description="The optional Lanes gateway connects the repos you choose to Autter: repo Q&A, security checks while agents work, and a safe-to-merge verdict on every PR.">
+  <section class="page-hero wrap" aria-labelledby="gw-title">
+    <p class="label">For teams, arriving in December</p>
+    <h1 class="display" id="gw-title" style="margin-top:1.5rem">The Lanes gateway<span class="dot">.</span></h1>
+    <div class="page-hero__row">
+      <p class="lede">An optional bridge from your lanes to Autter, for teams that want every lane checked while agents work and reachable from the cloud.</p>
+      <p class="note"><strong>You don't need Autter to use Lanes.</strong> Everything except the gateway itself works without an Autter account. Lanes is, and always will be, maintained as its own project, independently of Autter or any other product.</p>
+    </div>
+  </section>
+
+  <section class="print" aria-labelledby="gw-print">
+    <div class="print__frame">
+      <img class="print__img" data-parallax="0.08" src="/photos/pool-2000.webp" srcset="/photos/pool-960.webp 960w, /photos/pool-2000.webp 2000w" sizes="100vw" width="2000" height="1125" loading="eager" fetchpriority="high" decoding="async" alt={photos.pool.alt} />
+    </div>
+    <div class="print__text">
+      <h2 class="h2" id="gw-print" data-split="lines">Connected, one repo at a time.</h2>
+      <p class="print__credit">Photo: <a href={photos.pool.href}>{photos.pool.credit}</a>, Unsplash</p>
+    </div>
+  </section>
+
+  <section class="section wrap" aria-labelledby="gw-how">
+    <div class="section__head">
+      <h2 class="h2" id="gw-how" data-split="lines">How it works</h2>
+      <p>Three steps, and the first two happen once.</p>
+    </div>
+    <GatewayFlow />
+    <ol class="term__steps gw-steps">
+      {gateway.how.map((h, i) => (
+        <li><span class="n">{i + 1}</span><span><strong>{h.title}.</strong> {h.text}{h.cmd && <small><code>$ {h.cmd}</code></small>}</span></li>
+      ))}
+    </ol>
+  </section>
+
+  <section class="section wrap" aria-labelledby="gw-gets" style="padding-top:0">
+    <div class="section__head">
+      <h2 class="h2" id="gw-gets" data-split="lines">What you get</h2>
+    </div>
+    <ol class="rows">
+      {gateway.gets.map((g, i) => (
+        <li class="row">
+          <span class="row__n" aria-hidden="true">{String.fromCharCode(65 + i)}</span>
+          <h3 class="h3 row__title">{g.title}</h3>
+          <p class="row__text">{g.text}</p>
+        </li>
+      ))}
+    </ol>
+  </section>
+
+  <section class="section wrap" id="review" aria-labelledby="review-title" style="padding-top:0">
+    <div class="section__head">
+      <h2 class="h2" id="review-title" data-split="lines">How an Autter review runs on a lane.</h2>
+      <p>Autter's reviews are hosted entirely in its cloud. Your lane stays on your machine, and the gateway lets the review read what changed.</p>
+    </div>
+    <ReviewFlow />
+  </section>
+
+  <AutterLoop titleId="gw-loop" title="Where it's going." intro="The gateway arrives in December. Over time, it turns Lanes and Autter into one loop, from an agent's first step to a verified fix in production." />
+
+  <section class="section wrap" aria-labelledby="gw-same">
+    <div class="section__head">
+      <h2 class="h2" id="gw-same" data-split="lines">What stays the same</h2>
+    </div>
+    <ul class="rows rows--same">{gateway.same.map((s, i) => <li class="row"><span class="row__n" aria-hidden="true">0{i + 1}</span><p class="row__text row__text--wide">{s}</p></li>)}</ul>
+    <div class="start__actions" style="margin-top:3.5rem">
+      <a class="btn" href="/#start">Get started with Lanes</a>
+      <a class="btn btn--ghost" href={site.maker.href}>Visit autter.dev</a>
+    </div>
+  </section>
+</Base>

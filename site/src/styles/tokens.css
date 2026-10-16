@@ -1,0 +1,83 @@
+/* Lanes design tokens. Roles and values are documented in DESIGN.md. */
+
+@font-face {
+  font-family: 'Supreme';
+  src: url('/fonts/supreme-400-normal.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Supreme';
+  src: url('/fonts/supreme-500-normal.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Supreme';
+  src: url('/fonts/supreme-700-normal.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Martian Mono';
+  src: url('/fonts/martian-mono-400_500-normal.woff2') format('woff2');
+  font-weight: 400 500;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root {
+  /* Color: paper */
+  --c-bg: #f2f1ec;
+  --c-fg: #0e0e0d;
+  --c-muted: #62615b;
+  --c-line: #d9d7cf;
+  --c-accent: #08765a;     /* accent as text and focus ring on paper (5:1) */
+  --c-dot: #0fb98f;        /* accent as a graphic on paper */
+  --c-card: #f8f7f3;
+  --c-curtain: var(--c-fg);
+
+  /* Color: ink bands */
+  --c-ink-fg: #edece6;
+  --c-ink-muted: #9a998f;
+  --c-ink-line: #2a2a27;
+  --c-ink-accent: #2cffd0; /* Autter's brand dot */
+
+  /* Type families */
+  --f-display: 'Supreme', ui-sans-serif, system-ui, sans-serif;
+  --f-body: 'Supreme', ui-sans-serif, system-ui, sans-serif;
+  --f-mono: 'Martian Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Fluid type scale (min @ 375px → max @ 1440px) */
+  --t-mega: clamp(3.25rem, 1.1rem + 9.2vw, 9.5rem);
+  --t-xl: clamp(2.5rem, 1.3rem + 4.6vw, 5.5rem);
+  --t-l: clamp(1.75rem, 1.3rem + 1.9vw, 3rem);
+  --t-m: clamp(1.25rem, 1.1rem + 0.6vw, 1.5rem);
+  --t-body: clamp(1rem, 0.95rem + 0.2vw, 1.125rem);
+  --t-s: 0.875rem;
+  --t-xs: 0.8125rem;
+
+  /* Space */
+  --u: clamp(0.5rem, 0.35rem + 0.6vw, 1rem);
+  --gutter: clamp(1rem, 0.6rem + 1.6vw, 2.5rem);
+  --max: 90rem;
+  --cols: 12;
+
+  /* Shape: pills for actions, 20px for the one card, 0 elsewhere */
+  --radius: 0px;
+  --radius-pill: 999px;
+  --radius-card: 20px;
+
+  /* Layers */
+  --z-gl: 0;
+  --z-content: 1;
+  --z-grain: 40;
+  --z-header: 50;
+  --z-cursor: 80;
+  --z-curtain: 90;
+  --z-loader: 100;
+}

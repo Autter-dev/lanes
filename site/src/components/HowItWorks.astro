@@ -1,0 +1,127 @@
+---
+// The signature diagram: one repo splits into a lane per agent, two lanes touch the same function,
+// and the best lane merges back as one PR. Scrubbed by scroll in src/motion/how.ts; without motion
+// the final, fully drawn state shows with every chapter listed.
+import { steps, diagramLanes } from '../data/site';
+
+const ys = [130, 260, 390];
+const CH = 7.35; // Martian Mono advance at 10.5px (0.7em)
+const pill = (t: string) => t.length * CH + 18;
+const tags = diagramLanes.map((l) => {
+  let x = 300;
+  return [l.url, l.port, l.db].map((t) => {
+    const w = pill(t);
+    const tag = { t, x, w };
+    x += w + 6;
+    return tag;
+  });
+});
+---
+<section class="how band--ink" id="works" data-tone="ink" data-how aria-labelledby="works-title">
+  <div class="how__stage wrap" data-state="0">
+    <div class="how__copy">
+      <h2 class="h2 how__title" id="works-title">One repo in. One clean PR out.</h2>
+      <ol class="how__chapters">
+        {steps.map((s, i) => (
+          <li class="how__chapter" data-chapter={i}>
+            <span class="how__n" aria-hidden="true">{i + 1}</span>
+            <div>
+              <h3 class="h3">{s.title}</h3>
+              <p>{s.text}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
+
+    <figure class="how__figure">
+      <svg class="how__svg how__svg--wide" data-how-svg="wide" viewBox="0 0 820 500" role="img" aria-labelledby="how-svg-title how-svg-desc">
+        <title id="how-svg-title">How Lanes works</title>
+        <desc id="how-svg-desc">Your repo splits into three lanes, fix-auth, add-tests and new-billing, each with its own URL, port and database. Lanes warns when fix-auth and add-tests edit the same function, and fix-auth merges back as one clean pull request.</desc>
+
+        <g class="g-repo" data-g="repo">
+          <circle cx="60" cy="260" r="7" class="f-ink"></circle>
+          <text x="40" y="232" class="t-mono t-strong">your-repo</text>
+          <text x="40" y="294" class="t-mono t-muted">.git</text>
+          <text x="40" y="314" class="t-mono t-muted">node_modules/</text>
+          <text x="40" y="334" class="t-mono t-muted">.env</text>
+        </g>
+        <path d="M60 260 H200" class="s-line" data-draw="trunk"></path>
+
+        {ys.map((y, i) => (
+          <g data-g={`lane${i}`}>
+            <path d={y === 260 ? 'M200 260 H640' : `M200 260 C250 260 250 ${y} 300 ${y} H640`} class:list={['s-line', i === 0 && 's-accent']} data-draw={`lane${i}`}></path>
+            <g data-g={`label${i}`}>
+              <text x="300" y={y - 14} class="t-mono t-strong">{diagramLanes[i].lane}</text>
+              <text x="640" y={y - 14} text-anchor="end" class="t-sans t-muted">{diagramLanes[i].agent}</text>
+            </g>
+            <g data-g={`tags${i}`}>
+              {tags[i].map((t) => (
+                <g class="g-tag">
+                  <rect x={t.x} y={y + 12} width={t.w} height="22" rx="11"></rect>
+                  <text x={t.x + t.w / 2} y={y + 27} text-anchor="middle" class="t-mono t-tag">{t.t}</text>
+                </g>
+              ))}
+            </g>
+            <circle cx="300" cy={y} r="6" class:list={[i === 0 ? 'f-accent' : 'f-ink']} data-dot={i}></circle>
+          </g>
+        ))}
+
+        <g data-g="warn">
+          <path d="M470 138 V252" class="s-warn" data-draw="warnline"></path>
+          <rect x="332" y="182" width="276" height="26" rx="13" class="f-pill"></rect>
+          <text x="470" y="199.5" text-anchor="middle" class="t-mono t-pill">both editing validateSession()</text>
+        </g>
+
+        <path d="M640 130 C690 130 690 260 740 260 H762" class="s-line s-accent" data-draw="merge"></path>
+        <g data-g="pr">
+          <circle cx="776" cy="260" r="14" class="s-accent-fill"></circle>
+          <path d="M769 260 l5 5 l9 -10" class="s-check" data-draw="check"></path>
+          <text x="790" y="232" text-anchor="end" class="t-mono t-strong">PR</text>
+          <text x="790" y="296" text-anchor="end" class="t-sans t-muted">One clean PR</text>
+        </g>
+      </svg>
+
+      <svg class="how__svg how__svg--tall" data-how-svg="tall" viewBox="0 0 360 600" aria-hidden="true">
+        <g data-g="repo">
+          <circle cx="180" cy="40" r="7" class="f-ink"></circle>
+          <text x="198" y="38" class="t-mono t-strong">your-repo</text>
+          <text x="198" y="56" class="t-mono t-muted">.git  .env</text>
+        </g>
+        <path d="M180 46 V130" class="s-line" data-draw="trunk"></path>
+        {[70, 180, 290].map((x, i) => (
+          <g data-g={`lane${i}`}>
+            <path d={x === 180 ? 'M180 130 V470' : `M180 130 C180 170 ${x} 170 ${x} 210 V470`} class:list={['s-line', i === 0 && 's-accent']} data-draw={`lane${i}`}></path>
+            <g data-g={`label${i}`}>
+              <text x={x} y="496" text-anchor="middle" class="t-mono t-strong">{diagramLanes[i].lane}</text>
+            </g>
+            <g data-g={`tags${i}`}>
+              <g class="g-tag">
+                <rect x={x + 8} y="250" width="56" height="22" rx="11"></rect>
+                <text x={x + 36} y="265" text-anchor="middle" class="t-mono t-tag">{diagramLanes[i].port}</text>
+              </g>
+            </g>
+            <circle cx={x} cy="210" r="6" class:list={[i === 0 ? 'f-accent' : 'f-ink']} data-dot={i}></circle>
+          </g>
+        ))}
+        <g data-g="warn">
+          <path d="M78 340 H172" class="s-warn" data-draw="warnline"></path>
+          <rect x="61" y="352" width="128" height="24" rx="12" class="f-pill"></rect>
+          <text x="125" y="368" text-anchor="middle" class="t-mono t-pill">same function</text>
+        </g>
+        <path d="M70 470 C70 510 180 510 180 540 V548" class="s-line s-accent" data-draw="merge"></path>
+        <g data-g="pr">
+          <circle cx="180" cy="562" r="14" class="s-accent-fill"></circle>
+          <path d="M173 562 l5 5 l9 -10" class="s-check" data-draw="check"></path>
+          <text x="204" y="567" class="t-sans t-muted">One clean PR</text>
+        </g>
+      </svg>
+
+      <figcaption class="how__term">
+        <span class="how__prompt" aria-hidden="true">$</span>
+        <code data-how-cmd>{steps[steps.length - 1].cmd}</code>
+      </figcaption>
+    </figure>
+    <div class="how__progress" aria-hidden="true"><span data-how-progress></span></div>
+  </div>
+</section>

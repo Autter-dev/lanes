@@ -1,0 +1,20 @@
+---
+import Base from '../layouts/Base.astro';
+---
+<Base title="No such lane" description="This page doesn't exist. Head back to the Lanes home page to see how every coding agent gets its own lane.">
+  <section class="lost wrap" aria-labelledby="lost-title">
+    <p class="label">404</p>
+    <h1 class="display" id="lost-title" style="margin-top:1.25rem">No lane called <span class="lost__name" data-missing-lane>that</span><span class="dot">.</span></h1>
+    <div class="lost__lane" aria-hidden="true">
+      <span class="race__line"></span>
+      <span class="race__dot"></span>
+      <span class="label">lane new was never run for this one</span>
+      <span class="lost__end"></span>
+    </div>
+    <p>The page you asked for isn't here. It may have moved, or the link may be wrong.</p>
+    <div class="start__actions">
+      <a class="btn" href="/">Back to the home page</a>
+      <a class="btn btn--ghost" href="/gateway/">The Lanes gateway</a>
+    </div>
+  </section>
+</Base>
