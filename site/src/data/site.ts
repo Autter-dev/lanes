@@ -26,6 +26,7 @@ export const nav = [
   { label: 'Get started', href: '/#start' },
   { label: 'Gateway', href: '/#gateway' },
   { label: 'With Autter', href: '/#autter' },
+  { label: 'Status', href: '/#status' },
 ];
 
 // Hero race. f0: where each agent starts; fs: the still frame shown without motion
@@ -142,4 +143,46 @@ export const gatewayNext = [
   { title: 'Lanes your team can open', text: 'A connected lane’s checkpoints are kept with Autter, not pushed to GitHub. A teammate runs lane open to get your agent’s lane on their machine, with its own ports and database, before it’s a pull request.' },
   { title: 'Agents with their own access', text: 'Register an agent by name, give it access to the repos you choose, and see its name on every change. Switch it off and its writes stop at once.' },
   { title: 'Merged after checks', text: 'A promoted lane can merge through Autter once its checks pass. If it conflicts, you get the files and lines, and nothing is written.' },
+];
+
+// Where Lanes runs (home page). Matches the public README; nothing here is a private date.
+export const platforms = [
+  {
+    title: 'Your laptop',
+    note: 'macOS, Linux and Windows at launch',
+    items: [
+      { name: 'macOS', text: 'instant copies on APFS' },
+      { name: 'Linux', text: 'instant on Btrfs and XFS; ext4 copies, with a warning and the time it took' },
+      { name: 'Windows', text: 'fastest on a Windows 11 Dev Drive; regular NTFS drives work too' },
+      { name: 'WSL2', text: 'uses the Linux build' },
+    ],
+  },
+  {
+    title: 'Cloud agent sandboxes',
+    note: 'one line in the setup script',
+    items: [
+      { name: 'Claude Code on the web', text: '' },
+      { name: 'Codex cloud', text: '' },
+      { name: 'Cursor', text: '' },
+      { name: 'GitHub Copilot', text: '' },
+      { name: 'Jules and Devin', text: '' },
+    ],
+  },
+  {
+    title: 'Where your code lives',
+    note: 'lane promote opens the pull request there',
+    items: [
+      { name: 'GitHub', text: 'first' },
+      { name: 'GitLab', text: 'next' },
+      { name: 'Bitbucket', text: 'next' },
+    ],
+  },
+];
+
+// Public status, mirroring the README's Status table.
+export const status = [
+  { when: 'Building now', items: ['Instant lanes, lane init, ports and env per lane', 'The terminal app', 'Claude Code integration and the MCP server'] },
+  { when: 'Next', items: ['Cursor, Codex, Gemini CLI, Copilot and other agents', 'Databases and Docker Compose per lane, *.localhost URLs', 'Undo, conflict warnings, lane race and lane promote', 'Guardrails: approval codes for protected files', 'Windows: Dev Drive and NTFS', 'Cloud agent setup lines, the GitHub Action', 'Sign-in to Autter (lane login)'] },
+  { when: 'December', items: ['The Lanes gateway on Autter', 'Autter reviews on lanes'] },
+  { when: 'After the gateway', items: ['Lanes your team can open', 'Agents with their own access', 'Merging after checks'] },
 ];

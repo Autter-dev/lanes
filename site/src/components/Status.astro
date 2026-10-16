@@ -1,0 +1,23 @@
+---
+// What's being built: the public status as one lane. The line fills from "Building now" towards
+// "After the gateway" as you scroll (src/motion/status.ts); the dot marks where we are.
+import { status } from '../data/site';
+---
+<section class="section wrap" id="status" aria-labelledby="status-title">
+  <div class="section__head">
+    <h2 class="h2" id="status-title" data-split="lines">What's being built.</h2>
+    <p>Lanes is early and built in public. This is the order things land; follow the repo for releases.</p>
+  </div>
+  <div class="status" data-status>
+    <div class="status__rail" aria-hidden="true"><span data-status-fill></span></div>
+    <ol class="status__stops">
+      {status.map((s, i) => (
+        <li class:list={['status__stop', i === 0 && 'is-now']} data-status-stop>
+          <span class="status__dot" aria-hidden="true"></span>
+          <h3 class="status__when">{s.when}</h3>
+          <ul>{s.items.map((it) => <li>{it}</li>)}</ul>
+        </li>
+      ))}
+    </ol>
+  </div>
+</section>

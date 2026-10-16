@@ -602,3 +602,40 @@ html:not(.motion) .loop__stage { position: static; height: auto; padding-block: 
   .guard__line.is-out { padding-left: 0; }
   .guard__who { width: auto; }
 }
+
+/* ---------- Where it runs (src/components/Platforms.astro) ---------- */
+.where { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--c-ink-line); }
+.where__col { display: flex; flex-direction: column; gap: 0.9rem; padding: 1.75rem var(--gutter) 2rem 0; }
+.where__col + .where__col { padding-left: var(--gutter); border-left: 1px solid var(--c-ink-line); }
+.where__col .h3 { font-size: var(--t-l); letter-spacing: -0.035em; }
+.where__col ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.65rem; font-size: var(--t-s); }
+.where__col li { display: grid; grid-template-columns: 0.9rem 1fr; align-items: baseline; }
+.where__col strong { font-weight: 500; color: var(--c-ink-fg); }
+.where__text { color: var(--c-ink-muted); }
+.where__dot { width: 7px; height: 7px; border-radius: 50%; background: var(--c-ink-accent); transform: translateY(-1px); }
+
+/* ---------- What's being built (src/components/Status.astro) ---------- */
+.status { position: relative; }
+.status__rail { position: absolute; left: 0; right: 0; top: 5px; height: 1px; background: var(--c-line); }
+.status__rail span { position: absolute; inset: -0.5px 0; height: 2px; background: var(--c-dot); transform-origin: 0 50%; }
+html:not(.motion) .status__rail span { transform: scaleX(0.14); }
+.status__stops { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--gutter); }
+.status__stop { display: flex; flex-direction: column; gap: 0.9rem; min-width: 0; }
+.status__dot { width: 11px; height: 11px; border-radius: 50%; background: var(--c-bg); border: 1.5px solid var(--c-fg); position: relative; z-index: 1; }
+.status__stop.is-now .status__dot { background: var(--c-dot); border-color: var(--c-dot); box-shadow: 0 0 0 5px color-mix(in srgb, var(--c-dot) 22%, transparent); }
+.status__when { font-size: var(--t-m); font-weight: 700; letter-spacing: -0.02em; }
+.status__stop ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; font-size: var(--t-s); color: var(--c-muted); }
+.status__stop.is-now ul { color: var(--c-fg); }
+
+@media (max-width: 900px) {
+  .where { grid-template-columns: 1fr; }
+  .where__col + .where__col { padding-left: 0; border-left: 0; border-top: 1px solid var(--c-ink-line); }
+  .status__rail { left: 5px; right: auto; top: 0.4rem; bottom: 0.4rem; width: 1px; height: auto; }
+  .status__rail span { inset: 0 -0.5px; width: 2px; height: auto; transform-origin: 50% 0; }
+  html:not(.motion) .status__rail span { transform: scaleY(0.14); }
+  .status__stops { grid-template-columns: 1fr; gap: 2rem; }
+  .status__stop { display: grid; grid-template-columns: 11px 1fr; column-gap: 1.1rem; row-gap: 0.6rem; }
+  .status__dot { grid-row: 1; margin-top: 0.4rem; }
+  .status__when { grid-column: 2; }
+  .status__stop ul { grid-column: 2; }
+}

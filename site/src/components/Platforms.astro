@@ -1,0 +1,25 @@
+---
+// Where Lanes runs: the laptop, cloud agent sandboxes, and the code host promote opens PRs on.
+import { platforms } from '../data/site';
+---
+<section class="band--ink" id="where" data-tone="ink" aria-labelledby="where-title">
+  <div class="section wrap">
+    <div class="section__head">
+      <h2 class="h2" id="where-title" data-split="lines">Runs where your agents run.</h2>
+      <p>On your laptop, in the sandboxes cloud agents use, and on the code host you already have. Nothing to migrate.</p>
+    </div>
+    <div class="where">
+      {platforms.map((p) => (
+        <div class="where__col" data-reveal="up">
+          <p class="label">{p.note}</p>
+          <h3 class="h3">{p.title}</h3>
+          <ul>
+            {p.items.map((it) => (
+              <li><span class="where__dot" aria-hidden="true"></span><span><strong>{it.name}</strong>{it.text && <span class="where__text"> · {it.text}</span>}</span></li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>
