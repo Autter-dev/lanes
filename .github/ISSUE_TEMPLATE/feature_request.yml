@@ -1,0 +1,29 @@
+name: Idea or feature request
+description: Something Lanes should do, or an agent it should support
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you're trying to do, and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help
+      description: How you'd like it to work. A command you'd type is a great start.
+      placeholder: |
+        lane new --from <branch> so I can start a lane from a teammate's work.
+    validations:
+      required: true
+  - type: input
+    id: agents
+    attributes:
+      label: Agents you use
+      placeholder: Claude Code, Cursor, Codex…
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else

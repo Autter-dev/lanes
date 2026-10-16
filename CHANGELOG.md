@@ -8,6 +8,7 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-16
 
+- `19:47` **Added**: repo setup: bug and feature issue forms (OS, filesystem and command asked up front), a pull request template with the checks to run, weekly grouped Dependabot updates for Cargo, the website and Actions, CI on Windows next to Linux and macOS, a website build job, and `.gitattributes` keeping LF line endings everywhere.
 - `18:53` **Added**: website "Runs where your agents run" section (macOS, Linux, Windows and WSL2, cloud agent sandboxes, GitHub then GitLab and Bitbucket) and a "What's being built" status lane that fills as you scroll, plus a Status link in the nav.
 - `18:27` **Added**: website "Built-in guardrails" segment (edits checked against the latest version, approval codes for protected files, named agents, lanes from any branch) with an animated approval session, and a "Coming next on the gateway" section (lanes your team can open, agents with their own access, merging after checks). (`5214dd3`)
 - `05:31` **Changed**: README and website now say macOS, Linux and Windows at launch (fastest on a Windows 11 Dev Drive, regular NTFS drives supported, WSL2 uses the Linux build), instead of "Windows later". (`5214dd3`)

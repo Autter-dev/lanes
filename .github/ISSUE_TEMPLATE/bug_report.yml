@@ -1,0 +1,63 @@
+name: Bug report
+description: Something in Lanes doesn't work the way it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. The more exact the details, the faster we can fix it.
+        For a security problem, don't open an issue: follow [SECURITY.md](https://github.com/autter-dev/lanes/blob/main/SECURITY.md).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you ran, what you expected, and what happened instead.
+      placeholder: |
+        I ran `lane new fix-auth` and expected a ready-to-run lane, but…
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command and output
+      description: The exact command and its full output. Add `--json` if the command supports it.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Lanes version
+      description: Output of `lane --version`.
+      placeholder: lane 0.0.1
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Windows (WSL2)
+    validations:
+      required: true
+  - type: input
+    id: filesystem
+    attributes:
+      label: Filesystem
+      description: Where the repo lives. It decides how lanes are copied.
+      placeholder: APFS, Btrfs, XFS, ext4, Dev Drive (ReFS), NTFS…
+    validations:
+      required: true
+  - type: input
+    id: agent
+    attributes:
+      label: Agent, if one was involved
+      placeholder: Claude Code 2.x, Cursor, Codex…
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: Repo size, stack (pnpm monorepo, Rust workspace…), or steps to reproduce on a public repo.

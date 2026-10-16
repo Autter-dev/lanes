@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and benchmarks from your repo
+    url: https://github.com/autter-dev/lanes/discussions
+    about: Ask a question, share how Lanes does on your repo, or talk through an idea before it becomes an issue.
+  - name: Report a security problem
+    url: https://github.com/autter-dev/lanes/blob/main/SECURITY.md
+    about: Please don't open a public issue for security problems.

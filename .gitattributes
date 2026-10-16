@@ -1,0 +1,8 @@
+# Keep line endings the same on every OS (CI runs on Linux, macOS and Windows).
+* text=auto eol=lf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.webp binary
+*.woff2 binary
