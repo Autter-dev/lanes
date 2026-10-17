@@ -1,10 +1,14 @@
 //! Shared core for the Lanes CLI (`lane`) and daemon (`laned`).
 
+pub mod config;
+pub mod env;
+pub mod machine;
+
 /// The Lanes version, shared by every binary.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Where to follow progress while a command is still being built.
-pub const PROGRESS_URL: &str = "https://github.com/autter-dev/lanes";
+pub const PROGRESS_URL: &str = "https://github.com/Autter-dev/lanes";
 
 /// Stable exit codes. Agents and scripts rely on these, so never renumber them.
 pub mod exit {

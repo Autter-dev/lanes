@@ -16,3 +16,8 @@ path = "src/main.rs"
 
 [dependencies]
 lane-core.workspace = true
+lane-tui.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
