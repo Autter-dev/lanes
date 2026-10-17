@@ -1,7 +1,7 @@
 ---
 import Base from '../layouts/Base.astro';
 import InstallCommand from '../components/InstallCommand.astro';
-import { archives, channels, downloadPlatforms, install, release, site, uninstall } from '../data/site';
+import { archives, channels, downloadPlatforms, install, release, site, uninstall, unsigned } from '../data/site';
 import { allReleases, longDate } from '../data/releases';
 const slug = (v: string) => v.replace(/[^0-9A-Za-z]+/g, '-');
 ---
@@ -16,6 +16,25 @@ const slug = (v: string) => v.replace(/[^0-9A-Za-z]+/g, '-');
       ) : (
         <p class="note"><strong>Not released yet.</strong> These commands work from the first release. Until then, <a class="link" href={site.repo}>star the repo</a> to hear when it ships, or build it from source.</p>
       )}
+    </div>
+  </section>
+
+  <section class="wrap" aria-labelledby="dl-unsigned">
+    <div class="dl-callout">
+      <div class="dl-callout__head">
+        <p class="label">For early testers</p>
+        <h2 class="h3" id="dl-unsigned">These builds aren't code-signed yet.</h2>
+        <p>Signing is on the way. Until then, here's what it means on each system.</p>
+      </div>
+      <ul class="dl-callout__list">
+        {unsigned.map((u, i) => (
+          <li>
+            <h3 class="dl-method__name">{u.os}</h3>
+            <p>{u.text}</p>
+            {u.cmd && <InstallCommand id={`dl-unsigned-${i}`} cmd={u.cmd} block label={`Copy the ${u.os} command`} />}
+          </li>
+        ))}
+      </ul>
     </div>
   </section>
 

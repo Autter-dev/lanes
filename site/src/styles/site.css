@@ -133,6 +133,16 @@ html.on-ink .site-header .btn { background: var(--c-ink-fg); color: var(--c-fg);
 .dl-method__note, .dl-card__note { font-size: var(--t-xs); color: var(--c-muted); line-height: 1.5; }
 .dl-card__note { padding: 0.9rem 1rem; border-radius: 12px; background: var(--c-bg); }
 .dl-wide { max-width: 40rem; }
+/* The unsigned-builds note for early testers, under the page heading */
+.dl-callout { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: var(--gutter); row-gap: 1.5rem; padding: clamp(1.25rem, 2.6vw, 2.25rem); border: 1px solid var(--c-fg); border-radius: var(--radius-card); background: var(--c-card); }
+.dl-callout__head { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 0.6rem; max-width: 46rem; }
+.dl-callout__head p:last-child { color: var(--c-muted); font-size: var(--t-s); }
+.dl-callout__list { grid-column: 1 / -1; list-style: none; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gutter); }
+.dl-callout__list li { display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; padding-top: 1rem; border-top: 1px solid var(--c-line); font-size: var(--t-s); color: var(--c-muted); line-height: 1.5; }
+.dl-callout__list .dl-method__name { color: var(--c-fg); }
+@media (max-width: 1000px) {
+  .dl-callout__list { grid-template-columns: minmax(0, 1fr); }
+}
 /* A channel that isn't published yet: the command, dimmed, with no Copy button */
 .dl-soon { padding: 0.85rem 1.15rem; border: 1px dashed var(--c-line); border-radius: 14px; font-size: 0.875rem; color: var(--c-muted); overflow-wrap: anywhere; }
 .dl-table-wrap { overflow-x: auto; border-top: 1px solid var(--c-fg); }

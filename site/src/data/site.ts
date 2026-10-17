@@ -82,6 +82,23 @@ export const downloadPlatforms: { os: Os; name: string; detail: string; methods:
   },
 ];
 
+// Builds aren't code-signed yet. What that means on each system, for early testers.
+export const unsigned: { os: string; text: string; cmd?: string }[] = [
+  {
+    os: 'macOS',
+    text: "Homebrew, the install script and npm work as they are. An archive you download in a browser is quarantined: after unpacking it, run this once in that folder.",
+    cmd: 'xattr -d com.apple.quarantine lane laned',
+  },
+  {
+    os: 'Windows',
+    text: "With Smart App Control on, Windows 11 may block lane.exe, whichever way you installed it. Signed builds are on the way. Until then, the Linux build under WSL2 works.",
+  },
+  {
+    os: 'Linux and WSL',
+    text: 'Nothing extra to do. Every option works as it is.',
+  },
+];
+
 const targets = [
   { system: 'macOS, Apple silicon', target: 'aarch64-apple-darwin', ext: 'tar.gz' },
   { system: 'macOS, Intel', target: 'x86_64-apple-darwin', ext: 'tar.gz' },
