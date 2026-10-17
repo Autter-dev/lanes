@@ -244,6 +244,21 @@ pub fn new_lane(
 
 type Built = (BaseInfo, CloneSummary, usize, Option<PathBuf>);
 
+/// Agent settings that live only on this machine (Claude Code's hooks among them), copied from
+/// the repo into the lane so an agent started in the lane has them too.
+fn copy_local_agent_files(root: &Path, lane: &Path) -> Result<()> {
+    for rel in crate::agents::LOCAL_AGENT_FILES {
+        let (from, to) = (root.join(rel), lane.join(rel));
+        if from.is_file() && !to.exists() {
+            if let Some(dir) = to.parent() {
+                fs::create_dir_all(dir).map_err(|e| io_error("create", dir, e))?;
+            }
+            fs::copy(&from, &to).map_err(|e| io_error("copy", &from, e))?;
+        }
+    }
+    Ok(())
+}
+
 fn build_lane(store: &mut Store, repo: &Repo, lane: &Lane) -> Result<Built> {
     let path = lane.path.as_path();
     let base = ensure_base(store, repo)?;
@@ -267,6 +282,7 @@ fn build_lane(store: &mut Store, repo: &Repo, lane: &Lane) -> Result<Built> {
     fs::copy(&from, &to).map_err(|e| io_error("copy the Git index to", &to, e))?;
     git::refresh_index(path);
     let fixed = fix_paths(&base.path, path)?;
+    copy_local_agent_files(&repo.root, path)?;
     let env_file = crate::lane_env::write_dotenv(lane, repo.project.env.template.as_deref())?;
     let summary = CloneSummary {
         method: report.method,

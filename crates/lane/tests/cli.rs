@@ -1,8 +1,9 @@
 //! The `lane` binary from the outside: what scripts, CI and agents see. Output is never a
 //! terminal here, so the full-screen app must never open.
 
+use std::io::Write;
 use std::path::PathBuf;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 fn config_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("lane-cli-test-{}-{name}", std::process::id()));
@@ -27,6 +28,37 @@ fn lane_in(dir: &PathBuf, cwd: &std::path::Path, args: &[&str]) -> Output {
         .env_remove("CI")
         .output()
         .expect("lane runs")
+}
+
+/// Run `lane` the way a Claude Code hook does: JSON on stdin, with extra environment.
+fn lane_hook(
+    dir: &PathBuf,
+    cwd: &std::path::Path,
+    event: &str,
+    input: serde_json::Value,
+    env: &[(&str, &std::path::Path)],
+) -> Output {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_lane"));
+    cmd.args(["hook", "claude", event])
+        .current_dir(cwd)
+        .env("LANE_CONFIG_DIR", dir)
+        .env("LANE_STATE_DIR", dir.join("state"))
+        .env_remove("LANE_REQUEST_ID")
+        .env_remove("CLAUDE_ENV_FILE")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    let mut child = cmd.spawn().expect("lane runs");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input.to_string().as_bytes())
+        .unwrap();
+    child.wait_with_output().unwrap()
 }
 
 #[test]
@@ -465,6 +497,8 @@ fn init_finds_the_stack_and_writes_lane_toml_once() {
     )
     .unwrap();
     std::fs::write(repo.join(".env.example"), "API_KEY=\n").unwrap();
+    // A repo that uses Claude Code, whatever is on this machine's PATH.
+    std::fs::create_dir_all(repo.join(".claude")).unwrap();
 
     let printed = lane_in(&dir, &repo, &["init", "--print"]);
     assert!(String::from_utf8_lossy(&printed.stdout).contains("npm ci"));
@@ -482,16 +516,43 @@ fn init_finds_the_stack_and_writes_lane_toml_once() {
     assert_eq!(v["found"]["install"][0], "npm ci");
     assert_eq!(v["found"]["dev"]["command"], "npm run dev -- --port $PORT");
     assert_eq!(v["next"][0]["run"], "lane new fix-auth");
-    assert_eq!(v["next"][1]["run"], "git add lane.toml");
+    assert_eq!(v["next"][1]["run"], "claude -w fix-auth");
+    assert_eq!(v["next"][2]["run"], "git add lane.toml AGENTS.md");
     let text = std::fs::read_to_string(repo.join("lane.toml")).unwrap();
     assert!(text.contains("template = \".env.example\""), "{text}");
+    // The agents: Claude Code's hooks, the Git hook and the AGENTS.md note.
+    let set_up: Vec<(&str, bool)> = v["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| (a["what"].as_str().unwrap(), a["changed"].as_bool().unwrap()))
+        .collect();
+    assert_eq!(
+        set_up,
+        [("git_hook", true), ("agents_md", true), ("claude", true)]
+    );
+    let settings = std::fs::read_to_string(repo.join(".claude/settings.local.json")).unwrap();
+    assert!(settings.contains("lane hook claude worktree-create"));
+    assert!(
+        std::fs::read_to_string(repo.join("AGENTS.md"))
+            .unwrap()
+            .contains("lane new <name> --print-path")
+    );
 
-    // Run again: the file is kept as it is.
+    // Run again: the file is kept as it is, and the agents are already set up.
     std::fs::write(repo.join("lane.toml"), "version = 1\n# mine\n").unwrap();
     let v = json(&lane_in(&dir, &repo, &["init", "--json"]));
     assert_eq!(
         (v["written"].as_bool(), v["kept_existing"].as_bool()),
         (Some(false), Some(true))
+    );
+    assert!(
+        v["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|a| a["changed"] == false),
+        "{v}"
     );
     assert!(
         std::fs::read_to_string(repo.join("lane.toml"))
@@ -545,4 +606,188 @@ fn a_lane_gets_a_dotenv_from_the_template() {
         "{text}"
     );
     assert!(!text.contains("3000"), "{text}");
+}
+
+#[test]
+fn claude_code_hooks_put_a_session_in_a_lane() {
+    let dir = config_dir("claude-hooks");
+    let repo = repo_with_commit("claude-hooks");
+    std::fs::write(repo.join("lane.toml"), "version = 1\n").unwrap();
+
+    // `claude -w "Fix Auth"`: a lane, and its folder as the only line on stdout.
+    let input = serde_json::json!({ "session_id": "s-1", "cwd": repo, "name": "Fix Auth", "hook_event_name": "WorktreeCreate" });
+    let out = lane_hook(&dir, &repo, "worktree-create", input.clone(), &[]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let printed = String::from_utf8_lossy(&out.stdout).to_string();
+    assert_eq!(printed.lines().count(), 1, "{printed}");
+    let path = PathBuf::from(printed.trim());
+    assert!(path.join("src/app.ts").exists());
+    assert!(path.ends_with("fix-auth"));
+    // The same name again gets the same lane.
+    let again = lane_hook(&dir, &repo, "worktree-create", input, &[]);
+    assert_eq!(String::from_utf8_lossy(&again.stdout), printed);
+    let listed = json(&lane_in(&dir, &repo, &["list", "--json"]));
+    assert_eq!(listed["lanes"].as_array().unwrap().len(), 1);
+    assert_eq!(listed["lanes"][0]["agent"], "claude");
+
+    // The session starts in the lane: its ports go in the env file, and it's told where it is.
+    let env_file = dir.join("claude-env.sh");
+    let out = lane_hook(
+        &dir,
+        &path,
+        "session-start",
+        serde_json::json!({ "cwd": path, "source": "startup", "hook_event_name": "SessionStart" }),
+        &[("CLAUDE_ENV_FILE", env_file.as_path())],
+    );
+    assert_eq!(out.status.code(), Some(0));
+    let v = json(&out);
+    let context = v["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap();
+    assert!(context.contains("lane `fix-auth`"), "{context}");
+    let env = std::fs::read_to_string(&env_file).unwrap();
+    assert!(env.contains("export PORT=4100\n"), "{env}");
+
+    // `git worktree add` is turned down; other commands pass without a word.
+    let deny = lane_hook(
+        &dir,
+        &path,
+        "pre-tool-use",
+        serde_json::json!({ "cwd": path, "tool_name": "Bash", "tool_input": { "command": "git worktree add ../other -b other" } }),
+        &[],
+    );
+    let v = json(&deny);
+    assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "deny");
+    assert!(
+        v["hookSpecificOutput"]["permissionDecisionReason"]
+            .as_str()
+            .unwrap()
+            .contains("lane new")
+    );
+    let pass = lane_hook(
+        &dir,
+        &path,
+        "pre-tool-use",
+        serde_json::json!({ "cwd": path, "tool_name": "Bash", "tool_input": { "command": "git status" } }),
+        &[],
+    );
+    assert_eq!(pass.status.code(), Some(0));
+    assert!(pass.stdout.is_empty());
+
+    // Claude Code is done with it: the lane and its folder go.
+    let out = lane_hook(
+        &dir,
+        &repo,
+        "worktree-remove",
+        serde_json::json!({ "cwd": repo, "worktree_path": path, "hook_event_name": "WorktreeRemove" }),
+        &[],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!path.exists());
+    let listed = json(&lane_in(&dir, &repo, &["list", "--json"]));
+    assert!(listed["lanes"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn hooks_stay_quiet_outside_a_lanes_repo() {
+    let dir = config_dir("claude-quiet");
+    let repo = repo_with_commit("claude-quiet");
+    for (event, input) in [
+        (
+            "session-start",
+            serde_json::json!({ "cwd": repo, "source": "startup" }),
+        ),
+        (
+            "pre-tool-use",
+            serde_json::json!({ "cwd": repo, "tool_input": { "command": "git worktree add ../x" } }),
+        ),
+    ] {
+        let out = lane_hook(&dir, &repo, event, input, &[]);
+        assert_eq!(out.status.code(), Some(0), "{event}");
+        assert!(
+            out.stdout.is_empty(),
+            "{event}: {}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+    }
+    // Not JSON: a hook that can't stop the session still exits 0.
+    let mut child = Command::new(env!("CARGO_BIN_EXE_lane"))
+        .args(["hook", "claude", "pre-tool-use"])
+        .env("LANE_STATE_DIR", dir.join("state"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(b"not json").unwrap();
+    assert_eq!(child.wait_with_output().unwrap().status.code(), Some(0));
+}
+
+#[test]
+fn a_worktree_made_with_git_becomes_a_lane() {
+    let dir = config_dir("post-checkout");
+    let repo = repo_with_commit("post-checkout");
+    let out = lane_in(&dir, &repo, &["init", "--json"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // Any tool's `git worktree add` runs the post-checkout hook, which runs `lane adopt`.
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lane"));
+    let path = std::env::join_paths(std::iter::once(bin.parent().unwrap().to_path_buf()).chain(
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+    ))
+    .unwrap();
+    let other = repo.with_file_name("post-checkout-by-hand");
+    let _ = std::fs::remove_dir_all(&other);
+    let status = Command::new("git")
+        .args([
+            "-C",
+            &repo.to_string_lossy(),
+            "worktree",
+            "add",
+            "--detach",
+            "-q",
+        ])
+        .arg(&other)
+        .env("PATH", path)
+        .env("LANE_CONFIG_DIR", &dir)
+        .env("LANE_STATE_DIR", dir.join("state"))
+        .env_remove("LANE_GIT")
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let listed = json(&lane_in(&dir, &repo, &["list", "--json"]));
+    let names: Vec<&str> = listed["lanes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["post-checkout-by-hand"]);
+
+    // Lanes' own worktrees aren't adopted a second time.
+    let out = lane_in(&dir, &repo, &["new", "made-by-lanes", "--json"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let listed = json(&lane_in(&dir, &repo, &["list", "--json"]));
+    assert_eq!(listed["lanes"].as_array().unwrap().len(), 2);
+    let _ = std::fs::remove_dir_all(&other);
 }

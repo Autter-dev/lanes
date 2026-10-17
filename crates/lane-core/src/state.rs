@@ -139,6 +139,12 @@ pub struct Lane {
 }
 
 impl Lane {
+    /// Still `creating` long after any `lane new` would have finished: left by a crash, so the
+    /// next `lane new` of that name takes it over.
+    pub fn is_stale(&self) -> bool {
+        self.status == Status::Creating && now() - self.created_at > STALE_CREATING_SECS
+    }
+
     /// One word for where the lane stands: `creating`, `ready`, or how it ended.
     pub fn state(&self) -> &'static str {
         match (self.status, self.outcome) {

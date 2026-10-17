@@ -8,8 +8,11 @@ use std::process::Command;
 fn git(dir: &Path) -> Command {
     let mut cmd = Command::new("git");
     cmd.arg("-C").arg(dir);
-    // Never ask a person anything, and never page.
-    cmd.env("GIT_TERMINAL_PROMPT", "0").env("GIT_PAGER", "cat");
+    // Never ask a person anything, and never page. LANE_GIT tells Lanes' own post-checkout hook
+    // that this worktree is Lanes' doing, so it isn't adopted twice.
+    cmd.env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_PAGER", "cat")
+        .env("LANE_GIT", "1");
     cmd
 }
 

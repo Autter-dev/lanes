@@ -1,0 +1,17 @@
+{
+  "name": "autter",
+  "description": "Claude Code plugins from Autter, the makers of Lanes",
+  "owner": {
+    "name": "Autter",
+    "url": "https://lanes.autter.dev"
+  },
+  "plugins": [
+    {
+      "name": "lanes",
+      "source": "./plugins/claude-code",
+      "description": "Puts every claude -w session in its own lane: a Git worktree with its own ports and .env, so agents don't collide. Needs the lane command (lanes.autter.dev/download).",
+      "category": "development",
+      "tags": ["worktrees", "parallel-agents", "ports"]
+    }
+  ]
+}

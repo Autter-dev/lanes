@@ -73,15 +73,21 @@ pub fn in_lane(repo: &Repo, lane: &Lane) -> Vec<Step> {
     steps
 }
 
-/// After `lane init` wrote or kept lane.toml.
-pub fn after_init(written: bool) -> Vec<Step> {
+/// After `lane init`: make a lane (or have Claude Code make one), and check in what it wrote.
+pub fn after_init(to_add: &[String], claude: bool) -> Vec<Step> {
     let mut steps = vec![step(
         "lane new fix-auth",
         "make a lane; dependencies install once, the first time",
     )];
-    if written {
+    if claude {
         steps.push(step(
-            "git add lane.toml",
+            "claude -w fix-auth",
+            "or start Claude Code in a lane of its own",
+        ));
+    }
+    if !to_add.is_empty() {
+        steps.push(step(
+            format!("git add {}", to_add.join(" ")),
             "check it in, so teammates get the same lanes",
         ));
     }
@@ -229,10 +235,13 @@ mod tests {
 
     #[test]
     fn steps_render_as_an_aligned_block() {
-        let text = render(&after_init(true));
+        let text = render(&after_init(&["lane.toml".to_string()], false));
         assert!(text.starts_with("Next:\n"));
         assert!(text.contains("  lane new fix-auth  make a lane"));
         assert!(text.contains("  git add lane.toml  check it in"));
+        let text = render(&after_init(&["lane.toml".into(), "AGENTS.md".into()], true));
+        assert!(text.contains("claude -w fix-auth"));
+        assert!(text.contains("git add lane.toml AGENTS.md"));
         assert_eq!(render(&[]), "");
 
         let long = vec![

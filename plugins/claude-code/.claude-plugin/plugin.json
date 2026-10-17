@@ -1,0 +1,12 @@
+{
+  "name": "lanes",
+  "description": "Puts every claude -w session in its own lane: a Git worktree with its own ports and .env, so agents don't collide. Needs the lane command (lanes.autter.dev/download).",
+  "author": {
+    "name": "Autter",
+    "url": "https://lanes.autter.dev"
+  },
+  "homepage": "https://lanes.autter.dev",
+  "repository": "https://github.com/Autter-dev/lanes",
+  "license": "AGPL-3.0-only",
+  "keywords": ["lanes", "worktrees", "parallel-agents", "ports"]
+}

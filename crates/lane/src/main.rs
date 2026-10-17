@@ -9,7 +9,9 @@
 //!   the first result and changes nothing.
 
 mod args;
+mod hook;
 
+use lane_core::agents;
 use lane_core::config::Config;
 use lane_core::engine::{self, Made, Repo};
 use lane_core::env::Env;
@@ -152,20 +154,29 @@ Options:
 ";
 
 const INIT_HELP: &str = "\
-lane init: set up Lanes for this repo
+lane init: set up Lanes for this repo and the agents you use
 
-Usage: lane init [--force] [--print] [--json]
+Usage: lane init [--force] [--print] [--no-agents] [--json]
 
 Looks at the repo (package manager, dev server and its port, .env template, Compose file,
 migration tool) and writes lane.toml with what it found: how to install dependencies in the
 clean _base lane, how to start the dev server, and where each lane's .env starts from. Runs
 nothing and installs nothing. Check lane.toml in, so teammates get the same lanes.
 
+Then it puts agents in lanes:
+  Claude Code   hooks in .claude/settings.local.json (kept out of Git): `claude -w <name>`
+                makes a lane, a session in a lane gets its ports, and `git worktree add` is
+                turned down with a pointer to `lane new`. Only when Claude Code is in use here.
+  Git hook      post-checkout: a worktree any other tool makes becomes a lane
+  AGENTS.md     a short note on working in lanes (and `@AGENTS.md` in CLAUDE.md)
+Running it again changes nothing that's already set up.
+
 Options:
-  --force      Rewrite lane.toml even if it's already there
-  --print      Show the lane.toml it would write, and write nothing
-  --json       Print what was found and what was written
-  -h, --help   Show this help
+  --force       Rewrite lane.toml even if it's already there
+  --print       Show the lane.toml it would write, and write nothing
+  --no-agents   Write lane.toml only: no hooks, no AGENTS.md note
+  --json        Print what was found and what was written
+  -h, --help    Show this help
 ";
 
 const SETUP_HELP: &str = "\
@@ -204,6 +215,7 @@ fn main() -> ExitCode {
         Some("exec") => exec(&args[1..]),
         Some("env") => run("env", &args[1..], env_vars),
         Some("init") => run("init", &args[1..], init),
+        Some("hook") => hook::hook(&args[1..]),
         Some(other) => report(
             None,
             &Error::usage(format!("unknown command `{other}`"))
@@ -680,7 +692,7 @@ fn env_vars(args: &[String]) -> Result<()> {
 /// `lane init`: find what the repo needs and write lane.toml.
 fn init(args: &[String]) -> Result<()> {
     let (common, rest) = args::split(args)?;
-    let (mut force, mut print_only) = (false, false);
+    let (mut force, mut print_only, mut no_agents) = (false, false, false);
     for arg in &rest {
         match arg.as_str() {
             "-h" | "--help" => {
@@ -689,6 +701,7 @@ fn init(args: &[String]) -> Result<()> {
             }
             "--force" => force = true,
             "--print" => print_only = true,
+            "--no-agents" => no_agents = true,
             s => return Err(unknown_option("init", s)),
         }
     }
@@ -715,12 +728,40 @@ fn init(args: &[String]) -> Result<()> {
                 .hint("Check that you can write to the repo's folder.")
             })?;
     }
+    let setup = if print_only || no_agents {
+        Vec::new()
+    } else {
+        setup_agents(&repo)?
+    };
+    let claude = setup.iter().any(|(what, _)| *what == "claude");
+    let mut to_add: Vec<String> = Vec::new();
+    if write {
+        to_add.push(lane_core::project::FILE_NAME.to_string());
+    }
+    for (what, change) in &setup {
+        if change.changed && matches!(*what, "agents_md" | "claude_md") {
+            to_add.extend(
+                change
+                    .path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned()),
+            );
+        }
+    }
     let steps = if print_only {
         Vec::new()
     } else {
-        next::after_init(write)
+        next::after_init(&to_add, claude)
     };
     if common.json {
+        let agents: Vec<serde_json::Value> = setup
+            .iter()
+            .map(|(what, change)| {
+                let mut v = serde_json::to_value(change).expect("changes serialize");
+                v["what"] = serde_json::json!(what);
+                v
+            })
+            .collect();
         print_json(&serde_json::json!({
             "repo": repo.root,
             "found": found,
@@ -728,6 +769,7 @@ fn init(args: &[String]) -> Result<()> {
             "written": write,
             "kept_existing": existed && !write && !print_only,
             "text": text,
+            "agents": agents,
             "next": steps,
         }));
         return Ok(());
@@ -764,8 +806,48 @@ fn init(args: &[String]) -> Result<()> {
             "lane.toml is already there, so it was left as is. `lane init --print` shows what it would write; `--force` rewrites it."
         );
     }
+    if !setup.is_empty() {
+        println!("Agents:");
+        for (what, change) in &setup {
+            let (label, done) = match *what {
+                "claude" => (
+                    "Claude Code",
+                    "hooks in .claude/settings.local.json, kept out of Git",
+                ),
+                "git_hook" => (
+                    "Git hook",
+                    "post-checkout: worktrees other tools make become lanes",
+                ),
+                "agents_md" => ("AGENTS.md", "a note on working in lanes"),
+                _ => ("CLAUDE.md", "@AGENTS.md, so Claude Code reads the note"),
+            };
+            let state = match (&change.note, change.changed) {
+                (Some(note), _) => note.clone(),
+                (None, true) => done.to_string(),
+                (None, false) => format!("{done} (already set up)"),
+            };
+            println!("  {label:<12} {state}");
+        }
+    }
     print!("{}", next::render(&steps));
     Ok(())
+}
+
+/// Put agents in lanes: the Git hook and the AGENTS.md note always, Claude Code's hooks when
+/// Claude Code is in use here. Each step is safe to run again.
+fn setup_agents(repo: &Repo) -> Result<Vec<(&'static str, agents::Change)>> {
+    let mut done = vec![("git_hook", agents::setup_git_hook(repo)?)];
+    let mut notes = agents::setup_agents_md(repo)?.into_iter();
+    if let Some(c) = notes.next() {
+        done.push(("agents_md", c));
+    }
+    if let Some(c) = notes.next() {
+        done.push(("claude_md", c));
+    }
+    if agents::uses_claude(repo) {
+        done.push(("claude", agents::setup_claude(repo)?));
+    }
+    Ok(done)
 }
 
 fn fail(msg: impl std::fmt::Display) -> ExitCode {
