@@ -1119,7 +1119,8 @@ fn a_cursor_agent_in_its_own_worktree_gets_a_lane() {
     std::fs::write(repo.join("lane.toml"), "version = 1\n").unwrap();
 
     // Cursor makes its worktree with Git, where its hooks may not run, then starts the agent.
-    let worktree = repo.with_file_name("cursor-hooks-zjm");
+    // Cursor puts it at ~/.cursor/worktrees/<repo>/<id>.
+    let worktree = repo.with_file_name("cursor-worktrees").join("zjm");
     let _ = std::fs::remove_dir_all(&worktree);
     let ok = Command::new("git")
         .args([
@@ -1158,7 +1159,7 @@ fn a_cursor_agent_in_its_own_worktree_gets_a_lane() {
     );
     let v = json(&out);
     let context = v["additional_context"].as_str().unwrap();
-    assert!(context.contains("lane `cursor-hooks-zjm`"), "{context}");
+    assert!(context.contains("lane `cursor-zjm`"), "{context}");
     let listed = json(&lane_in(&dir, &repo, &["list", "--json"]));
     assert_eq!(listed["lanes"][0]["agent"], "cursor");
 
@@ -1187,5 +1188,91 @@ fn a_cursor_agent_in_its_own_worktree_gets_a_lane() {
         out.stdout.is_empty(),
         "no answer, so Cursor's own approval rules apply"
     );
-    let _ = std::fs::remove_dir_all(&worktree);
+    let _ = std::fs::remove_dir_all(worktree.parent().unwrap());
+}
+
+#[test]
+fn a_codex_session_in_its_own_worktree_gets_a_lane() {
+    let dir = config_dir("codex-hooks");
+    let repo = repo_with_commit("codex-hooks");
+    std::fs::write(
+        repo.join("lane.toml"),
+        "version = 1
+",
+    )
+    .unwrap();
+
+    // Codex makes `<root>/<4 hex>/<repo folder>` with Git hooks off, twice here: both folders
+    // are named after the repo, and each still gets a lane of its own.
+    let root = repo.with_file_name("codex-worktrees");
+    let _ = std::fs::remove_dir_all(&root);
+    let mut names = Vec::new();
+    for id in ["a1b2", "c3d4"] {
+        let worktree = root.join(id).join("codex-hooks");
+        let ok = Command::new("git")
+            .args([
+                "-c",
+                "core.hooksPath=/dev/null",
+                "-C",
+                &repo.to_string_lossy(),
+                "worktree",
+                "add",
+                "-q",
+                "--detach",
+            ])
+            .arg(&worktree)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok);
+        let input = serde_json::json!({ "hook_event_name": "SessionStart", "source": "startup", "cwd": worktree });
+        let out = hook_raw(
+            &dir,
+            &worktree,
+            "codex",
+            "session-start",
+            input.to_string().as_bytes(),
+        );
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let v = json(&out);
+        let context = v["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(context.contains(&format!("lane `codex-{id}`")), "{context}");
+        names.push(format!("codex-{id}"));
+
+        // A copy of the repo is turned down; the reason reaches the model.
+        let deny = serde_json::json!({ "tool_name": "Bash", "cwd": worktree, "tool_input": { "command": "git worktree add ../x" } });
+        let v = json(&hook_raw(
+            &dir,
+            &worktree,
+            "codex",
+            "pre-tool-use",
+            deny.to_string().as_bytes(),
+        ));
+        assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "deny");
+    }
+    let listed = json(&lane_in(&dir, &repo, &["list", "--json"]));
+    let mut got: Vec<String> = listed["lanes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l["name"].as_str().unwrap().to_string())
+        .collect();
+    got.sort();
+    assert_eq!(got, names);
+    assert!(
+        listed["lanes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|l| l["agent"] == "codex")
+    );
+    let _ = std::fs::remove_dir_all(&root);
 }

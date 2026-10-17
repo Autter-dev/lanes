@@ -4,8 +4,9 @@
 //! added and leaves everything else in those files as it was.
 
 use super::{
-    Change, claude_hooks_present, cursor_hooks_present, io_error, merge_claude_hooks,
-    merge_cursor_hooks, read_or_empty, remove_claude_hooks, remove_cursor_hooks, write_atomic,
+    Change, claude_hooks_present, codex_hooks_present, cursor_hooks_present, io_error,
+    merge_claude_hooks, merge_codex_hooks, merge_cursor_hooks, read_or_empty, remove_claude_hooks,
+    remove_codex_hooks, remove_cursor_hooks, write_atomic,
 };
 use crate::error::{Error, ErrorKind, Result};
 use serde_json::{Value, json};
@@ -30,13 +31,18 @@ pub const CLAUDE: Agent = Agent {
     name: "Claude Code",
 };
 
+pub const CODEX: Agent = Agent {
+    id: "codex",
+    name: "Codex",
+};
+
 pub const CURSOR: Agent = Agent {
     id: "cursor",
     name: "Cursor",
 };
 
 /// The agents Lanes knows how to set up, in the order it shows them.
-pub const AGENTS: [Agent; 2] = [CLAUDE, CURSOR];
+pub const AGENTS: [Agent; 3] = [CLAUDE, CODEX, CURSOR];
 
 /// Where agents keep their user settings: your home folder. `LANE_AGENTS_HOME` points it
 /// somewhere else, so tests never touch a real agent's settings.
@@ -67,6 +73,7 @@ pub fn found() -> Vec<Agent> {
         .into_iter()
         .filter(|a| match a.id {
             "claude" => claude_dir().is_ok_and(|d| d.is_dir()) || super::on_path("claude"),
+            "codex" => codex_dir().is_ok_and(|d| d.is_dir()) || super::on_path("codex"),
             "cursor" => {
                 cursor_dir().is_ok_and(|d| d.is_dir())
                     || super::on_path("cursor")
@@ -83,7 +90,8 @@ pub fn setup(on: bool) -> Result<Vec<(Agent, Vec<Change>)>> {
     for agent in found() {
         let changes = match agent.id {
             "claude" => claude(&claude_dir()?, on)?,
-            "cursor" => cursor(&cursor_dir()?, on)?,
+            "codex" => codex(&codex_dir()?, &shared_skills()?, on)?,
+            "cursor" => cursor(&cursor_dir()?, &shared_skills()?, on)?,
             _ => Vec::new(),
         };
         out.push((agent, changes));
@@ -98,10 +106,16 @@ pub fn is_set_up(agent: Agent) -> bool {
             claude_hooks_present(&read_json(&d.join("settings.json")).unwrap_or(Value::Null))
                 && is_ours(&d.join("skills/lanes/SKILL.md"))
         }),
-        "cursor" => cursor_dir().is_ok_and(|d| {
-            cursor_hooks_present(&read_json(&d.join("hooks.json")).unwrap_or(Value::Null))
-                && is_ours(&d.join("skills/lanes/SKILL.md"))
-        }),
+        "codex" => {
+            codex_dir().is_ok_and(|d| {
+                codex_hooks_present(&read_json(&d.join("hooks.json")).unwrap_or(Value::Null))
+            }) && shared_skills().is_ok_and(|d| is_ours(&d.join("lanes/SKILL.md")))
+        }
+        "cursor" => {
+            cursor_dir().is_ok_and(|d| {
+                cursor_hooks_present(&read_json(&d.join("hooks.json")).unwrap_or(Value::Null))
+            }) && shared_skills().is_ok_and(|d| is_ours(&d.join("lanes/SKILL.md")))
+        }
         _ => false,
     }
 }
@@ -142,9 +156,55 @@ pub fn cursor_dir() -> Result<PathBuf> {
     }
 }
 
+/// The skills folder every agent following the Agent Skills standard reads: `~/.agents/skills`.
+/// Codex and Cursor both read it, so they share one copy of the skill.
+pub fn shared_skills() -> Result<PathBuf> {
+    Ok(home()?.join(".agents").join("skills"))
+}
+
+/// Codex's user folder: `CODEX_HOME`, else `~/.codex`.
+pub fn codex_dir() -> Result<PathBuf> {
+    if std::env::var_os("LANE_AGENTS_HOME").is_some_and(|d| !d.is_empty()) {
+        return Ok(home()?.join(".codex"));
+    }
+    match std::env::var_os("CODEX_HOME").filter(|d| !d.is_empty()) {
+        Some(d) => Ok(PathBuf::from(d)),
+        None => Ok(home()?.join(".codex")),
+    }
+}
+
+/// Codex: its hooks in `~/.codex/hooks.json` (a session in a Codex worktree makes it a lane;
+/// copies of the repo are turned down), and the skill in `~/.agents/skills/lanes`. Codex runs
+/// a hook only once you've trusted it, so the change says to open `/hooks` in Codex.
+pub(crate) fn codex(dir: &Path, skills: &Path, on: bool) -> Result<Vec<Change>> {
+    let file = dir.join("hooks.json");
+    let mut value = read_json(&file)?;
+    let changed = if on {
+        merge_codex_hooks(&mut value)?
+    } else {
+        remove_codex_hooks(&mut value)
+    };
+    if changed {
+        let text = serde_json::to_string_pretty(&value).expect("hooks serialize") + "\n";
+        write_atomic(&file, &text)?;
+    }
+    let skill = skill(&skills.join("lanes/SKILL.md"), on)?;
+    Ok(vec![
+        Change {
+            path: file,
+            changed,
+            note: (on && changed).then(|| {
+                "Codex runs new hooks only once you trust them: open /hooks in Codex and trust Lanes' two hooks.".to_string()
+            }),
+            ..Change::default()
+        },
+        skill,
+    ])
+}
+
 /// Cursor: its hooks in `~/.cursor/hooks.json` (a session in a Cursor worktree makes it a
-/// lane; copies of the repo are turned down), and the skill in `~/.cursor/skills/lanes`.
-pub(crate) fn cursor(dir: &Path, on: bool) -> Result<Vec<Change>> {
+/// lane; copies of the repo are turned down), and the skill in `~/.agents/skills/lanes`.
+pub(crate) fn cursor(dir: &Path, skills: &Path, on: bool) -> Result<Vec<Change>> {
     let file = dir.join("hooks.json");
     let mut value = read_json(&file)?;
     let changed = if on {
@@ -156,7 +216,7 @@ pub(crate) fn cursor(dir: &Path, on: bool) -> Result<Vec<Change>> {
         let text = serde_json::to_string_pretty(&value).expect("hooks serialize") + "\n";
         write_atomic(&file, &text)?;
     }
-    let skill = skill(&dir.join("skills/lanes/SKILL.md"), on)?;
+    let skill = skill(&skills.join("lanes/SKILL.md"), on)?;
     Ok(vec![
         Change {
             path: file,
@@ -300,7 +360,13 @@ Mine.
             r#"{"version": 1, "hooks": {"afterFileEdit": [{"command": "./format.sh"}]}}"#,
         )
         .unwrap();
-        assert!(cursor(&dir, true).unwrap().iter().all(|c| c.changed));
+        let skills = dir.join("agents-skills");
+        assert!(
+            cursor(&dir, &skills, true)
+                .unwrap()
+                .iter()
+                .all(|c| c.changed)
+        );
         let file = read_json(&dir.join("hooks.json")).unwrap();
         assert!(super::super::cursor_hooks_present(&file));
         assert_eq!(
@@ -308,15 +374,71 @@ Mine.
             "lane hook cursor session-start"
         );
         assert_eq!(file["hooks"]["afterFileEdit"][0]["command"], "./format.sh");
-        assert!(dir.join("skills/lanes/SKILL.md").is_file());
-        assert!(cursor(&dir, true).unwrap().iter().all(|c| !c.changed));
+        assert!(skills.join("lanes/SKILL.md").is_file());
+        assert!(
+            cursor(&dir, &skills, true)
+                .unwrap()
+                .iter()
+                .all(|c| !c.changed)
+        );
 
-        assert!(cursor(&dir, false).unwrap().iter().all(|c| c.changed));
+        assert!(
+            cursor(&dir, &skills, false)
+                .unwrap()
+                .iter()
+                .all(|c| c.changed)
+        );
         let file = read_json(&dir.join("hooks.json")).unwrap();
         assert!(file["hooks"].get("sessionStart").is_none());
         assert_eq!(file["hooks"]["afterFileEdit"][0]["command"], "./format.sh");
         assert_eq!(file["version"], 1);
-        assert!(!dir.join("skills/lanes").exists());
+        assert!(!skills.join("lanes").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn codex_gets_its_hooks_and_the_shared_skill_and_off_takes_back_only_those() {
+        let dir = temp("codex");
+        let skills = dir.join("agents-skills");
+        fs::write(
+            dir.join("hooks.json"),
+            r#"{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "notify"}]}]}}"#,
+        )
+        .unwrap();
+        let on = codex(&dir, &skills, true).unwrap();
+        assert!(on.iter().all(|c| c.changed));
+        assert!(
+            on[0].note.as_deref().unwrap().contains("/hooks"),
+            "trusting the hooks is the user's step"
+        );
+        let file = read_json(&dir.join("hooks.json")).unwrap();
+        assert!(super::super::codex_hooks_present(&file));
+        assert_eq!(
+            file["hooks"]["SessionStart"][0]["hooks"][0]["command"],
+            "lane hook codex session-start"
+        );
+        assert_eq!(file["hooks"]["PreToolUse"][0]["matcher"], "^Bash$");
+        assert_eq!(
+            fs::read_to_string(skills.join("lanes/SKILL.md")).unwrap(),
+            SKILL
+        );
+        assert!(
+            codex(&dir, &skills, true)
+                .unwrap()
+                .iter()
+                .all(|c| !c.changed)
+        );
+
+        assert!(
+            codex(&dir, &skills, false)
+                .unwrap()
+                .iter()
+                .all(|c| c.changed)
+        );
+        let file = read_json(&dir.join("hooks.json")).unwrap();
+        assert!(file["hooks"].get("SessionStart").is_none());
+        assert_eq!(file["hooks"]["Stop"][0]["hooks"][0]["command"], "notify");
+        assert!(!skills.join("lanes").exists());
         let _ = fs::remove_dir_all(&dir);
     }
 

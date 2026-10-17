@@ -8,8 +8,12 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-17
 
-- `18:18` **Added**: agents get lanes on their own, with nothing to set up per repo.
-  - **Once per machine:** the first-run welcome and `lane setup --yes` put your agents in lanes, in each agent's own user settings. For Claude Code that's its hooks in `~/.claude/settings.json` and a `lanes` skill in `~/.claude/skills/lanes`, so `claude -w` makes a lane in every repo without `lane init`. It's a switch on the welcome's last screen (`a`), on by default. `lane setup --yes --agents off` takes back exactly what was added, and nothing else in those files changes.
+- `18:18` **Added**: agents get lanes on their own, with nothing to set up per repo: Claude Code, Codex and Cursor.
+  - **Once per machine:** the first-run welcome and `lane setup --yes` put your agents in lanes, in each agent's own user settings. It's a switch on the welcome's last screen (`a`), on by default. `lane setup --yes --agents off` takes back exactly what was added, and nothing else in those files changes.
+    - **Claude Code:** its hooks in `~/.claude/settings.json` and the `lanes` skill in `~/.claude/skills/lanes`, so `claude -w` makes a lane in every repo without `lane init`.
+    - **Codex:** hooks in `~/.codex/hooks.json`. Codex makes its worktrees with Git hooks off, so when a Codex session starts in one, it becomes a lane (`codex-<id>`), ready to run, and Codex is told which lane it's in. Copies of the repo are turned down. Codex runs new hooks only once you trust them, so `lane setup` says to open `/hooks` in Codex once.
+    - **Cursor:** hooks in `~/.cursor/hooks.json`. When a Cursor agent starts in a worktree Cursor made, it becomes a lane (`cursor-<id>`), ready to run, and the agent is told which lane it's in. Copies of the repo are turned down with a message the agent reads.
+    - Codex and Cursor share the skill in `~/.agents/skills/lanes`.
   - **A `lanes` skill:** tells an agent to start each task in a lane of its own (`lane new <task> --print-path`, or Claude Code's EnterWorktree), to run dev servers with `lane exec`, and never to copy the repo. The Claude Code plugin carries it too.
   - **No `lane.toml` needed:** in a repo without one, Lanes uses what `lane init` would find (install steps, dev command, `.env` template), so a lane an agent makes is ready to run. A `lane.toml` still wins when there is one.
   - **Worktrees other tools make are ready to run:** the Git hook now makes each one ready, like a lane from `lane new`. Dependencies (`node_modules`, `.venv`) are cloned from the clean `_base` copy when the lockfiles match, and installed in the worktree when they don't. The lane gets its own `.env` too. `lane adopt --ready` does the same by hand. The hook `lane init` added in 0.0.4 is upgraded the next time `lane init` runs.

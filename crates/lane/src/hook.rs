@@ -30,6 +30,8 @@ pub const HOOK_HELP: &str = "\
 lane hook: what an agent's hooks run (`lane init` sets them up)
 
 Usage: lane hook claude <event> [--json]
+       lane hook codex <session-start|pre-tool-use>
+       lane hook cursor <session-start|before-shell>
        lane hook git post-checkout <previous HEAD> <new HEAD> <flag> [--json]
 
 `lane hook claude` reads Claude Code's hook input on stdin and answers in Claude Code's format.
@@ -68,6 +70,8 @@ pub fn hook(args: &[String]) -> ExitCode {
         ["claude", "session-start"] => quiet(session_start()),
         ["claude", "pre-tool-use"] => quiet(pre_tool_use()),
         ["cursor", "session-start"] => quiet(cursor_session_start()),
+        ["codex", "session-start"] => quiet(codex_session_start()),
+        ["codex", "pre-tool-use"] => quiet(codex_pre_tool_use()),
         ["cursor", "before-shell"] => quiet(cursor_before_shell()),
         ["git", "post-checkout", git_args @ ..] => quiet(post_checkout(git_args, json)),
         ["git", ..] => report(
@@ -80,7 +84,7 @@ pub fn hook(args: &[String]) -> ExitCode {
         [agent, ..] if *agent != "claude" => report(
             Some("hook"),
             &Error::usage(format!("no hooks for `{agent}` yet")).hint(
-                "Only Claude Code and Git have hooks so far: `lane hook claude <event>` and `lane hook git post-checkout`.",
+                "Lanes has hooks for Claude Code, Codex, Cursor and Git: `lane hook claude|codex|cursor <event>` and `lane hook git post-checkout`. Run `lane hook --help`.",
             ),
             json,
         ),
@@ -327,15 +331,56 @@ fn cursor_session_start() -> Result<()> {
     let Some(folder) = cursor_folder(&input) else {
         return Ok(());
     };
-    let Ok(repo) = Repo::open(&folder) else {
+    if let Some(context) = adopting_session("cursor", &folder)? {
+        print_json(&json!({ "additional_context": context }));
+    }
+    Ok(())
+}
+
+/// A Codex session starts. Codex makes its worktrees with Git hooks off, so one it starts in
+/// becomes a lane here, ready to run. Then the agent is told which lane it's in.
+fn codex_session_start() -> Result<()> {
+    let input = input()?;
+    if let Some(context) = adopting_session("codex", &cwd(&input))? {
+        print_json(&json!({
+            "hookSpecificOutput": { "hookEventName": "SessionStart", "additionalContext": context }
+        }));
+    }
+    Ok(())
+}
+
+/// Before Codex runs a shell command: turn down copies of the repo. Codex's shell is PowerShell
+/// on Windows.
+fn codex_pre_tool_use() -> Result<()> {
+    let input = input()?;
+    let command = input["tool_input"]["command"].as_str().unwrap_or_default();
+    let Some(reason) = denied(command, cfg!(windows), &cwd(&input))? else {
         return Ok(());
     };
-    let top = engine::norm(&lane_core::repo::top_level(&folder)?);
+    print_json(&json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        }
+    }));
+    Ok(())
+}
+
+/// For an agent that makes its own worktrees out of Lanes' sight (Cursor, Codex): when a session
+/// starts in one, make it a lane, ready to run like one from `lane new`. Returns what to tell
+/// the agent: which lane it's in, or how to get one in a Lanes repo; nothing elsewhere.
+fn adopting_session(agent: &str, folder: &Path) -> Result<Option<String>> {
+    let Ok(repo) = Repo::open(folder) else {
+        return Ok(None);
+    };
+    let top = engine::norm(&lane_core::repo::top_level(folder)?);
     let mut store = Store::open()?;
     let lane = match store.lane_at(&top)? {
         Some(lane) => Some(lane),
         None if !engine::same_path(&top, &repo.root) => {
-            let lane = engine::adopt(&mut store, &repo, &top, None, Some("cursor"), None)?;
+            let name = free_name(&store, &repo, &worktree_name(agent, &top))?;
+            let lane = engine::adopt(&mut store, &repo, &top, Some(&name), Some(agent), None)?;
             if let Err(e) = engine::make_ready(&mut store, &repo, &lane) {
                 eprintln!("lane: {} is a lane, but {e}", lane.name);
             }
@@ -343,14 +388,51 @@ fn cursor_session_start() -> Result<()> {
         }
         None => None,
     };
-    let context = match lane {
-        Some(lane) if lane.status == Status::Ready => agents::context_in_lane(&repo, &lane),
-        Some(_) => return Ok(()),
-        None if is_lanes_repo(&repo, Some(&store))? => agents::context_in_repo(),
-        None => return Ok(()),
+    Ok(match lane {
+        Some(lane) if lane.status == Status::Ready => Some(agents::context_in_lane(&repo, &lane)),
+        Some(_) => None,
+        None if is_lanes_repo(&repo, Some(&store))? => Some(agents::context_in_repo()),
+        None => None,
+    })
+}
+
+/// A lane name for an agent's own worktree. Codex names every worktree folder after the repo,
+/// under a short id (`.../a1b2/app`), so its lanes are `codex-a1b2`; Cursor's folder is the id
+/// (`.../app/zjm`), so its lanes are `cursor-zjm`.
+fn worktree_name(agent: &str, top: &Path) -> String {
+    let file = |p: Option<&Path>| {
+        p.and_then(Path::file_name)
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default()
     };
-    print_json(&json!({ "additional_context": context }));
-    Ok(())
+    let folder = file(Some(top));
+    let parent = file(top.parent());
+    let id =
+        if agent == "codex" && parent.len() == 4 && parent.bytes().all(|b| b.is_ascii_hexdigit()) {
+            parent
+        } else {
+            folder
+        };
+    agents::lane_name(&format!("{agent}-{id}"), agent)
+}
+
+/// `name`, or `name-2`, `name-3`... when another lane in the repo has it already.
+fn free_name(store: &Store, repo: &Repo, name: &str) -> Result<String> {
+    if store.lane(&repo.root, name)?.is_none() {
+        return Ok(name.to_string());
+    }
+    for n in 2..100 {
+        let stem: String = name.chars().take(40 - 1 - n.to_string().len()).collect();
+        let candidate = format!("{}-{n}", stem.trim_end_matches('-'));
+        if store.lane(&repo.root, &candidate)?.is_none() {
+            return Ok(candidate);
+        }
+    }
+    Err(Error::new(
+        ErrorKind::Conflict,
+        format!("every name like `{name}` is taken"),
+    )
+    .hint("Remove lanes you're done with (`lane list`, then `lane rm <name>`)."))
 }
 
 /// Before a Cursor agent runs a shell command: turn down copies of the repo, with a message the

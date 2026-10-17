@@ -161,12 +161,16 @@ pub fn claude_hooks() -> Value {
 /// Add Lanes' hooks to Claude Code settings, keeping everything else as it is. Returns whether
 /// anything was added: a hook already there (any `lane hook claude` command) is left alone.
 pub fn merge_claude_hooks(settings: &mut Value) -> Result<bool> {
+    merge_grouped(settings, claude_hooks(), HOOK_PREFIX, CLAUDE_SETTINGS)
+}
+
+/// Add hooks laid out the way Claude Code and Codex lay them out (`{"hooks": {"<Event>":
+/// [{"matcher", "hooks": [{"command", ...}]}]}}`), keeping everything else. A hook already there
+/// (any command starting with `prefix`) is left alone.
+fn merge_grouped(settings: &mut Value, ours: Value, prefix: &str, file: &str) -> Result<bool> {
     let not_an_object = || {
-        Error::new(
-            ErrorKind::Config,
-            format!("{CLAUDE_SETTINGS} isn't a JSON object"),
-        )
-        .hint("Fix the file, or move it away, then run `lane init` again.")
+        Error::new(ErrorKind::Config, format!("{file} isn't a JSON object"))
+            .hint("Fix the file, or move it away, then run the command again.")
     };
     let root = settings.as_object_mut().ok_or_else(not_an_object)?;
     let hooks = root
@@ -175,8 +179,8 @@ pub fn merge_claude_hooks(settings: &mut Value) -> Result<bool> {
         .as_object_mut()
         .ok_or_else(not_an_object)?;
     let mut changed = false;
-    let Value::Object(ours) = claude_hooks() else {
-        unreachable!("claude_hooks is an object")
+    let Value::Object(ours) = ours else {
+        unreachable!("hooks are an object")
     };
     for (event, groups) in ours {
         let list = hooks
@@ -184,21 +188,86 @@ pub fn merge_claude_hooks(settings: &mut Value) -> Result<bool> {
             .or_insert_with(|| json!([]))
             .as_array_mut()
             .ok_or_else(not_an_object)?;
-        let present = list.iter().any(|group| {
-            group["hooks"].as_array().is_some_and(|hs| {
-                hs.iter().any(|h| {
-                    h["command"]
-                        .as_str()
-                        .is_some_and(|c| c.trim_start().starts_with(HOOK_PREFIX))
-                })
-            })
-        });
-        if !present {
+        if !list.iter().any(|g| is_ours_group(g, prefix)) {
             list.extend(groups.as_array().cloned().unwrap_or_default());
             changed = true;
         }
     }
     Ok(changed)
+}
+
+/// Whether a hook group holds one of Lanes' hooks (a command starting with `prefix`).
+fn is_ours_group(group: &Value, prefix: &str) -> bool {
+    group["hooks"].as_array().is_some_and(|hs| {
+        hs.iter().any(|h| {
+            h["command"]
+                .as_str()
+                .is_some_and(|c| c.trim_start().starts_with(prefix))
+        })
+    })
+}
+
+fn grouped_present(settings: &Value, ours: Value, prefix: &str) -> bool {
+    let Value::Object(ours) = ours else {
+        unreachable!("hooks are an object")
+    };
+    ours.keys().all(|event| {
+        settings["hooks"][event]
+            .as_array()
+            .is_some_and(|list| list.iter().any(|g| is_ours_group(g, prefix)))
+    })
+}
+
+/// Take the groups holding Lanes' hooks back out, and nothing else: an event left with no hooks
+/// goes, and so does an empty `hooks`.
+fn remove_grouped(settings: &mut Value, prefix: &str) -> bool {
+    let Some(hooks) = settings.get_mut("hooks").and_then(Value::as_object_mut) else {
+        return false;
+    };
+    let mut changed = false;
+    for list in hooks.values_mut().filter_map(Value::as_array_mut) {
+        let before = list.len();
+        list.retain(|g| !is_ours_group(g, prefix));
+        changed |= list.len() != before;
+    }
+    hooks.retain(|_, v| v.as_array().is_none_or(|l| !l.is_empty()));
+    if hooks.is_empty()
+        && let Some(root) = settings.as_object_mut()
+    {
+        root.remove("hooks");
+    }
+    changed
+}
+
+/// Every Codex hook Lanes adds starts with this.
+const CODEX_PREFIX: &str = "lane hook codex";
+
+/// The hooks Lanes adds to Codex's `hooks.json`: a session in a Codex worktree makes it a lane
+/// (Codex makes its worktrees with Git hooks off, so the post-checkout hook never sees them),
+/// and a shell command that copies the repo is turned down.
+pub fn codex_hooks() -> Value {
+    json!({
+        "SessionStart": [{
+            "matcher": "startup|resume|fork",
+            "hooks": [{ "type": "command", "command": format!("{CODEX_PREFIX} session-start"), "timeout": 300, "statusMessage": "Getting the lane ready" }],
+        }],
+        "PreToolUse": [{
+            "matcher": "^Bash$",
+            "hooks": [{ "type": "command", "command": format!("{CODEX_PREFIX} pre-tool-use"), "timeout": 10 }],
+        }],
+    })
+}
+
+pub fn merge_codex_hooks(file: &mut Value) -> Result<bool> {
+    merge_grouped(file, codex_hooks(), CODEX_PREFIX, "Codex's hooks.json")
+}
+
+pub fn codex_hooks_present(file: &Value) -> bool {
+    grouped_present(file, codex_hooks(), CODEX_PREFIX)
+}
+
+pub fn remove_codex_hooks(file: &mut Value) -> bool {
+    remove_grouped(file, CODEX_PREFIX)
 }
 
 /// Every Cursor hook Lanes adds starts with this.
@@ -279,48 +348,15 @@ pub fn remove_cursor_hooks(file: &mut Value) -> bool {
     changed
 }
 
-/// Whether a hook group holds one of Lanes' hooks.
-fn is_lanes_group(group: &Value) -> bool {
-    group["hooks"].as_array().is_some_and(|hs| {
-        hs.iter().any(|h| {
-            h["command"]
-                .as_str()
-                .is_some_and(|c| c.trim_start().starts_with(HOOK_PREFIX))
-        })
-    })
-}
-
 /// Whether every one of Lanes' hooks is in these Claude Code settings.
 pub fn claude_hooks_present(settings: &Value) -> bool {
-    let Value::Object(ours) = claude_hooks() else {
-        unreachable!("claude_hooks is an object")
-    };
-    ours.keys().all(|event| {
-        settings["hooks"][event]
-            .as_array()
-            .is_some_and(|list| list.iter().any(is_lanes_group))
-    })
+    grouped_present(settings, claude_hooks(), HOOK_PREFIX)
 }
 
 /// Take Lanes' hooks back out of Claude Code settings, and nothing else: an event left with no
 /// hooks goes, and so does an empty `hooks`. Returns whether anything was removed.
 pub fn remove_claude_hooks(settings: &mut Value) -> bool {
-    let Some(hooks) = settings.get_mut("hooks").and_then(Value::as_object_mut) else {
-        return false;
-    };
-    let mut changed = false;
-    for list in hooks.values_mut().filter_map(Value::as_array_mut) {
-        let before = list.len();
-        list.retain(|g| !is_lanes_group(g));
-        changed |= list.len() != before;
-    }
-    hooks.retain(|_, v| v.as_array().is_none_or(|l| !l.is_empty()));
-    if hooks.is_empty()
-        && let Some(root) = settings.as_object_mut()
-    {
-        root.remove("hooks");
-    }
-    changed
+    remove_grouped(settings, HOOK_PREFIX)
 }
 
 /// Write Lanes' hooks into the repo's `.claude/settings.local.json`, and keep that file out of
