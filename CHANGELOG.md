@@ -6,6 +6,29 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ## Unreleased
 
+## 0.0.4 (2026-10-17)
+
+**Claude Code works in lanes.** Run `lane init` once, then `claude -w <name>` starts a session in a lane of its own, with its own ports. Still a preview.
+
+```sh
+cd your-repo
+lane init            # writes lane.toml, and sets up Claude Code's hooks
+claude -w fix-auth   # a new lane; the session starts in it with PORT and LANE_URL set
+lane list            # fix-auth, with its ports and folder
+```
+
+In this version:
+- `claude -w <name>` makes a lane and works in it. Subagents with `isolation: worktree` and background sessions get lanes too, and removing the worktree removes the lane.
+- A session in a lane starts with `PORT`, `VITE_PORT` and `LANE_URL` set, and knows which lane it's in.
+- If Claude Code tries `git worktree add` in a Lanes repo, it's pointed to `lane new` instead.
+- `lane init` puts Claude Code's hooks in `.claude/settings.local.json`, which stays on your machine and out of Git. It also adds a Git hook that turns any other tool's new worktree into a lane, and a short note in `AGENTS.md`. `--no-agents` skips all of it.
+- For every repo at once, there's a Claude Code plugin: `/plugin marketplace add Autter-dev/lanes`, then `/plugin install lanes@autter`.
+
+Not yet:
+- Other agents (Cursor, Codex, Gemini CLI, Copilot) get lanes only through the Git hook: no session context and no `git worktree add` deny.
+- Repos with Git hooks under `core.hooksPath` (Husky, lefthook) don't get the Git hook yet; `lane init` says so.
+- There's no background daemon, no checkpoints or undo, no promote to a pull request, and no database per lane.
+
 ### 2026-10-17
 
 - `16:43` **Added**: Claude Code works in lanes. `claude -w fix-auth` makes a lane, and the session works in it, with no other steps once `lane init` has run. Checked end to end with Claude Code 2.1.300 on Windows. (`20d009c`)

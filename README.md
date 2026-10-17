@@ -178,7 +178,7 @@ macOS, Linux and Windows at launch. On Windows, Lanes is fastest on a Windows 11
 
 ## 07 / Quick start
 
-Lanes is a preview. The lane commands work: `init`, `new`, `exec`, `env`, `list`, `rm` and `adopt`. In 0.0.3, agents don't move into lanes on their own, so start yours inside a lane's folder. Claude Code does from the next release (below). Every option installs the same `lane` command; winget is on the way.
+Lanes is a preview. The lane commands work: `init`, `new`, `exec`, `env`, `list`, `rm` and `adopt`. Claude Code moves into lanes on its own (below). Other agents get lanes when they make a Git worktree; otherwise, start them inside a lane's folder. Every option installs the same `lane` command; winget is on the way.
 
 | On | Install with |
 | --- | --- |
@@ -199,7 +199,7 @@ open http://fix-auth.localhost:4100
 
 Each command ends by saying what to run next, with the lane's own folder, command and URL. `lane --help` lists every command, and every command takes `--help`.
 
-**With Claude Code** (next release, on `main` now): `lane init` also sets up Claude Code's hooks in `.claude/settings.local.json`, which stays on your machine and out of Git. Then `claude -w fix-auth` starts a session in a new lane, with `PORT` and `LANE_URL` set. If Claude Code tries `git worktree add`, it's pointed to `lane new` instead. When you're done, removing the worktree removes the lane. For every repo at once, install the plugin in Claude Code:
+**With Claude Code:** `lane init` also sets up Claude Code's hooks in `.claude/settings.local.json`, which stays on your machine and out of Git. Then `claude -w fix-auth` starts a session in a new lane, with `PORT` and `LANE_URL` set. If Claude Code tries `git worktree add`, it's pointed to `lane new` instead. When you're done, removing the worktree removes the lane. For every repo at once, install the plugin in Claude Code:
 
 ```
 /plugin marketplace add Autter-dev/lanes
