@@ -165,7 +165,10 @@ jobs:
           if gh release view "v$VERSION" >/dev/null 2>&1; then
             gh release upload "v$VERSION" "${assets[@]}" --clobber
           else
-            gh release create "v$VERSION" --verify-tag --title "Lanes $VERSION" --notes-file notes.md "${assets[@]}"
+            title="Lanes $VERSION"
+            # 0.0.x releases are previews. They're still marked latest, so the install commands find them.
+            case "$VERSION" in 0.0.*) title="$title (preview)" ;; esac
+            gh release create "v$VERSION" --verify-tag --title "$title" --notes-file notes.md "${assets[@]}"
           fi
 
   npm:

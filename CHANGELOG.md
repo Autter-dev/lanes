@@ -6,9 +6,19 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ## Unreleased
 
+## 0.0.1 (2026-10-17)
+
+**The first preview.** In this version:
+- `lane` opens the first-run welcome, then the home screen.
+- `lane setup` checks your machine, walks you through fixes, and saves your settings (also with `--json`).
+- `--help` and `--version` work.
+- The lane commands (`init`, `new`, `list`, `exec`, `rm`) are listed but not built yet, and exit with code 3.
+
+It runs on macOS, Linux and Windows, on x64 and arm64.
+
 ### 2026-10-17
 
-- `10:26` **Added**: release pipeline and a download page.
+- `10:26` **Added**: release pipeline and a download page. (`81fe630`)
   - **Release workflow:** pushing a `v<version>` tag builds macOS, Linux and Windows on x64 and arm64, and publishes a GitHub release. It includes `lanes-<version>-<target>` archives, SHA-256 checksums, build attestations, and one-line installers (`lanes-installer.sh`, `lanes-installer.ps1`) with the version stamped in.
   - **Channel files:** the same run renders the Homebrew formula, the Scoop manifest and the winget manifests. Once enabled, it also publishes `@autter/lanes` to npm, with one package per platform so npm downloads only yours.
   - **Tap and bucket:** starting files for the Homebrew tap and the Scoop bucket in `packaging/seeds/`. Each copies its file from the latest release and tests an install.
