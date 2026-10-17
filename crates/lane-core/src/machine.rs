@@ -40,6 +40,61 @@ pub struct Check {
     /// What to do next, for anything that isn't a plain pass.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
+    /// A guided way to clear a `!` or `✗`, when there is one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fix: Option<Fix>,
+}
+
+/// How to clear a problem, step by step. Lanes never runs `command` itself: the user runs it, or
+/// copies it, and then checks again. `open` is a settings page on this machine, opened only when
+/// the user asks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Fix {
+    pub title: String,
+    pub steps: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub open: Option<Settings>,
+}
+
+/// A page in the system's own settings app.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Settings {
+    pub label: &'static str,
+    pub uri: &'static str,
+}
+
+impl Fix {
+    /// How many steps come before the command: it goes after the first step that ends in a colon
+    /// ("Run this in another terminal window:"), or after all of them.
+    pub fn command_after(&self) -> usize {
+        self.steps
+            .iter()
+            .position(|s| s.ends_with(':'))
+            .map_or(self.steps.len(), |i| i + 1)
+    }
+
+    fn new(title: impl Into<String>) -> Fix {
+        Fix {
+            title: title.into(),
+            steps: Vec::new(),
+            command: None,
+            open: None,
+        }
+    }
+    fn step(mut self, step: impl Into<String>) -> Fix {
+        self.steps.push(step.into());
+        self
+    }
+    fn command(mut self, command: Option<String>) -> Fix {
+        self.command = command;
+        self
+    }
+    fn open(mut self, label: &'static str, uri: &'static str) -> Fix {
+        self.open = Some(Settings { label, uri });
+        self
+    }
 }
 
 impl Check {
@@ -55,11 +110,34 @@ impl Check {
             status,
             summary: summary.into(),
             hint: None,
+            fix: None,
         }
     }
     fn hint(mut self, hint: impl Into<String>) -> Check {
         self.hint = Some(hint.into());
         self
+    }
+    fn fix(mut self, fix: Option<Fix>) -> Check {
+        self.fix = fix;
+        self
+    }
+}
+
+/// Whether `cmd` is a program on `PATH`.
+fn on_path(cmd: &str) -> bool {
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&path)
+        .any(|d| d.join(cmd).is_file() || (cfg!(windows) && d.join(format!("{cmd}.exe")).is_file()))
+}
+
+/// `s`, quoted for a shell when it has spaces.
+fn quoted(s: &str) -> String {
+    if s.contains(' ') {
+        format!("\"{s}\"")
+    } else {
+        s.to_string()
     }
 }
 
@@ -180,6 +258,127 @@ fn copies_hint(name: &str) -> &'static str {
     }
 }
 
+/// The repo a fix moves: its folder, its name and where it was cloned from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Place {
+    pub top: PathBuf,
+    pub name: String,
+    pub origin: Option<String>,
+}
+
+fn place(dir: &Path) -> Option<Place> {
+    let (top, _) = repo_info(dir)?;
+    let name = top.file_name()?.to_string_lossy().into_owned();
+    let origin = git(Some(dir), &["remote", "get-url", "origin"]).filter(|o| !o.is_empty());
+    Some(Place { top, name, origin })
+}
+
+/// How to get the repo at `place` into `dest`: a fresh clone when it has a remote (the copy here
+/// stays as it is), otherwise a plain copy of the folder.
+fn move_command(place: &Place, dest: &str, windows: bool) -> String {
+    match &place.origin {
+        Some(origin) => format!("git clone {origin} {}", quoted(dest)),
+        None if windows => format!(
+            "robocopy {} {} /E",
+            quoted(&place.top.display().to_string()),
+            quoted(dest)
+        ),
+        None => format!(
+            "cp -r {} {}",
+            quoted(&place.top.display().to_string()),
+            quoted(dest)
+        ),
+    }
+}
+
+/// The guided fix for a filesystem that can't clone files. `instant` lists the volumes on this
+/// machine that can (Dev Drives on Windows, Btrfs or XFS mounts on Linux).
+pub fn copies_fix(
+    fs: &str,
+    place: Option<&Place>,
+    instant: &[String],
+    free: Option<u64>,
+) -> Option<Fix> {
+    let fs = fs.to_ascii_lowercase();
+    let name = place.map_or("your-repo", |p| p.name.as_str());
+    match fs.as_str() {
+        "ntfs" => Some(match instant.first() {
+            Some(drive) => {
+                let dest = format!("{drive}src\\{name}");
+                Fix::new("Move this repo to your Dev Drive")
+                    .step(format!(
+                        "You already have a Dev Drive at {drive}, where lanes are instant."
+                    ))
+                    .step(match place {
+                        Some(p) if p.origin.is_some() => {
+                            "Clone the repo there. The copy here stays as it is:"
+                        }
+                        Some(_) => "Copy the repo there. The copy here stays as it is:",
+                        None => "Clone or copy your repo there, then work from that folder.",
+                    })
+                    .command(place.map(|p| move_command(p, &dest, true)))
+                    .step(format!(
+                        "Open a terminal in {dest} and run `lane` from there."
+                    ))
+            }
+            None => {
+                let room = match free {
+                    Some(f) if f >= 50_000_000_000 => format!(
+                        "Choose Create Dev Drive, then a new virtual disk of 50 GB or more. This disk has {} free.",
+                        human_bytes(f)
+                    ),
+                    Some(f) => format!(
+                        "Choose Create Dev Drive. It needs 50 GB and this disk has only {} free, so free up space or pick another disk.",
+                        human_bytes(f)
+                    ),
+                    None => {
+                        "Choose Create Dev Drive, then a new virtual disk of 50 GB or more."
+                            .to_string()
+                    }
+                };
+                Fix::new("Make lanes instant with a Dev Drive")
+                    .step("Optional: Lanes already works here. A Dev Drive makes new lanes instant and nearly free on disk. It needs Windows 11 22H2 or later.")
+                    .step("Open Settings › System › Storage › Disks & volumes.")
+                    .step(room)
+                    .step(format!(
+                        "Clone or copy {name} onto the new drive, then run `lane` there. Check again here and Lanes finds the drive."
+                    ))
+                    .open("Disks & volumes", "ms-settings:disksandvolumes")
+            }
+        }),
+        "9p" | "drvfs" => {
+            let dest = format!("~/src/{name}");
+            Some(
+                Fix::new("Move the repo into WSL")
+                    .step("Folders under /mnt/c live on Windows. WSL reads them slowly and can't clone them.")
+                    .step(match place {
+                        Some(_) => "Put the repo in your WSL home instead. The copy on Windows stays as it is:",
+                        None => "Clone your repos into your WSL home (under ~) instead.",
+                    })
+                    .command(place.map(|p| move_command(p, &dest, false)))
+                    .step(format!("Then `cd {dest}` and run `lane` from there.")),
+            )
+        }
+        "ext4" | "ext3" | "ext2" => Some(match instant.first() {
+            Some(mount) => {
+                let dest = format!("{}/src/{name}", mount.trim_end_matches('/'));
+                Fix::new(format!("Keep repos on {mount}"))
+                    .step(format!("{mount} can clone files, so lanes there are instant."))
+                    .step(match place {
+                        Some(_) => "Put the repo there. The copy here stays as it is:",
+                        None => "Clone your repos there.",
+                    })
+                    .command(place.map(|p| move_command(p, &dest, false)))
+                    .step(format!("Then `cd {dest}` and run `lane` from there."))
+            }
+            None => Fix::new("Instant lanes on Linux")
+                .step("Optional: Lanes works here with plain copies.")
+                .step("Lanes is instant on a Btrfs or XFS disk. If you add one, keep your repos there and check again."),
+        }),
+        _ => None,
+    }
+}
+
 fn copies_check(dir: &Path) -> Check {
     match filesystem_name(dir) {
         Some(name) => {
@@ -189,8 +388,15 @@ fn copies_check(dir: &Path) -> Check {
                     Check::new("copies", "Instant lanes", Status::Ok, why.to_string())
                 }
                 CopySupport::Fallback => {
+                    let fix = copies_fix(
+                        &name,
+                        place(dir).as_ref(),
+                        &instant_volumes(),
+                        free_bytes(dir),
+                    );
                     Check::new("copies", "Instant lanes", Status::Warn, why.to_string())
                         .hint(copies_hint(&name))
+                        .fix(fix)
                 }
             }
         }
@@ -212,6 +418,12 @@ pub fn filesystem_name(dir: &Path) -> Option<String> {
 /// Free space on the volume holding `dir`, in bytes.
 pub fn free_bytes(dir: &Path) -> Option<u64> {
     platform::free_bytes(dir)
+}
+
+/// Volumes on this machine where lanes are instant: Dev Drives (`D:\`) on Windows, Btrfs and XFS
+/// mount points on Linux.
+pub fn instant_volumes() -> Vec<String> {
+    platform::instant_volumes()
 }
 
 #[cfg(target_os = "macos")]
@@ -237,6 +449,11 @@ mod platform {
     pub fn free_bytes(dir: &Path) -> Option<u64> {
         let st = statfs(dir)?;
         Some(st.f_bavail as u64 * st.f_bsize as u64)
+    }
+
+    pub fn instant_volumes() -> Vec<String> {
+        // Every Mac volume is APFS already.
+        Vec::new()
     }
 }
 
@@ -283,6 +500,12 @@ mod platform {
         #[allow(clippy::unnecessary_cast)]
         Some(st.f_bavail as u64 * st.f_frsize as u64)
     }
+
+    pub fn instant_volumes() -> Vec<String> {
+        std::fs::read_to_string("/proc/mounts")
+            .map(|m| super::instant_mounts(&m))
+            .unwrap_or_default()
+    }
 }
 
 #[cfg(windows)]
@@ -290,7 +513,8 @@ mod platform {
     use std::os::windows::ffi::OsStrExt;
     use std::path::Path;
     use windows_sys::Win32::Storage::FileSystem::{
-        GetDiskFreeSpaceExW, GetVolumeInformationW, GetVolumePathNameW,
+        GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDrives, GetVolumeInformationW,
+        GetVolumePathNameW,
     };
 
     fn wide(dir: &Path) -> Vec<u16> {
@@ -306,7 +530,11 @@ mod platform {
     }
 
     pub fn filesystem_name(dir: &Path) -> Option<String> {
-        let root = volume_root(dir)?;
+        volume_fs(&volume_root(dir)?)
+    }
+
+    /// The filesystem of the volume at `root`, a NUL-terminated path like `C:\`.
+    fn volume_fs(root: &[u16]) -> Option<String> {
         let mut name = vec![0u16; 64];
         // SAFETY: `root` is NUL-terminated; unused out-parameters are null; `name` has the length we pass.
         let ok = unsafe {
@@ -342,6 +570,24 @@ mod platform {
         };
         (ok != 0).then_some(free)
     }
+
+    pub fn instant_volumes() -> Vec<String> {
+        const DRIVE_FIXED: u32 = 3;
+        // SAFETY: no arguments; returns a bitmask of drive letters.
+        let mask = unsafe { GetLogicalDrives() };
+        (0..26u8)
+            .filter(|i| mask & (1 << i) != 0)
+            .filter_map(|i| {
+                let root = format!("{}:\\", (b'A' + i) as char);
+                let w: Vec<u16> = root.encode_utf16().chain(Some(0)).collect();
+                // SAFETY: `w` is NUL-terminated.
+                if unsafe { GetDriveTypeW(w.as_ptr()) } != DRIVE_FIXED {
+                    return None;
+                }
+                (volume_fs(&w)? == "refs").then_some(root)
+            })
+            .collect()
+    }
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -353,6 +599,28 @@ mod platform {
     pub fn free_bytes(_: &Path) -> Option<u64> {
         None
     }
+    pub fn instant_volumes() -> Vec<String> {
+        Vec::new()
+    }
+}
+
+/// Btrfs and XFS mount points in a `/proc/mounts` listing, leaving out the system's own.
+#[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(dead_code))]
+fn instant_mounts(mounts: &str) -> Vec<String> {
+    const SYSTEM: [&str; 7] = ["/boot", "/snap", "/proc", "/sys", "/run", "/var", "/tmp"];
+    mounts
+        .lines()
+        .filter_map(|l| {
+            let mut f = l.split_whitespace();
+            let (_, at, fs) = (f.next()?, f.next()?, f.next()?);
+            let at = at.replace("\\040", " ");
+            let system = at == "/"
+                || SYSTEM
+                    .iter()
+                    .any(|s| at == *s || at.starts_with(&format!("{s}/")));
+            (matches!(fs, "btrfs" | "xfs") && !system).then_some(at)
+        })
+        .collect()
 }
 
 // ---------- Git ----------
@@ -388,7 +656,78 @@ fn git(dir: Option<&Path>, args: &[&str]) -> Option<String> {
         .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+/// The command that installs (or, with `update`, updates) Git on `os`, using the package
+/// managers `has` finds.
+pub fn git_install_command(os: &str, update: bool, has: impl Fn(&str) -> bool) -> Option<String> {
+    let cmd = match os {
+        "windows" if has("winget") => {
+            if update {
+                "winget upgrade --id Git.Git -e --source winget"
+            } else {
+                "winget install --id Git.Git -e --source winget"
+            }
+        }
+        "macos" if has("brew") => {
+            if update {
+                "brew upgrade git"
+            } else {
+                "brew install git"
+            }
+        }
+        "macos" if !update => "xcode-select --install",
+        "linux" => {
+            [
+                ("apt", "sudo apt install git"),
+                ("dnf", "sudo dnf install git"),
+                ("pacman", "sudo pacman -S git"),
+                ("zypper", "sudo zypper install git"),
+                ("apk", "sudo apk add git"),
+            ]
+            .into_iter()
+            .find(|(pm, _)| has(pm))?
+            .1
+        }
+        _ => return None,
+    };
+    Some(cmd.to_string())
+}
+
+/// The guided fix for a missing or old Git.
+pub fn git_fix(os: &str, update: bool, has: impl Fn(&str) -> bool) -> Fix {
+    let command = git_install_command(os, update, has);
+    let fix = Fix::new(if update { "Update Git" } else { "Install Git" });
+    let fix = match &command {
+        Some(_) => fix
+            .step("Run this in another terminal window:")
+            .command(command)
+            .step("Or download the installer from git-scm.com."),
+        None => fix.step("Install Git with your system's package manager, or from git-scm.com."),
+    };
+    if os == "windows" {
+        fix.step("Then open a new terminal, so it can find Git.")
+    } else {
+        fix
+    }
+}
+
+/// Git installed in its usual place on Windows, but not on this terminal's `PATH` yet, as happens
+/// right after installing it.
+fn git_off_path() -> Option<PathBuf> {
+    if !cfg!(windows) {
+        return None;
+    }
+    let machine = std::env::var_os("ProgramFiles").map(|b| PathBuf::from(b).join("Git"));
+    let user =
+        std::env::var_os("LOCALAPPDATA").map(|b| PathBuf::from(b).join("Programs").join("Git"));
+    [machine, user]
+        .into_iter()
+        .flatten()
+        .map(|git| git.join("cmd").join("git.exe"))
+        .find(|p| p.is_file())
+}
+
 fn git_check() -> Check {
+    let os = std::env::consts::OS;
     match git(None, &["--version"])
         .as_deref()
         .and_then(parse_git_version)
@@ -399,14 +738,33 @@ fn git_check() -> Check {
         Some((_, _, shown)) => {
             Check::new("git", "Git", Status::Warn, format!("git {shown} is old"))
                 .hint("Update Git to 2.30 or later for the best results.")
+                .fix(Some(git_fix(os, true, on_path)))
         }
-        None => Check::new(
-            "git",
-            "Git",
-            Status::Fail,
-            "Git isn't installed or isn't on PATH",
-        )
-        .hint("Install Git from git-scm.com, then run `lane setup` again."),
+        None => match git_off_path() {
+            Some(path) => Check::new(
+                "git",
+                "Git",
+                Status::Warn,
+                "Git is installed, but this terminal can't see it yet",
+            )
+            .hint("Open a new terminal, then run `lane` again.")
+            .fix(Some(
+                Fix::new("Open a new terminal")
+                    .step(format!(
+                        "Git is at {}, but this terminal started before Git was added to PATH.",
+                        path.display()
+                    ))
+                    .step("Close this terminal, open a new one, and run `lane` again."),
+            )),
+            None => Check::new(
+                "git",
+                "Git",
+                Status::Fail,
+                "Git isn't installed or isn't on PATH",
+            )
+            .hint("Install Git, then check again.")
+            .fix(Some(git_fix(os, false, on_path))),
+        },
     }
 }
 
@@ -596,11 +954,32 @@ pub fn human_bytes(bytes: u64) -> String {
     }
 }
 
+/// The guided fix for a disk that's nearly full.
+pub fn disk_fix(os: &str) -> Fix {
+    let fix = Fix::new("Free up some space");
+    let fix = match os {
+        "windows" => fix
+            .step("Storage Sense clears temporary files and the Recycle Bin for you.")
+            .open("Storage Sense", "ms-settings:storagesense"),
+        "macos" => fix
+            .step("Storage settings show what's using space and what's safe to remove.")
+            .open(
+                "Storage settings",
+                "x-apple.systempreferences:com.apple.settings.Storage",
+            ),
+        _ => fix
+            .step("See the biggest folders in your home:")
+            .command(Some("du -sh ~/* 2>/dev/null | sort -h | tail -n 10".into())),
+    };
+    fix.step("Old build folders (target, node_modules, .venv) are often the biggest. Delete the ones you don't need.")
+}
+
 fn disk_check(dir: &Path) -> Check {
     match free_bytes(dir) {
         Some(free) if free >= 10_000_000_000 => Check::new("disk", "Free disk", Status::Ok, format!("{} free", human_bytes(free))),
         Some(free) => Check::new("disk", "Free disk", Status::Warn, format!("only {} free", human_bytes(free)))
-            .hint("Lanes share disk blocks, but builds and databases still need room. Free up some space if you can."),
+            .hint("Lanes share disk blocks, but builds and databases still need room. Free up some space if you can.")
+            .fix(Some(disk_fix(std::env::consts::OS))),
         None => Check::new("disk", "Free disk", Status::Info, "couldn't read free space"),
     }
 }
@@ -623,6 +1002,89 @@ mod tests {
     fn ntfs_hint_mentions_dev_drive() {
         assert!(copies_hint("ntfs").contains("Dev Drive"));
         assert!(copies_hint("9p").contains("WSL"));
+    }
+
+    fn repo(origin: Option<&str>) -> Place {
+        Place {
+            top: PathBuf::from(r"C:\Users\me\code\acme"),
+            name: "acme".into(),
+            origin: origin.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn ntfs_fix_offers_an_existing_dev_drive() {
+        let p = repo(Some("https://github.com/me/acme"));
+        let fix = copies_fix("NTFS", Some(&p), &[r"D:\".into()], Some(200_000_000_000)).unwrap();
+        assert_eq!(fix.title, "Move this repo to your Dev Drive");
+        assert_eq!(
+            fix.command.as_deref(),
+            Some(r"git clone https://github.com/me/acme D:\src\acme")
+        );
+        assert!(fix.open.is_none());
+    }
+
+    #[test]
+    fn ntfs_fix_without_a_dev_drive_opens_settings() {
+        let fix = copies_fix("ntfs", None, &[], Some(225_000_000_000)).unwrap();
+        assert_eq!(fix.title, "Make lanes instant with a Dev Drive");
+        assert_eq!(fix.open.unwrap().uri, "ms-settings:disksandvolumes");
+        assert!(fix.steps.iter().any(|s| s.contains("225 GB free")));
+        let tight = copies_fix("ntfs", None, &[], Some(30_000_000_000)).unwrap();
+        assert!(tight.steps.iter().any(|s| s.contains("only 30.0 GB")));
+    }
+
+    #[test]
+    fn repos_without_a_remote_are_copied() {
+        let p = repo(None);
+        let fix = copies_fix("ntfs", Some(&p), &[r"E:\".into()], None).unwrap();
+        assert_eq!(
+            fix.command.as_deref(),
+            Some(r"robocopy C:\Users\me\code\acme E:\src\acme /E")
+        );
+        let wsl = copies_fix("9p", Some(&p), &[], None).unwrap();
+        assert!(wsl.command.unwrap().starts_with("cp -r "));
+    }
+
+    #[test]
+    fn fast_filesystems_need_no_fix() {
+        assert!(copies_fix("apfs", None, &[], None).is_none());
+        assert!(
+            copies_fix("ext4", None, &["/data".into()], None)
+                .unwrap()
+                .title
+                == "Keep repos on /data"
+        );
+    }
+
+    #[test]
+    fn mounts_that_clone_are_found() {
+        let mounts = "/dev/sda1 / ext4 rw 0 0\n/dev/sdb1 /data btrfs rw 0 0\n/dev/sdc1 /boot/efi xfs rw 0 0\n/dev/sdd1 /mnt/my\\040disk xfs rw 0 0\n";
+        assert_eq!(instant_mounts(mounts), ["/data", "/mnt/my disk"]);
+    }
+
+    #[test]
+    fn git_install_commands_fit_the_machine() {
+        let only = |pm: &'static str| move |c: &str| c == pm;
+        assert_eq!(
+            git_install_command("windows", false, only("winget")).as_deref(),
+            Some("winget install --id Git.Git -e --source winget")
+        );
+        assert_eq!(
+            git_install_command("macos", false, only("none")).as_deref(),
+            Some("xcode-select --install")
+        );
+        assert_eq!(
+            git_install_command("macos", true, only("brew")).as_deref(),
+            Some("brew upgrade git")
+        );
+        assert_eq!(
+            git_install_command("linux", false, only("dnf")).as_deref(),
+            Some("sudo dnf install git")
+        );
+        assert_eq!(git_install_command("linux", false, only("none")), None);
+        let fix = git_fix("linux", false, only("none"));
+        assert!(fix.command.is_none() && fix.steps[0].contains("git-scm.com"));
     }
 
     #[test]

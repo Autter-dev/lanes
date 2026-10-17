@@ -298,5 +298,33 @@ fn print_checks(checks: &[Check]) {
         {
             println!("  {:<15}{hint}", "");
         }
+        if let Some(fix) = c.fix.as_ref().filter(|_| c.status != machine::Status::Ok) {
+            print_fix(fix);
+        }
     }
+}
+
+/// A fix as numbered steps under its check, with the command where it belongs. Nothing is run.
+fn print_fix(fix: &machine::Fix) {
+    let pad = " ".repeat(17);
+    println!("{pad}How to fix: {}", fix.title);
+    let command = || {
+        if let Some(cmd) = &fix.command {
+            println!("{pad}     $ {cmd}");
+        }
+    };
+    let at = fix.command_after();
+    for (n, step) in fix.steps.iter().enumerate() {
+        if n == at {
+            command();
+        }
+        println!("{pad}  {}. {step}", n + 1);
+    }
+    if at >= fix.steps.len() {
+        command();
+    }
+    if let Some(page) = fix.open {
+        println!("{pad}  Settings: {} ({})", page.label, page.uri);
+    }
+    println!("{pad}  Then run `lane setup` to check again.");
 }

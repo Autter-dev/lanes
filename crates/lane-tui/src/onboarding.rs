@@ -1,6 +1,11 @@
 //! The first-run onboarding: six steps along one lane. Welcome, your machine, how a lane works,
 //! privacy, sign-in (optional, disabled until the gateway opens) and ready.
+//!
+//! On the machine step, every problem with a fix opens as a card of plain steps. The card copies
+//! its command and opens a settings page, each on a key press, and checks again live. It never
+//! runs the command itself.
 
+use crate::actions;
 use crate::theme::Theme;
 use crate::widgets;
 use crate::wrap::wrap;
@@ -11,7 +16,7 @@ use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Instant;
 
 const STEPS: [&str; 6] = [
@@ -81,6 +86,20 @@ const EXPLAINED: [Explained; 4] = [
     },
 ];
 
+/// A message in the footer for a few seconds: good news, or something to know.
+struct Notice {
+    text: String,
+    good: bool,
+    at: f64,
+}
+
+/// A check running again, with what it said before.
+struct Recheck {
+    i: usize,
+    before: Check,
+    back: bool,
+}
+
 pub struct Onboarding {
     step: usize,
     explainer_step: usize,
@@ -90,9 +109,14 @@ pub struct Onboarding {
     checks: Vec<Option<Check>>,
     revealed: usize,
     last_reveal: f64,
-    rx: Option<Receiver<(usize, Check)>>,
+    tx: Sender<(usize, Check)>,
+    rx: Receiver<(usize, Check)>,
+    rechecking: Vec<Recheck>,
+    /// The problem chosen on the machine step, and the one whose fix card is open.
+    selected: usize,
+    fixing: Option<usize>,
     help: bool,
-    notice: Option<(&'static str, f64)>,
+    notice: Option<Notice>,
     started: Instant,
     /// The step the marker glides from, and when the move started.
     from_step: usize,
@@ -104,17 +128,20 @@ pub struct Onboarding {
 impl Onboarding {
     /// Start the onboarding; the machine checks begin at once, in the background.
     pub fn new(input: Input) -> Onboarding {
-        let (tx, rx) = mpsc::channel();
-        for (i, id) in CHECK_IDS.iter().enumerate() {
-            let tx = tx.clone();
-            let dir = input.dir.clone();
-            std::thread::spawn(move || {
-                let _ = tx.send((i, machine::run_check(id, &dir)));
-            });
+        let o = Onboarding::blank(input);
+        for i in 0..CHECK_IDS.len() {
+            o.spawn_check(i);
         }
-        let mut o = Onboarding::blank(input);
-        o.rx = Some(rx);
         o
+    }
+
+    fn spawn_check(&self, i: usize) {
+        let tx = self.tx.clone();
+        let dir = self.dir.clone();
+        let id = CHECK_IDS[i];
+        std::thread::spawn(move || {
+            let _ = tx.send((i, machine::run_check(id, &dir)));
+        });
     }
 
     /// Start with checks already known (for tests and still previews).
@@ -127,6 +154,7 @@ impl Onboarding {
 
     fn blank(input: Input) -> Onboarding {
         let forced_off = input.telemetry_forced_off;
+        let (tx, rx) = mpsc::channel();
         Onboarding {
             step: 0,
             explainer_step: 0,
@@ -136,7 +164,11 @@ impl Onboarding {
             checks: vec![None; CHECK_IDS.len()],
             revealed: 0,
             last_reveal: 0.0,
-            rx: None,
+            tx,
+            rx,
+            rechecking: Vec::new(),
+            selected: 0,
+            fixing: None,
             help: false,
             notice: None,
             started: Instant::now(),
@@ -170,14 +202,149 @@ impl Onboarding {
         self.revealed == self.checks.len()
     }
 
+    fn say(&mut self, text: impl Into<String>, good: bool) {
+        self.notice = Some(Notice {
+            text: text.into(),
+            good,
+            at: self.elapsed(),
+        });
+    }
+
+    /// The problems that have a fix, in the order they're listed.
+    fn fixable(&self) -> Vec<usize> {
+        (0..self.revealed)
+            .filter(|&i| {
+                self.checks[i]
+                    .as_ref()
+                    .is_some_and(|c| c.fix.is_some() && c.status != Status::Ok)
+            })
+            .collect()
+    }
+
+    /// The chosen problem: the one picked with the arrows, or else the first.
+    fn chosen(&self) -> Option<usize> {
+        let fixable = self.fixable();
+        fixable
+            .iter()
+            .copied()
+            .find(|&i| i == self.selected)
+            .or(fixable.first().copied())
+    }
+
+    fn is_rechecking(&self, i: usize) -> bool {
+        self.rechecking.iter().any(|r| r.i == i && !r.back)
+    }
+
+    /// Run checks again in the background; `tick` says what changed once they're all back.
+    fn recheck(&mut self, which: Vec<usize>) {
+        if !self.rechecking.is_empty() {
+            return;
+        }
+        for i in which {
+            if let Some(before) = self.checks[i].clone() {
+                self.rechecking.push(Recheck {
+                    i,
+                    before,
+                    back: false,
+                });
+                self.spawn_check(i);
+            }
+        }
+    }
+
+    fn fix_open(&self) -> Option<&machine::Fix> {
+        self.checks[self.fixing?].as_ref()?.fix.as_ref()
+    }
+
+    fn copy_command(&mut self) {
+        let Some(cmd) = self.fix_open().and_then(|f| f.command.clone()) else {
+            self.say("This fix has no command to copy.", false);
+            return;
+        };
+        if actions::copy(&cmd) {
+            self.say(
+                "Copied. Paste it into another terminal, run it, then press r.",
+                true,
+            );
+        } else {
+            self.say(
+                "Couldn't reach the clipboard. Select the command with the mouse instead.",
+                false,
+            );
+        }
+    }
+
+    fn open_settings(&mut self) {
+        let Some(page) = self.fix_open().and_then(|f| f.open) else {
+            self.say("This fix has no settings page to open.", false);
+            return;
+        };
+        if actions::open(page.uri) {
+            self.say(
+                format!(
+                    "Opened {}. Come back and press r when you're done.",
+                    page.label
+                ),
+                true,
+            );
+        } else {
+            self.say(
+                format!(
+                    "Couldn't open {} from here. Open it yourself, then press r.",
+                    page.label
+                ),
+                false,
+            );
+        }
+    }
+
+    /// Say what a finished re-check found: fixed, changed, or the same as before.
+    fn report(&mut self, done: Vec<Recheck>) {
+        let rank = |s: Status| match s {
+            Status::Ok => 0,
+            Status::Info => 1,
+            Status::Warn => 2,
+            Status::Fail => 3,
+        };
+        let now = |i: usize| self.checks[i].as_ref();
+        let fixed: Vec<&'static str> = done
+            .iter()
+            .filter(|r| now(r.i).is_some_and(|c| rank(c.status) < rank(r.before.status)))
+            .map(|r| r.before.label)
+            .collect();
+        let changed = done.iter().any(|r| now(r.i) != Some(&r.before));
+        // A card whose problem is gone has nothing left to show.
+        if let Some(i) = self.fixing
+            && self.checks[i]
+                .as_ref()
+                .is_some_and(|c| c.fix.is_none() || c.status == Status::Ok)
+        {
+            self.fixing = None;
+        }
+        match (fixed.as_slice(), changed) {
+            ([one], _) => self.say(format!("{one}: fixed."), true),
+            ([_, ..], _) => self.say(format!("Fixed: {}.", fixed.join(", ")), true),
+            ([], true) => self.say("Something changed, and the steps are updated.", true),
+            ([], false) if done.len() == 1 => {
+                self.say("No change yet. Finish the steps, then check again.", false)
+            }
+            ([], false) => self.say("Checked again. Nothing changed.", false),
+        }
+    }
+
     /// Take in finished checks and reveal them one by one. True if anything changed.
     pub fn tick(&mut self) -> bool {
         let mut changed = false;
-        if let Some(rx) = &self.rx {
-            while let Ok((i, check)) = rx.try_recv() {
-                self.checks[i] = Some(check);
-                changed = true;
+        while let Ok((i, check)) = self.rx.try_recv() {
+            self.checks[i] = Some(check);
+            if let Some(r) = self.rechecking.iter_mut().find(|r| r.i == i) {
+                r.back = true;
             }
+            changed = true;
+        }
+        if !self.rechecking.is_empty() && self.rechecking.iter().all(|r| r.back) {
+            let done = std::mem::take(&mut self.rechecking);
+            self.report(done);
         }
         let now = self.elapsed();
         let gap = if self.animate { 0.14 } else { 0.0 };
@@ -192,8 +359,8 @@ impl Onboarding {
                 break;
             }
         }
-        if let Some((_, at)) = self.notice
-            && now - at > 3.0
+        if let Some(at) = self.notice.as_ref().map(|n| n.at)
+            && now - at > 4.0
         {
             self.notice = None;
             changed = true;
@@ -205,14 +372,15 @@ impl Onboarding {
     pub fn animating(&self) -> bool {
         let moving = match self.step {
             0 => true,
-            MACHINE => !self.checks_done(),
+            MACHINE => !self.checks_done() || !self.rechecking.is_empty(),
             EXPLAINER => self.explainer_step > 0,
             PRIVACY => self.telemetry,
             SIGN_IN | READY => true,
             _ => false,
         };
         let gliding = self.elapsed() - self.moved_at < GLIDE_SECS + 0.05;
-        (self.animate && (moving || gliding)) || (self.step == MACHINE && !self.checks_done())
+        let waiting = !self.checks_done() || !self.rechecking.is_empty();
+        (self.animate && (moving || gliding)) || (self.step == MACHINE && waiting)
     }
 
     pub fn telemetry(&self) -> bool {
@@ -271,8 +439,44 @@ impl Onboarding {
             }
             return None;
         }
+        if self.step == MACHINE && self.fixing.is_some() {
+            match key.code {
+                KeyCode::Char('q') => return Some(Outcome::Quit),
+                KeyCode::Char('?') => self.help = true,
+                KeyCode::Char('c') => self.copy_command(),
+                KeyCode::Char('o') => self.open_settings(),
+                KeyCode::Char('r') => self.recheck(self.fixing.into_iter().collect()),
+                KeyCode::Esc
+                | KeyCode::Enter
+                | KeyCode::Left
+                | KeyCode::Backspace
+                | KeyCode::Char('h') => self.fixing = None,
+                _ => {}
+            }
+            return None;
+        }
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => return Some(Outcome::Quit),
+            KeyCode::Char('f') if self.step == MACHINE => match self.chosen() {
+                Some(i) => self.fixing = Some(i),
+                None => self.say("Nothing here needs fixing.", true),
+            },
+            KeyCode::Char('r') if self.step == MACHINE && self.checks_done() => {
+                self.recheck((0..self.checks.len()).collect())
+            }
+            KeyCode::Up | KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('k')
+                if self.step == MACHINE =>
+            {
+                let fixable = self.fixable();
+                if let Some(at) = self
+                    .chosen()
+                    .and_then(|c| fixable.iter().position(|&i| i == c))
+                {
+                    let n = fixable.len();
+                    let down = matches!(key.code, KeyCode::Down | KeyCode::Char('j'));
+                    self.selected = fixable[if down { (at + 1) % n } else { (at + n - 1) % n }];
+                }
+            }
             KeyCode::Char('?') => self.help = true,
             KeyCode::Enter | KeyCode::Right | KeyCode::Tab | KeyCode::Char('l') => {
                 return self.next();
@@ -282,10 +486,10 @@ impl Onboarding {
             }
             KeyCode::Char(' ') if self.step == PRIVACY => {
                 if self.forced_off.is_some() {
-                    self.notice = Some((
+                    self.say(
                         "It stays off while that setting is in your environment.",
-                        self.elapsed(),
-                    ));
+                        false,
+                    );
                 } else {
                     self.telemetry = !self.telemetry;
                 }
@@ -293,10 +497,10 @@ impl Onboarding {
             KeyCode::Up | KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('k')
                 if self.step == SIGN_IN =>
             {
-                self.notice = Some((
+                self.say(
                     "Sign-in isn't available yet. It opens with the gateway.",
-                    self.elapsed(),
-                ));
+                    false,
+                );
             }
             _ => {}
         }
@@ -325,7 +529,10 @@ impl Onboarding {
         self.render_header(frame, header);
         let lines = match self.step {
             0 => self.welcome(body),
-            MACHINE => self.machine(body.width),
+            MACHINE => match self.fixing {
+                Some(i) => self.fix_card(i, body.width),
+                None => self.machine(body.width),
+            },
             EXPLAINER => self.explainer(body),
             PRIVACY => self.privacy(body.width),
             SIGN_IN => self.sign_in(body.width),
@@ -369,14 +576,46 @@ impl Onboarding {
 
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
         let th = &self.theme;
+        let open_label;
         let mut keys: Vec<(&str, &str)> = match self.step {
             0 => vec![("Enter", "start")],
+            MACHINE if self.fixing.is_some() => {
+                let fix = self.fix_open();
+                let mut k = Vec::new();
+                if fix.is_some_and(|f| f.command.is_some()) {
+                    k.push(("c", "copy command"));
+                }
+                if let Some(page) = fix.and_then(|f| f.open) {
+                    open_label = format!("open {}", page.label);
+                    k.push(("o", open_label.as_str()));
+                }
+                k.extend([("r", "check again"), ("Esc", "back")]);
+                k
+            }
+            MACHINE if self.chosen().is_some() => {
+                let mut k = vec![("f", "fix it")];
+                if self.fixable().len() > 1 {
+                    k.push(("↑↓", "choose"));
+                }
+                k.extend([("r", "check again"), ("Enter", "next"), ("←", "back")]);
+                k
+            }
             EXPLAINER => vec![("→", "next"), ("←", "back")],
             PRIVACY => vec![("Space", "switch"), ("Enter", "next"), ("←", "back")],
             READY => vec![("Enter", "save and finish"), ("←", "back")],
             _ => vec![("Enter", "next"), ("←", "back")],
         };
         keys.extend([("?", "help"), ("q", "quit")]);
+        // Drop keys from the end until the rest fit, so none is ever cut in half.
+        let needed = |keys: &[(&str, &str)]| {
+            keys.iter()
+                .map(|(k, what)| k.chars().count() + what.chars().count() + 1)
+                .sum::<usize>()
+                + keys.len().saturating_sub(1) * 5
+        };
+        while keys.len() > 1 && needed(&keys) > area.width as usize {
+            keys.pop();
+        }
         let mut spans = Vec::new();
         for (i, (k, what)) in keys.iter().enumerate() {
             if i > 0 {
@@ -385,11 +624,18 @@ impl Onboarding {
             spans.push(Span::styled(*k, th.key()));
             spans.push(Span::styled(format!(" {what}"), th.muted()));
         }
-        let line = match self.notice {
-            Some((msg, _)) => Line::from(vec![
-                Span::styled("! ", th.warn()),
-                Span::styled(msg, th.warn()),
-            ]),
+        let line = match &self.notice {
+            Some(n) => {
+                let (mark, style) = if n.good {
+                    ("✓ ", th.accent_strong())
+                } else {
+                    ("! ", th.warn())
+                };
+                Line::from(vec![
+                    Span::styled(mark, style),
+                    Span::styled(fit(&n.text, (area.width as usize).saturating_sub(2)), style),
+                ])
+            }
             None => Line::from(spans),
         };
         frame.render_widget(Paragraph::new(line), area);
@@ -398,7 +644,7 @@ impl Onboarding {
     fn render_help(&self, frame: &mut Frame, area: Rect) {
         let th = &self.theme;
         let w = 52.min(area.width - 4);
-        let h = 13.min(area.height - 2);
+        let h = 15.min(area.height - 2);
         let popup = Rect {
             x: area.x + (area.width - w) / 2,
             y: area.y + (area.height - h) / 2,
@@ -415,6 +661,8 @@ impl Onboarding {
             Line::default(),
             row("Enter  →", "next step"),
             row("←", "previous step"),
+            row("f  ↑↓", "fix a problem (Your machine)"),
+            row("r", "check this machine again"),
             row("Space", "switch the install count (Privacy)"),
             row("?", "show or hide this help"),
             row("q  Esc", "quit; nothing is saved"),
@@ -491,7 +739,7 @@ impl Onboarding {
             Line::default(),
         ];
         for (i, id) in CHECK_IDS.iter().enumerate() {
-            match (&self.checks[i], i < self.revealed) {
+            match (&self.checks[i], i < self.revealed && !self.is_rechecking(i)) {
                 (Some(c), true) => {
                     // The summary wraps under itself, so long results never run off the edge.
                     let mut parts =
@@ -508,6 +756,24 @@ impl Onboarding {
                             lines.push(Line::styled(l, th.muted()));
                         }
                     }
+                    if let Some(fix) = c.fix.as_ref().filter(|_| c.status != Status::Ok) {
+                        let room = (width as usize).saturating_sub(label_w + 2 + 2 + 11);
+                        let pad = " ".repeat(label_w + 2);
+                        lines.push(if self.chosen() == Some(i) {
+                            Line::from(vec![
+                                Span::raw(pad),
+                                Span::styled("› ", th.accent_strong()),
+                                Span::styled(fit(&fix.title, room), th.accent_strong()),
+                                Span::styled("   f to fix", th.muted()),
+                            ])
+                        } else {
+                            Line::from(vec![
+                                Span::raw(pad),
+                                Span::raw("  "),
+                                Span::styled(fit(&fix.title, room), th.text()),
+                            ])
+                        });
+                    }
                 }
                 _ => {
                     let mut row = widgets::runner(th, self.t() + i as f64 * 0.37, 2);
@@ -517,15 +783,90 @@ impl Onboarding {
                         th.muted(),
                     ));
                     row.extend(widgets::runner(th, self.t() * 1.3 + i as f64, 8));
-                    row.push(Span::styled(" checking", th.muted()));
+                    row.push(Span::styled(
+                        if self.is_rechecking(i) {
+                            " checking again"
+                        } else {
+                            " checking"
+                        },
+                        th.muted(),
+                    ));
                     lines.push(Line::from(row));
                 }
             }
         }
         lines.push(Line::default());
-        if self.checks_done() {
+        if self.checks_done() && self.rechecking.is_empty() {
             lines.push(self.machine_summary());
         }
+        lines
+    }
+
+    /// A problem's fix as plain numbered steps, with its command where it belongs.
+    fn fix_card(&self, i: usize, width: u16) -> Vec<Line<'static>> {
+        let th = &self.theme;
+        let Some(c) = self.checks[i].as_ref() else {
+            return Vec::new();
+        };
+        let Some(fix) = c.fix.as_ref() else {
+            return Vec::new();
+        };
+        let w = (width as usize).min(88);
+        let mut lines = vec![if self.is_rechecking(i) {
+            let mut row = widgets::runner(th, self.t(), 2);
+            row.push(Span::styled(format!(" {}", c.label), th.strong()));
+            row.push(Span::styled("  checking again", th.muted()));
+            Line::from(row)
+        } else {
+            Line::from(vec![
+                Span::styled(format!("{} ", c.status.symbol()), th.status(c.status)),
+                Span::styled(format!("{}  ", c.label), th.strong()),
+                Span::styled(
+                    fit(&c.summary, w.saturating_sub(c.label.chars().count() + 4)),
+                    th.muted(),
+                ),
+            ])
+        }];
+        lines.push(Line::default());
+        lines.push(Line::styled(fix.title.clone(), th.accent_strong()));
+        lines.push(Line::default());
+        let command = |lines: &mut Vec<Line<'static>>| {
+            if let Some(cmd) = &fix.command {
+                for (n, part) in wrap(cmd, w.saturating_sub(6), 0).into_iter().enumerate() {
+                    lines.push(Line::from(vec![
+                        Span::styled(if n == 0 { "    $ " } else { "      " }, th.muted()),
+                        Span::styled(part, th.accent()),
+                    ]));
+                }
+            }
+        };
+        let at = fix.command_after();
+        for (n, step) in fix.steps.iter().enumerate() {
+            if n == at {
+                command(&mut lines);
+            }
+            let mut parts = wrap(step, w, 4).into_iter();
+            let first = parts.next().unwrap_or_default();
+            lines.push(Line::from(vec![
+                Span::styled(format!("{:>2}  ", n + 1), th.muted()),
+                Span::styled(first.trim_start().to_string(), th.text()),
+            ]));
+            lines.extend(parts.map(|l| Line::styled(l, th.text())));
+        }
+        if at >= fix.steps.len() {
+            command(&mut lines);
+        }
+        lines.push(Line::default());
+        let after = if fix.command.is_some() {
+            "Lanes never runs this for you. Copy it with c, run it, then press r to check again."
+        } else {
+            "When you've done this, press r and Lanes checks again."
+        };
+        lines.extend(
+            wrap(after, w, 0)
+                .into_iter()
+                .map(|l| Line::styled(l, th.muted())),
+        );
         lines
     }
 

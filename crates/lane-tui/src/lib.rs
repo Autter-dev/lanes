@@ -4,6 +4,7 @@
 //! The terminal is always restored on quit, on Ctrl-C and on a panic (`ratatui::init` installs a
 //! panic hook that restores it first).
 
+mod actions;
 pub mod home;
 pub mod onboarding;
 pub mod theme;

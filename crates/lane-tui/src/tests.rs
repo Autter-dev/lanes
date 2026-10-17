@@ -32,6 +32,7 @@ fn check(
         status,
         summary: summary.into(),
         hint: hint.map(Into::into),
+        fix: None,
     }
 }
 
@@ -320,4 +321,124 @@ fn welcome_shows_the_big_wordmark_when_there_is_room() {
         "falls back to one line when short"
     );
     assert!(short.contains("Every agent gets its own lane."));
+}
+
+fn with_fixes() -> Onboarding {
+    use lane_core::machine::{Fix, Settings};
+    let mut checks = sample_checks();
+    checks[1].fix = Some(Fix {
+        title: "Make lanes instant with a Dev Drive".into(),
+        steps: vec![
+            "Open Settings › System › Storage › Disks & volumes.".into(),
+            "Choose Create Dev Drive.".into(),
+        ],
+        command: None,
+        open: Some(Settings {
+            label: "Disks & volumes",
+            uri: "ms-settings:disksandvolumes",
+        }),
+    });
+    checks[2] = check(
+        "git",
+        "Git",
+        Status::Fail,
+        "Git isn't installed or isn't on PATH",
+        Some("Install Git, then check again."),
+    );
+    checks[2].fix = Some(Fix {
+        title: "Install Git".into(),
+        steps: vec![
+            "Run this in another terminal window:".into(),
+            "Then open a new terminal.".into(),
+        ],
+        command: Some("winget install --id Git.Git -e --source winget".into()),
+        open: None,
+    });
+    let mut app = Onboarding::with_checks(input(None), checks);
+    app.go_to(1, 0);
+    app
+}
+
+#[test]
+fn problems_offer_a_fix_and_arrows_choose_one() {
+    let mut app = with_fixes();
+    let text = screen_text(&app, 100, 30);
+    assert!(text.contains("› Make lanes instant with a Dev Drive   f to fix"));
+    assert!(
+        text.contains("  Install Git"),
+        "the other fix is listed, not chosen"
+    );
+    assert!(text.contains("f fix it"));
+    app.on_key(key(KeyCode::Down));
+    let text = screen_text(&app, 100, 30);
+    assert!(text.contains("› Install Git"));
+    app.on_key(key(KeyCode::Down));
+    assert!(
+        screen_text(&app, 100, 30).contains("› Make lanes instant"),
+        "wraps around"
+    );
+}
+
+#[test]
+fn the_fix_card_shows_steps_and_the_command_in_place() {
+    let mut app = with_fixes();
+    app.on_key(key(KeyCode::Down));
+    assert_eq!(app.on_key(key(KeyCode::Char('f'))), None);
+    let text = screen_text(&app, 100, 30);
+    let step1 = text
+        .find(" 1  Run this in another terminal window:")
+        .expect(&text);
+    let cmd = text.find("$ winget install --id Git.Git").expect(&text);
+    let step2 = text.find(" 2  Then open a new terminal.").expect(&text);
+    assert!(
+        step1 < cmd && cmd < step2,
+        "the command sits under the step that asks for it"
+    );
+    assert!(text.contains("Lanes never runs this for you"));
+    assert!(text.contains("c copy command"));
+    assert!(text.contains("r check again"));
+    // Esc closes the card instead of quitting.
+    assert_eq!(app.on_key(key(KeyCode::Esc)), None);
+    assert!(screen_text(&app, 100, 30).contains("Checking this machine"));
+}
+
+#[test]
+fn a_settings_fix_offers_to_open_the_page() {
+    let mut app = with_fixes();
+    app.on_key(key(KeyCode::Char('f')));
+    let text = screen_text(&app, 100, 30);
+    assert!(text.contains("o open Disks & volumes"));
+    assert!(!text.contains("c copy command"), "no command, no copy key");
+    for (w, h) in [(80, 24), (60, 18)] {
+        let text = screen_text(&app, w, h);
+        assert!(
+            text.contains("Make lanes instant with a Dev Drive"),
+            "{w}x{h}:\n{text}"
+        );
+    }
+}
+
+#[test]
+fn checking_again_runs_live_and_reports() {
+    let mut app = with_fixes();
+    app.on_key(key(KeyCode::Char('f')));
+    app.on_key(key(KeyCode::Char('r')));
+    assert!(app.animating(), "keeps drawing while the check runs");
+    assert!(screen_text(&app, 100, 30).contains("checking again"));
+    let start = std::time::Instant::now();
+    while app.animating() && start.elapsed().as_secs() < 30 {
+        app.tick();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(!app.animating(), "the re-check came back");
+    let text = screen_text(&app, 100, 30);
+    // The real check replaced the fake one, so something changed either way.
+    assert!(text.contains('✓') || text.contains('!'), "{text}");
+}
+
+#[test]
+fn enter_still_moves_on_from_the_machine_step() {
+    let mut app = with_fixes();
+    app.on_key(key(KeyCode::Enter));
+    assert!(screen_text(&app, 100, 30).contains("How a lane works"));
 }

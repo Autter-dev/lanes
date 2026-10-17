@@ -7,6 +7,7 @@ use lane_tui::onboarding::{Input, Onboarding};
 use lane_tui::theme::Theme;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 fn main() {
     let mut args = std::env::args().skip(1).map(|a| a.parse::<u16>().ok());
@@ -17,6 +18,7 @@ fn main() {
     let steps = [
         (0, 0),
         (1, 0),
+        (1, 1),
         (2, 0),
         (2, 1),
         (2, 2),
@@ -37,6 +39,10 @@ fn main() {
             checks.clone(),
         );
         app.go_to(step, ex);
+        if (step, ex) == (1, 1) {
+            // The fix card for the first problem, if there is one.
+            app.on_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE));
+        }
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
         terminal.draw(|f| app.render(f)).unwrap();
         let buf = terminal.backend().buffer();
