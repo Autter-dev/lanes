@@ -6,6 +6,10 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ## Unreleased
 
+### 2026-10-17
+
+- `16:28` **Changed**: the website offers 0.0.3: the download page's archives, and a 0.0.3 entry on the releases page.
+
 ## 0.0.3 (2026-10-17)
 
 **Lanes now tells you what to run next.** A small update to 0.0.2, for testers.
@@ -27,16 +31,16 @@ In this version:
 
 ### 2026-10-17
 
-- `16:18` **Added**: every command that changes something ends by saying what to run next.
+- `16:18` **Added**: every command that changes something ends by saying what to run next. (`f489625`)
   - **After `lane new` and `lane adopt`:** `cd` into the lane to start your agent there, and `lane exec <name> -- <dev command>` with the port written out, and the URL it serves.
   - **After `lane init`:** `lane new fix-auth`, and `git add lane.toml` so teammates get the same lanes.
   - **After `lane rm`, or an empty `lane list`:** `lane list`, or how to make the first lane.
   - **A repo without `lane.toml`** is told to run `lane init` first.
   - **With `--json`:** the same steps are in `next`, as `{"run", "why"}`.
-- `16:18` **Added**: the home screen lists the lanes of the repo you're in (every lane outside a repo), with their URLs and state. It also gives one next step: set up the repo, make the first lane, or run the app in one.
-- `16:18` **Fixed**: the welcome's "You're set" screen marked `lane init` and `lane new` as "soon", though both work since 0.0.2.
-- `16:18` **Fixed**: the README and the website said to open `http://fix-auth.localhost`. Until the daemon serves lane URLs, the address needs the lane's port, like `http://fix-auth.localhost:4100`. The README's command table now splits what works from what's coming. `lane exec --help` quotes `'$PORT'`, so your own shell leaves it for Lanes.
-- `16:18` **Changed**: the download page starts with the quickest install for your system, then each system's options. On Windows the PowerShell script comes first, with nothing to install beforehand. The note about unsigned builds moved below the archives, where its one extra step applies.
+- `16:18` **Added**: the home screen lists the lanes of the repo you're in (every lane outside a repo), with their URLs and state. It also gives one next step: set up the repo, make the first lane, or run the app in one. (`f489625`)
+- `16:18` **Fixed**: the welcome's "You're set" screen marked `lane init` and `lane new` as "soon", though both work since 0.0.2. (`f489625`)
+- `16:18` **Fixed**: the README and the website said to open `http://fix-auth.localhost`. Until the daemon serves lane URLs, the address needs the lane's port, like `http://fix-auth.localhost:4100`. The README's command table now splits what works from what's coming. `lane exec --help` quotes `'$PORT'`, so your own shell leaves it for Lanes. (`f489625`)
+- `16:18` **Changed**: the download page starts with the quickest install for your system, then each system's options. On Windows the PowerShell script comes first, with nothing to install beforehand. The note about unsigned builds moved below the archives, where its one extra step applies. (`f489625`)
 - `15:25` **Changed**: the website offers 0.0.2: the download page's archives, and a 0.0.2 entry on the releases page above 0.0.1.
 
 ## 0.0.2 (2026-10-17)
