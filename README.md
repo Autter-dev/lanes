@@ -177,10 +177,18 @@ macOS, Linux and Windows at launch. On Windows, Lanes is fastest on a Windows 11
 
 ## 07 / Quick start
 
-Install commands go live with the first release.
+Install commands go live with the first release. Every one installs the same `lane` command.
+
+| On | Install with |
+| --- | --- |
+| macOS, Linux, WSL | `brew install autter-dev/tap/lanes`, or `curl -fsSL https://github.com/Autter-dev/lanes/releases/latest/download/lanes-installer.sh \| sh` |
+| Windows | `winget install Autter.Lanes`, or `scoop install lanes` after `scoop bucket add autter https://github.com/Autter-dev/scoop-bucket`, or `irm https://github.com/Autter-dev/lanes/releases/latest/download/lanes-installer.ps1 \| iex` |
+| Anywhere with Node | `npm install -g @autter/lanes` |
+
+Or download an archive from [GitHub Releases](https://github.com/Autter-dev/lanes/releases).
 
 ```sh
-brew install lane            # or: cargo install lane / npm i -g <package>
+brew install autter-dev/tap/lanes
 cd your-repo
 lane init                    # finds your stack and sets up your agents
 lane new fix-auth            # a ready-to-run lane

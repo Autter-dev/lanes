@@ -20,7 +20,7 @@ import { site, race, helps, extras, agents, quickstart, photos } from '../data/s
             <a class="btn" href={site.repo}>Star on GitHub</a>
             <div class="install">
               <span class="install__prompt" aria-hidden="true">$</span>
-              <code id="install-cmd">{site.install.command}</code>
+              <code id="install-cmd">{site.install.command.split(' ').map((word, i) => <>{i > 0 && ' '}<span class="install__word">{word}</span></>)}</code>
               <button class="install__copy" type="button" data-copy="#install-cmd" aria-label="Copy the install command">Copy</button>
             </div>
             <p class="install__note">Pre-release: install commands go live with the first release.</p>

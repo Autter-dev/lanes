@@ -103,6 +103,8 @@ html.on-ink .site-header .btn { background: var(--c-ink-fg); color: var(--c-fg);
   font-family: var(--f-mono); font-size: 0.9375rem;
 }
 .install__prompt { color: var(--c-muted); }
+/* wrap only between words, so a path like autter-dev/tap/lanes never splits at its hyphen */
+.install__word { white-space: nowrap; }
 .install__copy {
   min-height: 2.75rem; padding: 0 1rem; border-radius: var(--radius-pill); background: transparent; color: var(--c-fg); border: 1px solid var(--c-line);
   font-family: var(--f-mono); font-size: var(--t-xs); transition: background-color 0.3s;

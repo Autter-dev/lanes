@@ -2,7 +2,7 @@
 //
 // Assumptions (placeholder: true below), mirrored in the hand-off message:
 //   - url: the production domain is not decided; https://lanes.autter.dev is a guess.
-//   - install: `brew install lane` and `cargo install lane` go live with the first release.
+//   - install: the Homebrew tap, winget, Scoop, npm and installer commands go live with the first release.
 //   - the demo lane names and agents in the hero race are examples, not real activity.
 
 export const site = {
@@ -17,7 +17,7 @@ export const site = {
   license: 'https://github.com/autter-dev/lanes/blob/main/LICENSE',
   x: { label: '@sagnik_ghosh_11', href: 'https://x.com/sagnik_ghosh_11' },
   maker: { name: 'Autter', href: 'https://autter.dev' },
-  install: { command: 'brew install lane', alt: 'cargo install lane', live: false }, // placeholder: true
+  install: { command: 'brew install autter-dev/tap/lanes', alt: 'npm install -g @autter/lanes', live: false }, // placeholder: true
 };
 
 export const nav = [
@@ -75,7 +75,7 @@ export const photos = {
 export const agents = ['Claude Code', 'Cursor', 'Codex', 'Gemini CLI', 'GitHub Copilot', 'Conductor', 'Amp', 'OpenCode', 'Cline', 'Aider'];
 
 export const quickstart = [
-  { cmd: 'brew install lane', note: 'or cargo install lane' },
+  { cmd: 'brew install autter-dev/tap/lanes', note: 'or winget install Autter.Lanes, scoop install lanes, npm install -g @autter/lanes' },
   { cmd: 'cd your-repo && lane init', note: 'finds your stack and sets up your agents' },
   { cmd: 'lane new fix-auth', note: 'a ready-to-run lane' },
   { cmd: 'lane exec fix-auth -- npm run dev', note: 'then open http://fix-auth.localhost' },
