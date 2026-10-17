@@ -199,13 +199,4 @@ jobs:
         env:
           # Optional: with trusted publishing set up on npmjs.com, no token is needed.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          # Platform packages first, so the main package never points at a missing one.
-          for dir in npm/lanes-* npm/lanes; do
-            name=$(node -p "require('./$dir/package.json').name")
-            if npm view "$name@$VERSION" version >/dev/null 2>&1; then
-              echo "$name@$VERSION is already on npm."
-              continue
-            fi
-            npm publish "./$dir" --access public --provenance
-          done
+        run: sh packaging/publish-npm.sh "$VERSION" npm

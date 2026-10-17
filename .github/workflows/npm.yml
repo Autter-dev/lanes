@@ -1,0 +1,45 @@
+name: npm
+
+# Publishes a version that's already on GitHub Releases to npm, from the release's own archives
+# (checked against its SHA256SUMS), so npm gets exactly the released bytes. The Release workflow
+# publishes to npm itself when the repo variable NPM_PUBLISH is "true"; run this by hand to
+# publish or retry an existing release.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Released version to publish, like 0.1.0
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      INPUT_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing (no token) needs npm 11.5 or later.
+      - run: npm install -g npm@latest
+      - name: Download the release's archives
+        run: |
+          version="${INPUT_VERSION#v}"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          gh release download "v$version" -R "$GITHUB_REPOSITORY" -D dist -p 'lanes-*.tar.gz' -p 'lanes-*.zip' -p SHA256SUMS
+          cd dist && sha256sum -c --ignore-missing SHA256SUMS
+      - run: node packaging/build-npm.mjs --version "$VERSION" --dist dist --out npm
+      - name: Publish
+        env:
+          # Optional: with trusted publishing set up on npmjs.com, no token is needed.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: sh packaging/publish-npm.sh "$VERSION" npm
