@@ -163,9 +163,9 @@ The gateway arrives in December. Over time, it turns Lanes and Autter into one l
 | --- | --- |
 | Instant lanes, `lane init`, ports and env per lane | ● Now |
 | Terminal app | ● Now |
-| Claude Code integration, MCP server | ● Now |
+| Claude Code, Codex and Cursor put their work in lanes on their own | ● Now |
 | Sign-in to Autter (`lane login`) | ○ Next |
-| Cursor, Codex, Gemini CLI, Copilot and other agents | ○ Next |
+| Gemini CLI, Copilot and other agents, the MCP server | ○ Next |
 | Databases and Docker Compose per lane, `*.localhost` URLs | ○ Next |
 | Undo, conflict warnings, `lane race`, `lane promote` | ○ Next |
 | Cloud agent setup snippets, GitHub Action | ○ Next |
@@ -178,7 +178,7 @@ macOS, Linux and Windows at launch. On Windows, Lanes is fastest on a Windows 11
 
 ## 07 / Quick start
 
-Lanes is a preview. The lane commands work: `init`, `new`, `exec`, `env`, `list`, `rm` and `adopt`. Claude Code moves into lanes on its own (below). Other agents get lanes when they make a Git worktree; otherwise, start them inside a lane's folder. Every option installs the same `lane` command; winget is on the way.
+Lanes is a preview. Install it, run `lane` once, and your agents put their work in lanes on their own: Claude Code, Codex and Cursor, in every repo, with nothing to set up per repo. Every option installs the same `lane` command; winget is on the way.
 
 | On | Install with |
 | --- | --- |
@@ -190,23 +190,33 @@ Or download an archive from [GitHub Releases](https://github.com/Autter-dev/lane
 
 ```sh
 brew install autter-dev/tap/lanes
+lane                           # once: checks your machine and puts your agents in lanes
 cd your-repo
-lane init                    # finds your stack and writes lane.toml
-lane new fix-auth            # a ready-to-run lane with its own ports
+claude -w fix-auth             # Claude Code starts in a new lane, with its own ports
+lane list                      # every lane, with its ports and folder
 lane exec fix-auth -- npm run dev
 open http://fix-auth.localhost:4100
 ```
 
-Each command ends by saying what to run next, with the lane's own folder, command and URL. `lane --help` lists every command, and every command takes `--help`.
+**How agents get lanes.** The first run of `lane` (or `lane setup --yes`, for scripts) adds Lanes to each agent's own user settings, once per machine. It's a switch: `lane setup --yes --agents off` takes back exactly what was added, and nothing else in those files changes. Set up Lanes before 0.0.5? Run `lane setup` once more to put your agents in lanes; the home screen says when one isn't.
 
-**With Claude Code:** `lane init` also sets up Claude Code's hooks in `.claude/settings.local.json`, which stays on your machine and out of Git. Then `claude -w fix-auth` starts a session in a new lane, with `PORT` and `LANE_URL` set. If Claude Code tries `git worktree add`, it's pointed to `lane new` instead. From the next release, so is a `git clone` of the repo or a recursive copy of its folder (`cp -r`, `xcopy`, `robocopy`, `Copy-Item -Recurse`). When you're done, removing the worktree removes the lane. For every repo at once, install the plugin in Claude Code:
+- **Claude Code:** `claude -w <name>`, subagents with `isolation: worktree` and background sessions each get a lane. A `lanes` skill has Claude start a task in a lane of its own. If it tries `git worktree add`, a `git clone` of the repo or a recursive copy of its folder, it's pointed to `lane new` instead. Removing the worktree removes the lane.
+- **Codex:** when a Codex session starts in a worktree Codex made, that worktree becomes a lane, ready to run, and Codex is told which lane it's in. Codex runs new hooks only once you trust them, so open `/hooks` in Codex once.
+- **Cursor:** when a Cursor agent starts in a worktree Cursor made, it becomes a lane the same way.
+- **Any other tool:** a worktree it makes with Git becomes a lane through a Git `post-checkout` hook that `lane init` adds.
+
+A lane is ready to run: dependencies installed (cloned from a clean `_base` copy when the lockfiles match), a block of ports of its own, and its own `.env`. Without a `lane.toml`, Lanes finds your stack by itself.
+
+**For your team:** `lane init` writes what Lanes found to `lane.toml`, adds a short note on working in lanes to `AGENTS.md`, and sets up the repo's Git hook. Check `lane.toml` and `AGENTS.md` in. With Husky, the hook is one line at the top of `.husky/post-checkout`. That file is checked in, so `lane init` says to `git add` it, and the line does nothing for a teammate without `lane`. With lefthook or another `core.hooksPath`, `lane init` changes nothing there and prints the command or line to add. `lane init --no-agents` writes `lane.toml` only.
+
+**By hand:** `lane new fix-auth` makes a lane yourself. Each command ends by saying what to run next, with the lane's own folder, command and URL. `lane --help` lists every command, and every command takes `--help`. The step-by-step guide, for your system, is at [lanes.autter.dev/guide](https://lanes.autter.dev/guide/).
+
+Prefer a Claude Code plugin? It carries the same hooks and skill:
 
 ```
 /plugin marketplace add Autter-dev/lanes
 /plugin install lanes@autter
 ```
-
-Other agents' worktrees become lanes through a Git `post-checkout` hook that `lane init` adds, and `AGENTS.md` gets a short note on working in lanes. With Husky, the hook is one line at the top of `.husky/post-checkout`. That file is checked in, so `lane init` says to `git add` it, and the line does nothing for a teammate without `lane`. With lefthook or another `core.hooksPath`, `lane init` changes nothing there and prints the command or line to add. `lane init --no-agents` skips all of this.
 
 <br>
 
@@ -215,14 +225,15 @@ Other agents' worktrees become lanes through a Git `post-checkout` hook that `la
 | Command | What it does |
 | --- | --- |
 | `lane` | Opens the terminal app, with a short welcome the first time |
-| `lane setup` | Checks your machine and chooses your settings (`--json` and `--yes` for scripts) |
-| `lane init` | Finds your stack and writes `lane.toml`: how to install dependencies, start the dev server and fill each lane's `.env`. Sets up your agents too (Claude Code hooks, a Git hook, a note in `AGENTS.md`) |
+| `lane setup` | Checks your machine, chooses your settings and puts your agents in lanes (`--yes`, `--agents on\|off` and `--json` for scripts) |
+| `lane init` | Writes what Lanes found to `lane.toml` (install steps, dev server, `.env` template) for your team, a note in `AGENTS.md`, and the repo's Git hook |
 | `lane new <name>` | Creates a lane |
 | `lane list` | Lists your lanes with their ports and folders |
 | `lane exec <name> -- <cmd>` | Runs a command inside a lane, with its own `PORT` and `LANE_URL` |
 | `lane env <name>` | Prints a lane's variables for sh, PowerShell, cmd or a `.env` file |
-| `lane adopt <path>` | Turns a worktree you already have into a lane |
+| `lane adopt <path>` | Turns a worktree you already have into a lane (`--ready` gives it its dependencies and `.env` too) |
 | `lane rm <name>` | Removes a lane and frees its ports |
+| `lane hook <agent> <event>` | What agents' hooks run, for Claude Code, Codex, Cursor and Git (set up by `lane setup` and `lane init`) |
 
 Coming next:
 

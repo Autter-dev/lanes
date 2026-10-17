@@ -6,9 +6,33 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ## Unreleased
 
+## 0.0.5 (2026-10-17)
+
+**Your agents put their work in lanes on their own.** Run `lane` once, and Claude Code, Codex and Cursor get a lane for each task, in every repo, ready to run. Nobody types `lane new`. Still a preview.
+
+```sh
+lane                 # once: checks your machine and puts your agents in lanes
+cd your-repo
+claude -w fix-auth   # or start a Codex or Cursor agent in a worktree of its own
+lane list            # each agent's lane, with its ports and folder
+```
+
+In this version:
+- Setup happens once per machine. The welcome (and `lane setup --yes`) adds Lanes to each agent's own user settings. It's a switch, and `--agents off` takes it back out exactly. Set up Lanes before 0.0.5? Run `lane setup` once more.
+- **Claude Code:** `claude -w`, subagents and background sessions get lanes in every repo, without `lane init`. A `lanes` skill has Claude start a task in a lane of its own.
+- **Codex and Cursor:** when a session starts in a worktree they made, it becomes a lane (`codex-<id>`, `cursor-<id>`), and the agent is told which lane it's in. In Codex, open `/hooks` once to trust Lanes' hooks.
+- Lanes from agents are ready to run: dependencies are cloned from a clean copy, and each lane gets its own ports and `.env`. A repo doesn't need a `lane.toml` for this.
+- Agents are turned down when they try to copy the repo (`git worktree add`, a `git clone` of it, `cp -r`), with a pointer to `lane new`.
+- `lane init` handles repos whose Git hooks belong to Husky or lefthook.
+
+Not yet:
+- Gemini CLI, Copilot and other agents get lanes only when they make a Git worktree, through the hook `lane init` adds.
+- There's no background daemon, no checkpoints or undo, no promote to a pull request, and no database per lane.
+
 ### 2026-10-17
 
-- `18:18` **Added**: agents get lanes on their own, with nothing to set up per repo: Claude Code, Codex and Cursor.
+- `18:32` **Added**: the home screen says when an agent installed here isn't in lanes yet (say, after an update from 0.0.4), and to run `lane setup`.
+- `18:18` **Added**: agents get lanes on their own, with nothing to set up per repo: Claude Code, Codex and Cursor. (`dd754be`, `cc529ae`)
   - **Once per machine:** the first-run welcome and `lane setup --yes` put your agents in lanes, in each agent's own user settings. It's a switch on the welcome's last screen (`a`), on by default. `lane setup --yes --agents off` takes back exactly what was added, and nothing else in those files changes.
     - **Claude Code:** its hooks in `~/.claude/settings.json` and the `lanes` skill in `~/.claude/skills/lanes`, so `claude -w` makes a lane in every repo without `lane init`.
     - **Codex:** hooks in `~/.codex/hooks.json`. Codex makes its worktrees with Git hooks off, so when a Codex session starts in one, it becomes a lane (`codex-<id>`), ready to run, and Codex is told which lane it's in. Copies of the repo are turned down. Codex runs new hooks only once you trust them, so `lane setup` says to open `/hooks` in Codex once.

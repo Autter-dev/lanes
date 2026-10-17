@@ -19,6 +19,9 @@ pub struct Input {
     pub repo: Option<HomeRepo>,
     /// This repo's lanes, or every repo's when `lane` was opened outside one.
     pub lanes: Vec<Lane>,
+    /// Agents installed here that aren't in lanes yet (say, Lanes was set up before it could do
+    /// that), when the setting is on. Empty when there's nothing to say.
+    pub agents_unset: Vec<&'static str>,
 }
 
 pub struct HomeRepo {
@@ -219,8 +222,16 @@ impl Home {
                 Span::styled(what, th.text()),
                 Span::styled(cmd, th.accent()),
             ]));
-            lines.push(Line::default());
         }
+        if !self.input.agents_unset.is_empty() {
+            let names = self.input.agents_unset.join(", ");
+            lines.push(Line::from(vec![
+                Span::styled(format!("{names}: not in lanes yet. Run "), th.text()),
+                Span::styled("lane setup", th.accent()),
+                Span::styled(" to put them there.", th.text()),
+            ]));
+        }
+        lines.push(Line::default());
         lines.push(Line::styled("Commands", th.strong()));
         for (cmd, what, built) in COMMANDS {
             let mut spans = vec![

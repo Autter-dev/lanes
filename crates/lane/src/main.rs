@@ -965,6 +965,15 @@ fn run_home(env: &Env, mut config: Config) -> ExitCode {
             theme: theme(env),
             repo,
             lanes,
+            agents_unset: if config.agents {
+                agents::user::found()
+                    .into_iter()
+                    .filter(|a| !agents::user::is_set_up(*a))
+                    .map(|a| a.name)
+                    .collect()
+            } else {
+                Vec::new()
+            },
         };
         let (outcome, telemetry) = match lane_tui::run_home(input) {
             Ok(home::Outcome::Quit { telemetry }) => (None, telemetry),

@@ -258,6 +258,7 @@ fn home_renders_and_switches_the_install_count() {
         theme: Theme::new(true, false),
         repo: None,
         lanes: Vec::new(),
+        agents_unset: Vec::new(),
     });
     let mut terminal = Terminal::new(TestBackend::new(90, 26)).unwrap();
     terminal.draw(|f| app.render(f)).unwrap();
@@ -277,6 +278,7 @@ fn home_renders_and_switches_the_install_count() {
             theme: Theme::new(true, false),
             repo: None,
             lanes: Vec::new(),
+            agents_unset: Vec::new(),
         })
         .on_key(key(KeyCode::Char('s'))),
         Some(home::Outcome::Setup { telemetry: true })
@@ -467,6 +469,7 @@ fn home_with(repo: Option<home::HomeRepo>, lanes: Vec<lane_core::state::Lane>) -
         theme: Theme::new(true, false),
         repo,
         lanes,
+        agents_unset: Vec::new(),
     });
     let mut terminal = Terminal::new(TestBackend::new(90, 26)).unwrap();
     terminal.draw(|f| app.render(f)).unwrap();
@@ -549,4 +552,20 @@ fn the_last_screen_puts_agents_in_lanes_and_a_switches_it() {
             agents: false
         })
     );
+}
+
+#[test]
+fn home_says_when_an_agent_isnt_in_lanes_yet() {
+    let app = Home::new(home::Input {
+        version: "0.0.5",
+        telemetry: false,
+        telemetry_forced_off: None,
+        theme: Theme::new(true, false),
+        repo: None,
+        lanes: Vec::new(),
+        agents_unset: vec!["Codex"],
+    });
+    let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    assert!(buffer_text(&terminal).contains("Codex: not in lanes yet. Run lane setup"));
 }

@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/lane", "crates/laned", "crates/lane-core", "crates/lane-tui"]
 
 [workspace.package]
-version = "0.0.4"
+version = "0.0.5"
 edition = "2024"
 # 1.89 for std::fs::File::lock (the state store's single-writer lock).
 rust-version = "1.89"
