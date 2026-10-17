@@ -1,7 +1,7 @@
 name: Installers
 
-# Installs the latest release the way users do, on every system, and runs it. Runs after each
-# published release, and by hand from the Actions tab.
+# Installs the latest release the way users do, through every live channel and on every system,
+# and runs it. Runs after each published release, and by hand from the Actions tab.
 
 on:
   workflow_dispatch:
@@ -57,3 +57,52 @@ jobs:
           lane setup --json | Select-Object -First 8
         env:
           SHELL_NAME: ${{ matrix.shell }}
+
+  homebrew:
+    name: Homebrew (${{ matrix.os }})
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: Homebrew/actions/setup-homebrew@main
+      - run: |
+          brew install autter-dev/tap/lanes
+          lane --version
+          laned --version
+
+  scoop:
+    name: Scoop (Windows)
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: windows-latest
+    steps:
+      - shell: pwsh
+        run: |
+          # The runner is an administrator account, which Scoop's installer refuses without this flag.
+          iex "& {$(irm get.scoop.sh)} -RunAsAdmin"
+          $env:Path = "$env:USERPROFILE\scoop\shims;$env:Path"
+          scoop bucket add autter https://github.com/Autter-dev/scoop-bucket
+          scoop install lanes
+          lane --version
+          laned --version
+
+  npm:
+    name: npm (${{ matrix.os }})
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - shell: bash
+        run: |
+          npm install -g @autter/lanes
+          lane --version
+          laned --version
+          lane setup --json > setup.json && head -c 200 setup.json

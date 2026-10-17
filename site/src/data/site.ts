@@ -43,7 +43,7 @@ export const install = {
 };
 
 // Channels that aren't published yet show as "coming soon". Flip each to true once it's live.
-export const channels = { npm: false, winget: false };
+export const channels = { npm: true, winget: false };
 
 // The hero's command for each system; the page picks one on load (brew without JavaScript).
 export const heroInstall = { macos: install.brew, linux: install.sh, windows: channels.winget ? install.winget : install.ps1 };

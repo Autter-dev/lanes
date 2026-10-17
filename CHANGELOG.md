@@ -8,6 +8,7 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-17
 
+- `11:42` **Added**: Lanes is on npm: `npm install -g @autter/lanes` installs only the build for your system, with signed provenance. A new `npm` workflow publishes an existing release from its own archives, and the installers check now installs through every live channel (both scripts, Homebrew, Scoop and npm) on macOS, Linux and Windows. The download page lists npm as live; winget is still waiting for Microsoft's review.
 - `11:19` **Added**: Lanes 0.0.1 is out as a preview. It installs with `brew install autter-dev/tap/lanes`, with Scoop from the Autter bucket, with the one-line scripts (`curl -fsSL https://lanes.autter.dev/install.sh | sh`, `irm https://lanes.autter.dev/install.ps1 | iex`), or from GitHub Releases. Each one was checked by a real install on macOS, Linux and Windows. The download page and the README show the live options; npm and winget are marked "coming soon" until they're published. A new installers check reinstalls every release the way users do.
 
 ## 0.0.1 (2026-10-17)

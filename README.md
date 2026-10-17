@@ -178,7 +178,7 @@ macOS, Linux and Windows at launch. On Windows, Lanes is fastest on a Windows 11
 
 ## 07 / Quick start
 
-Lanes 0.0.1 is a preview: `lane` opens the welcome and the home screen, and `lane setup` checks your machine. The lane commands come next. Every option installs the same `lane` command; npm and winget are on the way.
+Lanes 0.0.1 is a preview: `lane` opens the welcome and the home screen, and `lane setup` checks your machine. The lane commands come next. Every option installs the same `lane` command; winget is on the way.
 
 | On | Install with |
 | --- | --- |
