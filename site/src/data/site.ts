@@ -1,14 +1,13 @@
 // All visible copy for the Lanes website. Every claim here is already made in the repo README.
 //
 // Assumptions (placeholder: true below), mirrored in the hand-off message:
-//   - url: the production domain is not decided; https://lanes.autter.dev is a guess.
 //   - install: the Homebrew tap, winget, Scoop, npm and installer commands go live with the first release.
 //   - the demo lane names and agents in the hero race are examples, not real activity.
 
 export const site = {
   name: 'Lanes',
   tagline: 'Lighter agents',
-  url: 'https://lanes.autter.dev', // placeholder: true
+  url: 'https://lanes.autter.dev',
   description:
     'Lanes gives every coding agent its own instant, ready-to-run copy of your repo, with its own ports, URL and database. Free and open source.',
   repo: 'https://github.com/autter-dev/lanes',
