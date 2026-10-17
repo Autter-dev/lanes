@@ -6,6 +6,34 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ## Unreleased
 
+## 0.0.2 (2026-10-17)
+
+**The lane commands work: try them on your own repo.** Still a preview: agents don't land in lanes on their own yet, which comes next.
+
+```sh
+cd your-repo
+lane init                        # writes lane.toml from what it finds
+lane new fix-auth                # an instant, ready-to-run copy with its own ports
+lane exec fix-auth -- npm run dev
+lane list
+lane rm fix-auth
+```
+
+In this version:
+- `lane new <name>` makes a lane from a clean copy of `main`, with dependencies installed once.
+  - It's a real Git worktree: `git status` and `git diff` work there, and no branch is created.
+  - Files are copy-on-write clones on APFS, Btrfs, XFS and Windows Dev Drives, and plain copies elsewhere, with a note saying so.
+- `lane exec`, `lane env`, `lane list`, `lane rm` and `lane adopt` all work.
+  - Each lane gets its own `PORT`, `VITE_PORT` and `LANE_URL` (`http://<name>.localhost:<port>`), so two lanes can run the same dev server at once.
+- `lane init` finds your package manager, dev command and `.env` template, and writes `lane.toml`.
+- Every command has `--json` and stable exit codes. Writes take `--request-id`, so a retried command never makes a second lane.
+
+Not yet:
+- Agents don't land in lanes on their own: start them inside a lane's folder for now.
+- There's no background daemon, no checkpoints or undo, and no promote to a pull request.
+- There's no database or Compose project per lane.
+- `*.localhost` URLs work in browsers and curl, but not in every Windows tool.
+
 ### 2026-10-17
 
 - `15:07` **Added**: lanes run things. Every command in the CLI now works.
