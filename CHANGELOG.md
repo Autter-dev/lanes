@@ -6,6 +6,10 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ## Unreleased
 
+### 2026-10-17
+
+- `18:51` **Changed**: the website offers 0.0.5, and the [guide](https://lanes.autter.dev/guide/) is rewritten around agents making lanes on their own: set it up once, start your agents as usual (Claude Code, Codex, Cursor), see the lanes and run the app. Making a lane by hand and `lane init` are now optional steps.
+
 ## 0.0.5 (2026-10-17)
 
 **Your agents put their work in lanes on their own.** Run `lane` once, and Claude Code, Codex and Cursor get a lane for each task, in every repo, ready to run. Nobody types `lane new`. Still a preview.

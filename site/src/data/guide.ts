@@ -1,7 +1,7 @@
 // The guide page (/guide/): from install to agents in lanes, written once per system. Every block
 // can be limited to some systems with `only`; the page shows the visitor's system and hides the
 // rest, and without JavaScript every system shows, each labelled. Text takes `code` and
-// [links](url). Every command here is real and does what it says in Lanes 0.0.4.
+// [links](url). Every command here is real and does what it says in Lanes 0.0.5.
 import { install, release, type Os } from './site';
 
 export type Block =
@@ -29,6 +29,14 @@ const repoAt: Record<Os, string> = {
   windows: 'C:\\code\\your-app',
 };
 const sep = (os: Os) => (os === 'windows' ? '\\' : '/');
+const homeAt: Record<Os, string> = { macos: '/Users/you', linux: '/home/you', windows: 'C:\\Users\\you' };
+const configAt: Record<Os, string> = {
+  macos: '/Users/you/.config/lane/config.toml',
+  linux: '/home/you/.config/lane/config.toml',
+  windows: 'C:\\Users\\you\\AppData\\Roaming\\lane\\config.toml',
+};
+// Codex puts a worktree at <CODEX_HOME>/worktrees/<id>/<repo folder>.
+const codexPath = (os: Os) => [homeAt[os], '.codex', 'worktrees', 'a1b2', 'your-app'].join(sep(os));
 const lanePath = (os: Os, name: string) => `${repoAt[os]}.lanes${sep(os)}${name}`;
 
 // The "Next:" block, laid out exactly as `lane` does it (lane_core::next::render): commands in
@@ -64,12 +72,19 @@ ${nextBlock([
 ])}`;
 
 const listOut = (os: Os) => {
-  const rows = [['fix-auth', '4100-4109'], ['dark-mode', '4110-4119']];
+  const rows = [['fix-auth', '4100-4109', lanePath(os, 'fix-auth')], ['codex-a1b2', '4110-4119', codexPath(os)]];
   const w = Math.max(4, ...rows.map(([n]) => n.length));
   const head = `${'NAME'.padEnd(w)}  ${'PORTS'.padEnd(11)}  ${'STATE'.padEnd(10)}  PATH`;
-  const row = ([n, p]: string[]) => `${n.padEnd(w)}  ${p.padEnd(11)}  ${'ready'.padEnd(10)}  ${lanePath(os, n)}`;
+  const row = ([n, p, at]: string[]) => `${n.padEnd(w)}  ${p.padEnd(11)}  ${'ready'.padEnd(10)}  ${at}`;
   return [head, ...rows.map(row)].join('\n');
 };
+
+const setupOut = (os: Os) => `Saved: install count on. Settings are in ${configAt[os]}.
+Agents in lanes:
+  Claude Code  set up: its worktrees become lanes, in every repo
+  Codex        set up: its worktrees become lanes, in every repo
+               Codex runs new hooks only once you trust them: open /hooks in Codex and trust Lanes' two hooks.
+  Cursor       set up: its worktrees become lanes, in every repo`;
 
 const perSystem = (make: (os: Os) => string): Block[] => every.map((os) => ({ kind: 'out', text: make(os), only: [os] }));
 
@@ -91,70 +106,73 @@ export const steps: Step[] = [
     ],
   },
   {
-    id: 'machine',
-    title: 'Check your machine.',
-    text: 'Run `lane` on its own. The first time, it checks Git, your disk and the agents you have, and shows a step-by-step fix for anything that\'s off. Nothing is sent while you look around.',
+    id: 'setup',
+    title: 'Set it up once.',
+    text: 'Run `lane` on its own. The first time, it checks Git, your disk and your agents, and puts the agents it finds in lanes: Claude Code, Codex and Cursor get Lanes\' hooks and a `lanes` skill in their own user settings. From then on, every repo gets lanes, with nothing more to set up. Nothing is sent while you look around.',
     blocks: [
       { kind: 'cmd', cmd: 'lane' },
       { kind: 'note', text: 'Every Mac disk is APFS, so a lane is a copy-on-write clone: instant, and it takes almost no extra space.', only: ['macos'] },
       { kind: 'note', text: 'On Btrfs or XFS, a lane is an instant copy-on-write clone. On ext4 it\'s a plain copy, which works but takes longer and uses more space; `lane setup` says which one you have.', only: ['linux'] },
       { kind: 'note', text: 'On a Dev Drive, a lane is an instant copy-on-write clone. On a regular NTFS drive it\'s a plain copy, which works but takes longer and uses more space. Keep your repos on a Dev Drive if you have one; `lane setup` shows how to make one, and the `git clone` command to move a repo there.', only: win },
-      { kind: 'cmd', cmd: 'lane setup', label: 'Run the checks again any time' },
+      { kind: 'cmd', cmd: 'lane setup --yes', label: 'Or without the welcome, for a script or a new machine' },
+      ...perSystem(setupOut),
+      { kind: 'note', text: 'Set up Lanes before 0.0.5? Run `lane setup` once more; the home screen says when an agent isn\'t in lanes yet. Changed your mind? `lane setup --yes --agents off` takes back exactly what was added, and nothing else in those files changes.' },
+    ],
+  },
+  {
+    id: 'agents',
+    inRepo: true,
+    title: 'Let your agents make lanes.',
+    text: 'Start your agents the way you always do. Each task gets a lane of its own: a ready-to-run copy of the repo with its own ports, dependencies and `.env`. You don\'t run anything, and agents never edit the same files or fight over a port.',
+    blocks: [
+      { kind: 'cmd', cmd: 'claude -w fix-auth', label: 'Claude Code' },
+      { kind: 'note', text: 'Or just ask Claude for the work: the `lanes` skill has it move into a lane of its own first, and you approve the move once. Subagents with `isolation: worktree` and background sessions get lanes too. If Claude tries `git worktree add` or copies the repo, it\'s pointed to `lane new` instead.' },
+      { kind: 'cmd', cmd: 'codex --worktree', label: 'Codex' },
+      { kind: 'note', text: 'Or pick a worktree for a new chat in the Codex app. When the session starts, the worktree becomes a lane named `codex-<id>`, ready to run, and Codex is told which lane it\'s in. The first time, open `/hooks` in Codex and trust Lanes\' hooks.' },
+      { kind: 'cmd', cmd: 'agent -w fix-auth', label: 'Cursor' },
+      { kind: 'note', text: 'Or start an agent in a worktree from Cursor\'s Agents window, or with `/worktree`. When it starts, the worktree becomes a lane named `cursor-<name>`, ready to run.' },
+      { kind: 'note', text: 'Any other tool: a worktree it makes with Git becomes a lane, dependencies and all, through the Git hook `lane init` adds (step 6).' },
+    ],
+  },
+  {
+    id: 'run',
+    inRepo: true,
+    title: 'See them, and run the app.',
+    text: '`lane list` shows every lane with its agent\'s ports and folder. `lane exec` runs a command in one with its own `PORT`, `VITE_PORT` and `LANE_URL`, so the same dev server runs in two lanes at once.',
+    blocks: [
+      { kind: 'cmd', cmd: 'lane list' },
+      ...perSystem(listOut),
+      { kind: 'cmd', cmd: 'lane exec fix-auth -- npm run dev' },
+      { kind: 'note', text: 'Then open `http://fix-auth.localhost:4100`. Use your own dev command: `lane exec` runs whatever you give it.' },
+      { kind: 'cmd', cmd: 'lane exec codex-a1b2 -- npm run dev', label: 'In a second terminal' },
+      { kind: 'note', text: 'Codex\'s lane has ports 4110 to 4119, at `http://codex-a1b2.localhost:4110`. Both apps run side by side.' },
+      { kind: 'note', text: 'Browsers and `curl.exe` open `*.localhost` addresses. PowerShell\'s `Invoke-WebRequest` can\'t; use `http://127.0.0.1:4100` there.', only: win },
+      { kind: 'note', text: 'To put the port in an argument, write `\'$PORT\'` in single quotes and Lanes fills it in: `lane exec fix-auth -- pnpm dev --port \'$PORT\'`.' },
+    ],
+  },
+  {
+    id: 'new',
+    inRepo: true,
+    title: 'Make a lane yourself.',
+    text: 'You don\'t need to, but you can. A lane is a real Git worktree that starts from a clean `main`, with dependencies installed and a block of ten ports of its own. No branch is made, and `git status` and `git diff` work as usual.',
+    blocks: [
+      { kind: 'cmd', cmd: 'lane new fix-auth' },
+      ...perSystem(newOut),
+      { kind: 'note', text: 'Your times and file count will differ. The first lane takes longest: Lanes makes a clean `_base` copy and installs dependencies there, once. Every lane after that is a copy of it, and so are the dependencies of a lane an agent makes. Every command ends with a "Next:" block like this one.' },
     ],
   },
   {
     id: 'init',
     inRepo: true,
-    title: 'Set up a repo.',
-    text: 'In a repo you work on, `lane init` finds your package manager, dev server and `.env` template, and writes `lane.toml`. It sets up your agents too: Claude Code\'s hooks, a Git hook and a short note in `AGENTS.md`. It runs and installs nothing, and running it again is safe.',
+    title: 'Share it with your team.',
+    text: 'Lanes finds your stack by itself. To write it down for teammates, run `lane init`: it writes `lane.toml`, adds a short note on working in lanes to `AGENTS.md` for every agent that reads it, and sets up the repo\'s Git hook, so any tool\'s worktrees become lanes. It runs and installs nothing, and running it again is safe.',
     blocks: [
       { kind: 'cmd', cmd: 'cd ~/code/your-app', only: unix },
       { kind: 'cmd', cmd: 'cd C:\\code\\your-app', only: win },
       { kind: 'cmd', cmd: 'lane init' },
       ...perSystem(initOut),
       { kind: 'cmd', cmd: 'git add lane.toml AGENTS.md', label: 'Then check them in' },
-      { kind: 'note', text: 'Teammates get the same lanes from `lane.toml`. Claude Code\'s hooks stay on your machine, so nobody without Lanes is affected. `lane init --no-agents` writes `lane.toml` only.' },
-    ],
-  },
-  {
-    id: 'new',
-    inRepo: true,
-    title: 'Make a lane.',
-    text: 'A lane is a ready-to-run copy of your repo: a real Git worktree that starts from a clean `main`, with dependencies installed and a block of ten ports of its own. No branch is made, and `git status` and `git diff` work as usual.',
-    blocks: [
-      { kind: 'cmd', cmd: 'lane new fix-auth' },
-      ...perSystem(newOut),
-      { kind: 'note', text: 'Your times and file count will differ. The first lane takes longest: Lanes makes a clean `_base` copy and installs dependencies there, once. Every lane after that is a copy of it. Every command ends with a "Next:" block like this one.' },
-    ],
-  },
-  {
-    id: 'run',
-    inRepo: true,
-    title: 'Run the app in it.',
-    text: '`lane exec` runs a command in the lane with its own `PORT`, `VITE_PORT` and `LANE_URL`. So the same dev server can run in two lanes at once, without a port clash.',
-    blocks: [
-      { kind: 'cmd', cmd: 'lane exec fix-auth -- npm run dev' },
-      { kind: 'note', text: 'Then open `http://fix-auth.localhost:4100`. Use your own dev command: `lane init` printed it.' },
-      { kind: 'cmd', cmd: 'lane new dark-mode', label: 'In a second terminal' },
-      { kind: 'cmd', cmd: 'lane exec dark-mode -- npm run dev' },
-      { kind: 'note', text: 'The second lane gets ports 4110 to 4119, at `http://dark-mode.localhost:4110`. Both apps run side by side.' },
-      { kind: 'note', text: 'Browsers and `curl.exe` open `*.localhost` addresses. PowerShell\'s `Invoke-WebRequest` can\'t; use `http://127.0.0.1:4100` there.', only: win },
-      { kind: 'note', text: 'To put the port in an argument, write `\'$PORT\'` in single quotes and Lanes fills it in: `lane exec fix-auth -- pnpm dev --port \'$PORT\'`.' },
-    ],
-  },
-  {
-    id: 'agents',
-    inRepo: true,
-    title: 'Put agents in lanes.',
-    text: 'Give each agent its own lane, and they never edit the same files or fight over a port.',
-    blocks: [
-      { kind: 'cmd', cmd: 'claude -w fix-auth', label: 'Claude Code' },
-      { kind: 'note', text: 'After `lane init`, this makes a lane and starts Claude Code in it, with the lane\'s ports set. If it tries `git worktree add`, it\'s pointed to `lane new` instead. When you remove the worktree, the lane goes too.' },
-      { kind: 'cmd', cmd: '/plugin marketplace add Autter-dev/lanes', label: 'Or in Claude Code, for every repo at once' },
-      { kind: 'cmd', cmd: '/plugin install lanes@autter' },
-      { kind: 'cmd', cmd: 'cd ~/code/your-app.lanes/fix-auth', only: unix, label: 'Any other agent: start it in a lane\'s folder' },
-      { kind: 'cmd', cmd: 'cd C:\\code\\your-app.lanes\\fix-auth', only: win, label: 'Any other agent: start it in a lane\'s folder' },
-      { kind: 'note', text: 'Then start Codex, Gemini CLI, Aider or any other agent there. When an agent makes its own Git worktree, the hook `lane init` added turns it into a lane.' },
+      { kind: 'note', text: 'Teammates get the same lanes from `lane.toml`. The hooks stay on each machine, so nobody without Lanes is affected. With Husky, the Git hook is one line in `.husky/post-checkout`, and `lane init` says to add that file too. `lane init --no-agents` writes `lane.toml` only.' },
     ],
   },
   {
@@ -174,15 +192,14 @@ export const steps: Step[] = [
   {
     id: 'manage',
     inRepo: true,
-    title: 'Keep track, and clean up.',
-    text: 'Lanes keeps a list of every lane with its folder and ports. Removing one frees its ports.',
+    title: 'Clean up.',
+    text: 'Removing a lane frees its ports. When Claude Code removes its worktree, its lane goes too.',
     blocks: [
-      { kind: 'cmd', cmd: 'lane list' },
-      ...perSystem(listOut),
-      { kind: 'cmd', cmd: 'lane rm dark-mode' },
+      { kind: 'cmd', cmd: 'lane rm codex-a1b2' },
       { kind: 'note', text: 'This removes the lane\'s folder, changes and all. `--keep-files` keeps the folder and forgets the lane.' },
-      { kind: 'cmd', cmd: 'lane adopt ../my-worktree', only: unix, label: 'Have a worktree already? Make it a lane' },
-      { kind: 'cmd', cmd: 'lane adopt ..\\my-worktree', only: win, label: 'Have a worktree already? Make it a lane' },
+      { kind: 'cmd', cmd: 'lane adopt ../my-worktree --ready', only: unix, label: 'Have a worktree already? Make it a lane' },
+      { kind: 'cmd', cmd: 'lane adopt ..\\my-worktree --ready', only: win, label: 'Have a worktree already? Make it a lane' },
+      { kind: 'note', text: '`--ready` gives it its dependencies and `.env` too, like a lane from `lane new`.' },
     ],
   },
   {
@@ -206,7 +223,7 @@ export const upkeep: { os: Os; update: string; remove: string; note?: string }[]
 
 // Coming, not built: said plainly so nobody looks for it.
 export const notYet = [
-  'Other agents (Cursor, Codex, Gemini CLI, Copilot) get lanes through the Git hook, but no session context yet.',
+  'Gemini CLI, Copilot and other agents get lanes only when they make a Git worktree, through the hook `lane init` adds.',
   'No background daemon, checkpoints or undo, and no promote to one pull request.',
   'No database or Docker Compose project per lane yet.',
 ];

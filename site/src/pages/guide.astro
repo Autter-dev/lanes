@@ -19,7 +19,7 @@ const names = (b: { only?: string[] }) =>
 const pad = (n: number) => String(n).padStart(2, '0');
 const id = (step: string, i: number, b: Block) => `g-${step}-${i}${b.only ? `-${b.only.join('-')}` : ''}`;
 ---
-<Base title="Guide: your first lanes" description="Install Lanes and run two agents side by side in their own lanes, step by step, with the commands for your system: macOS, Linux or Windows.">
+<Base title="Guide: your first lanes" description="Install Lanes, run it once, and Claude Code, Codex and Cursor put their work in lanes on their own. Step by step, for macOS, Linux or Windows.">
   <div class="guide" data-guide>
     <script is:inline>
       // Pick the system before the first paint, so the page doesn't shift once it has loaded.
@@ -39,7 +39,7 @@ const id = (step: string, i: number, b: Block) => `g-${step}-${i}${b.only ? `-${
       <p class="label">Guide · Lanes {release.version}</p>
       <h1 class="display" id="guide-title" style="margin-top:1.5rem">Your first lanes<span class="dot">.</span></h1>
       <div class="page-hero__row">
-        <p class="lede">Install Lanes, give one repo two lanes, and run an agent in each. It takes about five minutes, and every command below is written for your system.</p>
+        <p class="lede">Install Lanes, run it once, and your agents put their work in lanes on their own. It takes about five minutes, and every command below is written for your system.</p>
         <div class="guide-pick">
           <p class="label" id="guide-pick-label">Steps for</p>
           <div class="guide-pick__buttons" role="group" aria-labelledby="guide-pick-label">
@@ -83,7 +83,7 @@ const id = (step: string, i: number, b: Block) => `g-${step}-${i}${b.only ? `-${
     <section class="section wrap" aria-labelledby="guide-upkeep">
       <div class="section__head">
         <h2 class="h2" id="guide-upkeep" data-split="lines">Update, or remove it.</h2>
-        <p>Updating keeps your lanes. Removing Lanes leaves your repos and their lanes' folders where they are.</p>
+        <p>Updating keeps your lanes. Before you remove Lanes, run <code>lane setup --yes --agents off</code> so your agents stop calling it. Your repos and their lanes' folders stay where they are.</p>
       </div>
       <div class="guide-upkeep">
         {upkeep.map((u) => {
