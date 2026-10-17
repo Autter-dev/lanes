@@ -133,6 +133,8 @@ html.on-ink .site-header .btn { background: var(--c-ink-fg); color: var(--c-fg);
 .dl-method__note, .dl-card__note { font-size: var(--t-xs); color: var(--c-muted); line-height: 1.5; }
 .dl-card__note { padding: 0.9rem 1rem; border-radius: 12px; background: var(--c-bg); }
 .dl-wide { max-width: 40rem; }
+/* A channel that isn't published yet: the command, dimmed, with no Copy button */
+.dl-soon { padding: 0.85rem 1.15rem; border: 1px dashed var(--c-line); border-radius: 14px; font-size: 0.875rem; color: var(--c-muted); overflow-wrap: anywhere; }
 .dl-table-wrap { overflow-x: auto; border-top: 1px solid var(--c-fg); }
 .dl-table { width: 100%; border-collapse: collapse; font-size: var(--t-s); }
 .dl-table th, .dl-table td { text-align: left; padding: 1rem 1.5rem 1rem 0; border-bottom: 1px solid var(--c-line); vertical-align: baseline; }

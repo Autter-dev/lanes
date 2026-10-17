@@ -1,7 +1,7 @@
 ---
 import Base from '../layouts/Base.astro';
 import InstallCommand from '../components/InstallCommand.astro';
-import { archives, downloadPlatforms, install, release, site, uninstall } from '../data/site';
+import { archives, channels, downloadPlatforms, install, release, site, uninstall } from '../data/site';
 ---
 <Base title="Download Lanes" description="Install Lanes on macOS, Linux or Windows with Homebrew, winget, Scoop, npm or a one-line script. Free and open source.">
   <section class="page-hero wrap" aria-labelledby="dl-title">
@@ -31,11 +31,11 @@ import { archives, downloadPlatforms, install, release, site, uninstall } from '
           </div>
           <p class="label">{p.detail}</p>
           <div class="dl-methods">
-          {p.methods.map((m, i) => (
-            <div class="dl-method">
-              <p class="dl-method__name">{m.name}{i === 0 && <span class="label"> · usual way</span>}</p>
-              <InstallCommand id={`dl-${p.os}-${i}`} cmd={m.cmd} block label={`Copy the ${m.name} command for ${p.name}`} />
-              <p class="dl-method__note">{m.note}</p>
+          {[...p.methods.filter((m) => !m.soon), ...p.methods.filter((m) => m.soon)].map((m, i) => (
+            <div class:list={['dl-method', m.soon && 'dl-method--soon']}>
+              <p class="dl-method__name">{m.name}{i === 0 && <span class="label"> · usual way</span>}{m.soon && <span class="label"> · coming soon</span>}</p>
+              {m.soon ? <p class="dl-soon"><code>{m.cmd}</code></p> : <InstallCommand id={`dl-${p.os}-${i}`} cmd={m.cmd} block label={`Copy the ${m.name} command for ${p.name}`} />}
+              <p class="dl-method__note">{m.soon ?? m.note}</p>
             </div>
           ))}
           </div>
@@ -48,10 +48,10 @@ import { archives, downloadPlatforms, install, release, site, uninstall } from '
   <section class="section wrap" aria-labelledby="dl-npm" style="padding-top:0">
     <div class="section__head">
       <h2 class="h2" id="dl-npm" data-split="lines">With npm.</h2>
-      <p>On any system with Node 18 or later. npm downloads only the build for yours.</p>
+      <p>{channels.npm ? 'On any system with Node 18 or later. npm downloads only the build for yours.' : 'Coming soon: the npm package is on its way. Until then, use one of the options above.'}</p>
     </div>
     <div class="dl-wide">
-      <InstallCommand id="dl-npm-cmd" cmd={install.npm} block label="Copy the npm command" />
+      {channels.npm ? <InstallCommand id="dl-npm-cmd" cmd={install.npm} block label="Copy the npm command" /> : <p class="dl-soon"><code>{install.npm}</code></p>}
     </div>
   </section>
 

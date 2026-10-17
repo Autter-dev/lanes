@@ -1,7 +1,6 @@
 // All visible copy for the Lanes website. Every claim here is already made in the repo README.
 //
 // Assumptions (placeholder: true below), mirrored in the hand-off message:
-//   - release: the install commands below go live with the first release (release.live).
 //   - the demo lane names and agents in the hero race are examples, not real activity.
 
 export const site = {
@@ -25,7 +24,7 @@ const releases = 'https://github.com/Autter-dev/lanes/releases';
 // The version people get. When a release ships, set its version here and live to true.
 export const release = {
   version: '0.0.1',
-  live: false, // placeholder: true until v0.0.1 is published
+  live: true,
   page: `${releases}/latest`,
   file: (name: string) => `${releases}/download/v${release.version}/${name}`,
 };
@@ -43,11 +42,15 @@ export const install = {
   npm: 'npm install -g @autter/lanes',
 };
 
+// Channels that aren't published yet show as "coming soon". Flip each to true once it's live.
+export const channels = { npm: false, winget: false };
+
 // The hero's command for each system; the page picks one on load (brew without JavaScript).
-export const heroInstall = { macos: install.brew, linux: install.sh, windows: install.winget };
+export const heroInstall = { macos: install.brew, linux: install.sh, windows: channels.winget ? install.winget : install.ps1 };
 
 export type Os = 'macos' | 'linux' | 'windows';
-export const downloadPlatforms: { os: Os; name: string; detail: string; methods: { name: string; cmd: string; note: string }[]; note?: string }[] = [
+type Method = { name: string; cmd: string; note: string; soon?: string };
+export const downloadPlatforms: { os: Os; name: string; detail: string; methods: Method[]; note?: string }[] = [
   {
     os: 'macos',
     name: 'macOS',
@@ -71,7 +74,7 @@ export const downloadPlatforms: { os: Os; name: string; detail: string; methods:
     name: 'Windows',
     detail: 'x64 and arm64, Windows 10 and 11',
     methods: [
-      { name: 'winget', cmd: install.winget, note: 'Built into Windows 11. Update with winget upgrade Autter.Lanes.' },
+      { name: 'winget', cmd: install.winget, note: 'Built into Windows 11. Update with winget upgrade Autter.Lanes.', soon: channels.winget ? undefined : "Waiting for Microsoft's review of the winget package." },
       { name: 'Scoop', cmd: install.scoop, note: 'Update with scoop update lanes.' },
       { name: 'PowerShell script', cmd: install.ps1, note: 'Puts lane.exe and laned.exe in your user folder and adds it to PATH.' },
     ],
@@ -90,9 +93,9 @@ export const archives = [
 
 export const uninstall = [
   { how: 'Homebrew', cmd: 'brew uninstall lanes' },
-  { how: 'winget', cmd: 'winget uninstall Autter.Lanes' },
+  ...(channels.winget ? [{ how: 'winget', cmd: 'winget uninstall Autter.Lanes' }] : []),
   { how: 'Scoop', cmd: 'scoop uninstall lanes' },
-  { how: 'npm', cmd: 'npm uninstall -g @autter/lanes' },
+  ...(channels.npm ? [{ how: 'npm', cmd: 'npm uninstall -g @autter/lanes' }] : []),
   { how: 'Install script', cmd: 'delete lane and laned from the folder it printed' },
 ];
 
