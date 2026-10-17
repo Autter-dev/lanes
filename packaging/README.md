@@ -25,7 +25,7 @@ Lanes ships on six channels, all named `lanes`. Each one installs the same two b
    - publishes to npm, once that's set up (below).
 5. Within the hour, the tap and the bucket copy their file from the new release and test an install. To skip the wait, run their "Update Lanes" workflow by hand.
 6. **winget:** download the `channel-files` artifact from the release run (`gh run download <run-id> -R Autter-dev/lanes -n channel-files`). Then either open a PR to microsoft/winget-pkgs with `dist/winget/manifests/a/Autter/Lanes/<version>/`, or run `wingetcreate submit` on that folder.
-7. On the website, update `version` and set `live: true` in `site/src/data/site.ts`.
+7. On the website, set `version` in `site/src/data/site.ts` to the new release, and push. The releases page (`/download/releases/`) lists every `## <version> (<date>)` section of `CHANGELOG.md` up to that version, with its files, so it updates by itself.
 
 To check everything without publishing, run the Release workflow by hand (Actions → Release → Run workflow). It builds every target and the channel files, and publishes nothing.
 

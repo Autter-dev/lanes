@@ -2,6 +2,8 @@
 import Base from '../layouts/Base.astro';
 import InstallCommand from '../components/InstallCommand.astro';
 import { archives, channels, downloadPlatforms, install, release, site, uninstall } from '../data/site';
+import { allReleases, longDate } from '../data/releases';
+const slug = (v: string) => v.replace(/[^0-9A-Za-z]+/g, '-');
 ---
 <Base title="Download Lanes" description="Install Lanes on macOS, Linux or Windows with Homebrew, winget, Scoop, npm or a one-line script. Free and open source.">
   <section class="page-hero wrap" aria-labelledby="dl-title">
@@ -67,8 +69,8 @@ import { archives, channels, downloadPlatforms, install, release, site, uninstal
           {archives.map((a) => (
             <tr>
               <th scope="row">{a.system}</th>
-              <td><a class="link mono" href={release.file(a.name)}>{a.name}</a></td>
-              <td><a class="link mono" href={release.file(`${a.name}.sha256`)}>sha256</a></td>
+              <td><a class="link mono" href={a.url}>{a.name}</a></td>
+              <td><a class="link mono" href={a.sha}>sha256</a></td>
             </tr>
           ))}
         </tbody>
@@ -78,6 +80,29 @@ import { archives, channels, downloadPlatforms, install, release, site, uninstal
       <p>Downloaded in a browser on macOS? The archive is quarantined because it isn't signed yet. After unpacking, run <code>xattr -d com.apple.quarantine lane laned</code> once.</p>
       <p>Check a file: <code>gh attestation verify {archives[0].name} --repo Autter-dev/lanes</code> proves it was built by this repo's release workflow. Or compare it with <a class="link" href={release.file('SHA256SUMS')}>SHA256SUMS</a>.</p>
       <p>Every file, past versions too, is on the <a class="link" href={release.page}>releases page</a>. The install scripts also work straight from GitHub, for sandboxes that only allow github.com: <code class="dl-break">{install.shGithub}</code></p>
+    </div>
+  </section>
+
+  <section class="section wrap" aria-labelledby="dl-past" style="padding-top:0">
+    <div class="section__head">
+      <h2 class="h2" id="dl-past" data-split="lines">Past releases.</h2>
+      <p>Every version stays downloadable, with its own files, checksums and install command.</p>
+    </div>
+    <ol class="rel-mini">
+      {allReleases.slice(0, 5).map((r) => (
+        <li>
+          <a class="rel-mini__link" href={`/download/releases/#v${slug(r.version)}`}>
+            <span class="rel-mini__v">{r.version}</span>
+            <time datetime={r.date}>{longDate(r.date)}</time>
+            <span class="rel-mini__tags">{r.latest && 'Latest'}{r.latest && r.preview && ' · '}{r.preview && 'Preview'}</span>
+            <span class="rel-mini__go" aria-hidden="true">→</span>
+          </a>
+        </li>
+      ))}
+    </ol>
+    <div class="start__actions" style="margin-top:2rem">
+      <a class="btn btn--ghost" href="/download/releases/">All releases</a>
+      <a class="btn btn--ghost" href="https://github.com/Autter-dev/lanes/releases">Releases on GitHub</a>
     </div>
   </section>
 

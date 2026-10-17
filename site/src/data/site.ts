@@ -82,14 +82,31 @@ export const downloadPlatforms: { os: Os; name: string; detail: string; methods:
   },
 ];
 
-export const archives = [
+const targets = [
   { system: 'macOS, Apple silicon', target: 'aarch64-apple-darwin', ext: 'tar.gz' },
   { system: 'macOS, Intel', target: 'x86_64-apple-darwin', ext: 'tar.gz' },
   { system: 'Linux, x64', target: 'x86_64-unknown-linux-musl', ext: 'tar.gz' },
   { system: 'Linux, arm64', target: 'aarch64-unknown-linux-musl', ext: 'tar.gz' },
   { system: 'Windows, x64', target: 'x86_64-pc-windows-msvc', ext: 'zip' },
   { system: 'Windows, arm64', target: 'aarch64-pc-windows-msvc', ext: 'zip' },
-].map((a) => ({ ...a, name: `lanes-${release.version}-${a.target}.${a.ext}` }));
+];
+
+// Every release has the same files, named by version and target (packaging/render.mjs).
+export const releaseFile = (version: string, name: string) => `${releases}/download/v${version}/${name}`;
+export const releaseNotes = (version: string) => `${releases}/tag/v${version}`;
+export const archivesFor = (version: string) =>
+  targets.map((a) => {
+    const name = `lanes-${version}-${a.target}.${a.ext}`;
+    return { ...a, name, url: releaseFile(version, name), sha: releaseFile(version, `${name}.sha256`) };
+  });
+export const archives = archivesFor(release.version);
+
+// How to install one exact version, for the releases page.
+export const installVersion = (version: string) => [
+  { how: 'Install script (macOS, Linux, WSL)', cmd: `curl -fsSL https://lanes.autter.dev/install.sh | sh -s -- --version ${version}` },
+  { how: 'PowerShell (Windows)', cmd: `$env:LANES_VERSION = '${version}'; irm https://lanes.autter.dev/install.ps1 | iex` },
+  ...(channels.npm ? [{ how: 'npm', cmd: `npm install -g @autter/lanes@${version}` }] : []),
+];
 
 export const uninstall = [
   { how: 'Homebrew', cmd: 'brew uninstall lanes' },

@@ -144,8 +144,40 @@ html.on-ink .site-header .btn { background: var(--c-ink-fg); color: var(--c-fg);
 .dl-notes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gutter); margin-top: 2.5rem; font-size: var(--t-xs); color: var(--c-muted); line-height: 1.55; }
 .dl-notes code { color: var(--c-fg); }
 .dl-break { overflow-wrap: anywhere; }
+/* Releases: the short list on the download page, and the full page */
+.rel-mini { list-style: none; padding: 0; border-top: 1px solid var(--c-fg); }
+.rel-mini__link { display: grid; grid-template-columns: minmax(5rem, 1fr) 2fr 1fr auto; gap: 1rem; align-items: baseline; padding: 1.1rem 0; border-bottom: 1px solid var(--c-line); transition: padding-left 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+.rel-mini__link:hover { padding-left: 0.5rem; }
+.rel-mini__v { font-weight: 700; font-size: var(--t-m); letter-spacing: -0.02em; }
+.rel-mini time, .rel-mini__tags { font-family: var(--f-mono); font-size: var(--t-xs); color: var(--c-muted); }
+.rel-mini__go { color: var(--c-muted); }
+.rel-list { display: flex; flex-direction: column; gap: clamp(3rem, 7vw, 5.5rem); padding-top: 0; }
+.rel { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: var(--gutter); row-gap: 1.75rem; padding-top: 1.75rem; border-top: 1px solid var(--c-fg); }
+.rel__head { grid-column: 1 / span 4; display: flex; flex-direction: column; gap: 0.9rem; align-self: start; position: sticky; top: 6rem; }
+.rel__version { font-size: var(--t-xl); }
+.rel__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; font-family: var(--f-mono); font-size: var(--t-xs); color: var(--c-muted); }
+.rel__tag { padding: 0.2rem 0.65rem; border-radius: var(--radius-pill); border: 1px solid var(--c-line); }
+.rel__body { grid-column: 5 / -1; display: flex; flex-direction: column; gap: 1.75rem; min-width: 0; }
+.rel__summary { display: flex; flex-direction: column; gap: 0.75rem; max-width: 60ch; }
+.rel__summary ul { padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.4rem; }
+.rel__summary li::marker { color: var(--c-dot); }
+.rel__links { display: flex; flex-wrap: wrap; gap: 0.4rem 0.6rem; font-size: var(--t-xs); color: var(--c-muted); }
+.rel__install { display: flex; flex-direction: column; gap: 1rem; }
+.rel__cmds { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: 1.25rem var(--gutter); }
+/* On phones each file is one stacked row: the system, then its archive and checksum */
+@media (max-width: 640px) {
+  .dl-table thead { display: none; }
+  .dl-table tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 1rem; row-gap: 0.3rem; padding: 0.9rem 0; border-bottom: 1px solid var(--c-line); }
+  .dl-table th, .dl-table td { padding: 0; border: 0; }
+  .dl-table tbody th { grid-column: 1 / -1; }
+}
+
 @media (max-width: 1000px) {
   .dl-grid, .dl-notes { grid-template-columns: minmax(0, 1fr); }
+  .rel__head, .rel__body { grid-column: 1 / -1; }
+  .rel__head { position: static; flex-direction: row; flex-wrap: wrap; align-items: baseline; justify-content: space-between; }
+  .rel-mini__link { grid-template-columns: 1fr auto; }
+  .rel-mini__tags { display: none; }
   .dl-card:first-child { grid-column: auto; }
 }
 .install__copy {

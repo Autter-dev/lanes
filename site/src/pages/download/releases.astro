@@ -1,0 +1,73 @@
+---
+import Base from '../../layouts/Base.astro';
+import InstallCommand from '../../components/InstallCommand.astro';
+import { allReleases, longDate } from '../../data/releases';
+
+const slug = (v: string) => v.replace(/[^0-9A-Za-z]+/g, '-');
+---
+<Base title="All Lanes releases" description="Every version of Lanes, newest first, with its archives for macOS, Linux and Windows, their checksums, and the command to install that exact version.">
+  <section class="page-hero wrap" aria-labelledby="rel-title">
+    <p class="label"><a class="link" href="/download/">Download</a> / All releases</p>
+    <h1 class="display" id="rel-title" style="margin-top:1.5rem">All releases<span class="dot">.</span></h1>
+    <div class="page-hero__row">
+      <p class="lede">Every version of Lanes, newest first, with its files, checksums and the command to install that exact version.</p>
+      <p class="note">Want the newest? The <a class="link" href="/download/">download page</a> picks the right install for your system. Every release is also on <a class="link" href="https://github.com/Autter-dev/lanes/releases">GitHub</a>, with its build attestations.</p>
+    </div>
+  </section>
+
+  <section class="section wrap rel-list" aria-label="Releases">
+    {allReleases.length === 0 && <p class="note">No releases yet. The first one will be listed here.</p>}
+    {allReleases.map((r) => (
+      <article class="rel" id={`v${slug(r.version)}`} aria-labelledby={`rel-${slug(r.version)}`}>
+        <header class="rel__head">
+          <h2 class="h2 rel__version" id={`rel-${slug(r.version)}`}>{r.version}</h2>
+          <div class="rel__meta">
+            <time datetime={r.date}>{longDate(r.date)}</time>
+            {r.latest && <span class="dl-card__yours">Latest</span>}
+            {r.preview && <span class="rel__tag">Preview</span>}
+          </div>
+        </header>
+
+        <div class="rel__body">
+          <div class="rel__summary" set:html={r.summary} />
+          <p class="rel__links">
+            <a class="link" href={r.notes}>Release notes on GitHub</a>
+            <span aria-hidden="true">·</span>
+            <a class="link" href={r.sums}>SHA256SUMS</a>
+            <span aria-hidden="true">·</span>
+            {r.installers.map((f, i) => <>{i > 0 && ', '}<a class="link mono" href={f.url}>{f.name}</a></>)}
+          </p>
+
+          <div class="dl-table-wrap">
+            <table class="dl-table">
+              <caption class="sr-only">Lanes {r.version} files</caption>
+              <thead><tr><th scope="col">System</th><th scope="col">Archive</th><th scope="col">Checksum</th></tr></thead>
+              <tbody>
+                {r.archives.map((a) => (
+                  <tr>
+                    <th scope="row">{a.system}</th>
+                    <td><a class="link mono" href={a.url}>{a.name}</a></td>
+                    <td><a class="link mono" href={a.sha}>sha256</a></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="rel__install">
+            <h3 class="h3">Install exactly {r.version}</h3>
+            <div class="rel__cmds">
+              {r.install.map((c, i) => (
+                <div class="dl-method">
+                  <p class="dl-method__name">{c.how}</p>
+                  <InstallCommand id={`rel-${slug(r.version)}-${i}`} cmd={c.cmd} block label={`Copy the ${c.how} command for Lanes ${r.version}`} />
+                </div>
+              ))}
+            </div>
+            <p class="dl-method__note">Homebrew, Scoop and winget always install the newest version.</p>
+          </div>
+        </div>
+      </article>
+    ))}
+  </section>
+</Base>
