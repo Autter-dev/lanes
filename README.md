@@ -194,7 +194,8 @@ open http://fix-auth.localhost
 
 | Command | What it does |
 | --- | --- |
-| `lane` | Opens the terminal app |
+| `lane` | Opens the terminal app, with a short welcome the first time |
+| `lane setup` | Checks your machine and chooses your settings (`--json` and `--yes` for scripts) |
 | `lane init` | Sets up Lanes for your repo and the agents you use |
 | `lane new <name>` | Creates a lane |
 | `lane list` | Lists your lanes with their ports and URLs |

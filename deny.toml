@@ -19,6 +19,7 @@ exceptions = [
   { crate = "lane", allow = ["AGPL-3.0-only"] },
   { crate = "laned", allow = ["AGPL-3.0-only"] },
   { crate = "lane-core", allow = ["AGPL-3.0-only"] },
+  { crate = "lane-tui", allow = ["AGPL-3.0-only"] },
 ]
 
 [bans]

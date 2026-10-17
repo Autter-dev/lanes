@@ -6,8 +6,13 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ## Unreleased
 
+### 2026-10-17
+
+- `05:26` **Added**: motion and character in the terminal app: "Lanes." in big block letters on the welcome and home screens, a step marker that glides between stops, small running lanes while checks finish, a packet lane on the privacy step, and Autter's otter in its captain's hat (swimming on the welcome, blinking beside sign-in, reaching the finish on the last step). `LANE_NO_ANIM=1` keeps every screen still.
+
 ### 2026-10-16
 
+- `20:43` **Added**: the first-run welcome. Running `lane` in a terminal the first time opens a six-step terminal app (ratatui): a welcome with moving lanes; live checks of this machine (OS, whether instant copies work on this disk, Git, the repo, the stack, agents on `PATH`, free disk), each with what to do next; a four-step "how a lane works"; a privacy step that shows exactly what the install count sends and respects `DO_NOT_TRACK`; an optional sign-in that's shown but disabled until the gateway opens; and next steps for the folder you're in. After that, `lane` opens a home screen. `lane setup` reruns it, `lane setup --json` prints the checks, and `lane setup --yes [--telemetry on|off]` saves without the app. It never opens in pipes, CI, `--json` or agent sessions. Settings live in `~/.config/lane/config.toml` (`%APPDATA%\lane` on Windows), saved atomically.
 - `19:47` **Added**: repo setup: bug and feature issue forms (OS, filesystem and command asked up front), a pull request template with the checks to run, weekly grouped Dependabot updates for Cargo, the website and Actions, CI on Windows next to Linux and macOS, a website build job, and `.gitattributes` keeping LF line endings everywhere.
 - `18:53` **Added**: website "Runs where your agents run" section (macOS, Linux, Windows and WSL2, cloud agent sandboxes, GitHub then GitLab and Bitbucket) and a "What's being built" status lane that fills as you scroll, plus a Status link in the nav.
 - `18:27` **Added**: website "Built-in guardrails" segment (edits checked against the latest version, approval codes for protected files, named agents, lanes from any branch) with an animated approval session, and a "Coming next on the gateway" section (lanes your team can open, agents with their own access, merging after checks). (`5214dd3`)
