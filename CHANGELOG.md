@@ -8,6 +8,7 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-17
 
+- `13:25` **Changed**: `AGENTS.md` names the anonymous install count as the one exception to "no network calls unless the user ran `lane login`". It's on by default, opt-out with `lane telemetry off`, `LANE_TELEMETRY=0` or `DO_NOT_TRACK=1`, and never sent from CI. Nothing sends it yet.
 - `12:34` **Added**: the download page says up front that builds aren't code-signed yet, and what that means on each system. macOS needs one `xattr` command, only for archives downloaded in a browser. Windows 11 with Smart App Control on may block `lane.exe` (WSL2 works meanwhile). Linux needs nothing extra.
 - `11:47` **Added**: an "All releases" page at lanes.autter.dev/download/releases. It lists every version, newest first, with its summary, the six archives and their checksums, the installers, a link to the release notes, and the command to install that exact version. The download page has a "Past releases" list linking to it, and the footer links it too. On phones, file tables stack one file per row.
 - `11:42` **Added**: Lanes is on npm: `npm install -g @autter/lanes` installs only the build for your system, with signed provenance. A new `npm` workflow publishes an existing release from its own archives, and the installers check now installs through every live channel (both scripts, Homebrew, Scoop and npm) on macOS, Linux and Windows. The download page lists npm as live; winget is still waiting for Microsoft's review.

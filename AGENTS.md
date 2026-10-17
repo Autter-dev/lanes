@@ -21,7 +21,7 @@ Run format, lint and tests before you finish.
 - Uses the exit codes in `lane_core::exit`. Never renumber them.
 - Error messages say what to do next.
 - Writes are safe to retry.
-- No network calls unless the user ran `lane login`.
+- No network calls unless the user ran `lane login`. The one exception is the anonymous install count. It's on by default, and off with `lane telemetry off`, `LANE_TELEMETRY=0` or `DO_NOT_TRACK=1`. It's never sent from CI, and it never slows a command down.
 
 ## Dependencies
 
