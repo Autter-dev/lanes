@@ -448,6 +448,8 @@ mod platform {
 
     pub fn free_bytes(dir: &Path) -> Option<u64> {
         let st = statfs(dir)?;
+        // f_bavail is already u64 on macOS; the cast keeps this the same as the Linux code.
+        #[allow(clippy::unnecessary_cast)]
         Some(st.f_bavail as u64 * st.f_bsize as u64)
     }
 
