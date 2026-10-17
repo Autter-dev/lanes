@@ -6,6 +6,10 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ## Unreleased
 
+### 2026-10-17
+
+- `15:25` **Changed**: the website offers 0.0.2: the download page's archives, and a 0.0.2 entry on the releases page above 0.0.1.
+
 ## 0.0.2 (2026-10-17)
 
 **The lane commands work: try them on your own repo.** Still a preview: agents don't land in lanes on their own yet, which comes next.
