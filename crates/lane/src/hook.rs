@@ -5,10 +5,14 @@
 //! - `worktree-remove` removes the lane;
 //! - `session-start` puts the lane's ports in the session's environment and tells the agent
 //!   where it is;
-//! - `pre-tool-use` turns down `git worktree add` in a Lanes repo, pointing to `lane new`.
+//! - `pre-tool-use` turns down `git worktree add`, a clone of the repo or a copy of its folder in
+//!   a Lanes repo, pointing to `lane new`.
 //!
-//! `lane init` adds these hooks. The last two never get in the way: if anything goes wrong they
-//! stay silent and let the session carry on.
+//! `lane hook git post-checkout` is what a Git hook that Lanes doesn't own runs (Husky's, or
+//! lefthook's): a new worktree becomes a lane.
+//!
+//! `lane init` adds these hooks. All but the first two never get in the way: if anything goes
+//! wrong they stay silent and let the session, or the checkout, carry on.
 
 use crate::{print_json, report};
 use lane_core::agents;
@@ -26,17 +30,23 @@ pub const HOOK_HELP: &str = "\
 lane hook: what an agent's hooks run (`lane init` sets them up)
 
 Usage: lane hook claude <event> [--json]
+       lane hook git post-checkout <previous HEAD> <new HEAD> <flag> [--json]
 
-Reads Claude Code's hook input on stdin and answers in Claude Code's format.
+`lane hook claude` reads Claude Code's hook input on stdin and answers in Claude Code's format.
 
 Events:
   worktree-create   Make a lane for `claude -w` and print its folder (WorktreeCreate)
   worktree-remove   Remove the lane Claude Code is done with (WorktreeRemove)
   session-start     Give the session the lane's ports and tell it where it is (SessionStart)
-  pre-tool-use      Turn down `git worktree add`, pointing to `lane new` (PreToolUse)
+  pre-tool-use      Turn down `git worktree add`, a clone of the repo or a copy of its folder,
+                    pointing to `lane new` (PreToolUse)
+
+`lane hook git post-checkout` takes Git's post-checkout arguments: a new worktree (checked out
+from nothing) becomes a lane. It's the line `lane init` adds to Husky's hook, and the command it
+gives for lefthook. It never fails the checkout.
 
 Options:
-  --json       For worktree-create and worktree-remove: print the result as JSON
+  --json       For worktree-create, worktree-remove and post-checkout: print the result as JSON
   -h, --help   Show this help
 ";
 
@@ -48,19 +58,28 @@ pub fn hook(args: &[String]) -> ExitCode {
         .filter(|a| *a != "--json")
         .collect();
     match rest.as_slice() {
-        [] | ["-h" | "--help"] | [_, "-h" | "--help"] => {
+        [] | [.., "-h" | "--help"] => {
             print!("{HOOK_HELP}");
             ExitCode::from(exit::OK)
         }
         ["claude", "worktree-create"] => done(worktree_create(json), json),
         ["claude", "worktree-remove"] => done(worktree_remove(json), json),
-        // These two never stop a session: a problem is noted on stderr and nothing more.
+        // These never stop a session or a checkout: a problem is noted on stderr and nothing more.
         ["claude", "session-start"] => quiet(session_start()),
         ["claude", "pre-tool-use"] => quiet(pre_tool_use()),
+        ["git", "post-checkout", git_args @ ..] => quiet(post_checkout(git_args, json)),
+        ["git", ..] => report(
+            Some("hook"),
+            &Error::usage("unknown Git hook").hint(
+                "Lanes has one Git hook: `lane hook git post-checkout <previous HEAD> <new HEAD> <flag>`.",
+            ),
+            json,
+        ),
         [agent, ..] if *agent != "claude" => report(
             Some("hook"),
-            &Error::usage(format!("no hooks for `{agent}` yet"))
-                .hint("Only Claude Code has hooks so far: `lane hook claude <event>`."),
+            &Error::usage(format!("no hooks for `{agent}` yet")).hint(
+                "Only Claude Code and Git have hooks so far: `lane hook claude <event>` and `lane hook git post-checkout`.",
+            ),
             json,
         ),
         _ => report(
@@ -251,28 +270,61 @@ fn write_env(file: &Path, lane: &Lane) -> Result<()> {
     })
 }
 
-/// Before a shell command runs: turn down `git worktree add` in a Lanes repo.
+/// Before a shell command runs: in a Lanes repo, turn down `git worktree add`, a clone of the
+/// repo and a recursive copy of its folder, each with its own reason.
 fn pre_tool_use() -> Result<()> {
     let input = input()?;
     let command = input["tool_input"]["command"].as_str().unwrap_or_default();
+    let powershell = input["tool_name"].as_str() == Some("PowerShell");
     // Most commands stop here, before any Git or disk work.
-    if !agents::makes_worktree(command) {
+    let found = agents::repo_copies(command, powershell);
+    if found.is_empty() {
         return Ok(());
     }
-    let Ok(repo) = Repo::open(&cwd(&input)) else {
+    let cwd = cwd(&input);
+    let Ok(repo) = Repo::open(&cwd) else {
         return Ok(());
     };
     if !is_lanes_repo(&repo, Store::open_existing()?.as_ref())? {
         return Ok(());
     }
+    let Some(reason) = agents::deny_reason(&found, &cwd, &repo.root) else {
+        return Ok(());
+    };
     print_json(&json!({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
-            "permissionDecisionReason": agents::WORKTREE_DENIED,
+            "permissionDecisionReason": reason,
         }
     }));
     Ok(())
+}
+
+/// Git's post-checkout hook: a new worktree, checked out from nothing so the previous HEAD is
+/// all zeros, becomes a lane. Not one Lanes made itself (its Git commands set LANE_GIT), and not
+/// the repo's own folder after a `git clone`.
+fn post_checkout(git_args: &[&str], json: bool) -> Result<()> {
+    let new = git_args
+        .first()
+        .is_some_and(|head| !head.is_empty() && head.bytes().all(|b| b == b'0'));
+    let ours = std::env::var_os("LANE_GIT").is_some_and(|v| !v.is_empty());
+    let lane = if new && !ours { adopt_here()? } else { None };
+    if json {
+        print_json(&json!({ "lane": lane }));
+    }
+    Ok(())
+}
+
+fn adopt_here() -> Result<Option<Lane>> {
+    let here = crate::here();
+    let repo = Repo::open(&here)?;
+    let top = engine::norm(&lane_core::repo::top_level(&here)?);
+    if engine::same_path(&top, &repo.root) {
+        return Ok(None);
+    }
+    let mut store = Store::open()?;
+    engine::adopt(&mut store, &repo, &top, None, None, None).map(Some)
 }
 
 /// A repo set up for Lanes: it has a lane.toml, or lanes.
