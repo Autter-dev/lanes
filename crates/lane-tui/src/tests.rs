@@ -16,6 +16,8 @@ fn input(forced_off: Option<&'static str>) -> Input {
         telemetry_forced_off: forced_off,
         animate: false,
         theme: Theme::new(true, false),
+        agents: true,
+        agents_found: vec!["Claude Code", "Codex"],
     }
 }
 
@@ -166,7 +168,13 @@ fn enter_walks_through_to_finished() {
             break;
         }
     }
-    assert_eq!(outcome, Some(Outcome::Finished { telemetry: true }));
+    assert_eq!(
+        outcome,
+        Some(Outcome::Finished {
+            telemetry: true,
+            agents: true
+        })
+    );
 }
 
 #[test]
@@ -522,4 +530,23 @@ fn home_says_what_to_do_next() {
         home_with(set_up(true), Vec::new()).contains("Make your first lane: lane new fix-auth")
     );
     assert!(home_with(None, Vec::new()).contains("cd your-project"));
+}
+
+#[test]
+fn the_last_screen_puts_agents_in_lanes_and_a_switches_it() {
+    let mut app = at(5, 0);
+    let text = screen_text(&app, 100, 30);
+    assert!(
+        text.contains("Agents in lanes: on, for Claude Code and Codex"),
+        "{text}"
+    );
+    assert_eq!(app.on_key(key(KeyCode::Char('a'))), None);
+    assert!(screen_text(&app, 100, 30).contains("Agents in lanes: off"));
+    assert_eq!(
+        app.on_key(key(KeyCode::Enter)),
+        Some(Outcome::Finished {
+            telemetry: true,
+            agents: false
+        })
+    );
 }

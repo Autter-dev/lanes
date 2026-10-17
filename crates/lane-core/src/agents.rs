@@ -5,6 +5,7 @@
 //! gets a short note. `lane init` writes all of it; everything here is safe to run again.
 
 mod copies;
+pub mod user;
 
 pub use copies::{RepoCopy, deny_reason, makes_worktree, repo_copies};
 
@@ -200,6 +201,128 @@ pub fn merge_claude_hooks(settings: &mut Value) -> Result<bool> {
     Ok(changed)
 }
 
+/// Every Cursor hook Lanes adds starts with this.
+const CURSOR_PREFIX: &str = "lane hook cursor";
+
+/// The hooks Lanes adds to Cursor's `hooks.json`: a session in a Cursor worktree makes it a
+/// lane, and a shell command that copies the repo is turned down.
+pub fn cursor_hooks() -> Value {
+    let hook = |event: &str, timeout: u32| json!({ "command": format!("{CURSOR_PREFIX} {event}"), "timeout": timeout });
+    json!({
+        "sessionStart": [hook("session-start", 300)],
+        "beforeShellExecution": [hook("before-shell", 10)],
+    })
+}
+
+fn is_cursor_hook(h: &Value) -> bool {
+    h["command"]
+        .as_str()
+        .is_some_and(|c| c.trim_start().starts_with(CURSOR_PREFIX))
+}
+
+/// Add Lanes' hooks to Cursor's `hooks.json` (`{"version": 1, "hooks": {...}}`), keeping the
+/// rest. Returns whether anything was added.
+pub fn merge_cursor_hooks(file: &mut Value) -> Result<bool> {
+    let not_an_object = || {
+        Error::new(ErrorKind::Config, "Cursor's hooks.json isn't a JSON object")
+            .hint("Fix ~/.cursor/hooks.json, or move it away, then run `lane setup` again.")
+    };
+    let root = file.as_object_mut().ok_or_else(not_an_object)?;
+    root.entry("version").or_insert_with(|| json!(1));
+    let hooks = root
+        .entry("hooks")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .ok_or_else(not_an_object)?;
+    let mut changed = false;
+    let Value::Object(ours) = cursor_hooks() else {
+        unreachable!("cursor_hooks is an object")
+    };
+    for (event, entries) in ours {
+        let list = hooks
+            .entry(event)
+            .or_insert_with(|| json!([]))
+            .as_array_mut()
+            .ok_or_else(not_an_object)?;
+        if !list.iter().any(is_cursor_hook) {
+            list.extend(entries.as_array().cloned().unwrap_or_default());
+            changed = true;
+        }
+    }
+    Ok(changed)
+}
+
+/// Whether all of Lanes' Cursor hooks are in this `hooks.json`.
+pub fn cursor_hooks_present(file: &Value) -> bool {
+    let Value::Object(ours) = cursor_hooks() else {
+        unreachable!("cursor_hooks is an object")
+    };
+    ours.keys().all(|event| {
+        file["hooks"][event]
+            .as_array()
+            .is_some_and(|l| l.iter().any(is_cursor_hook))
+    })
+}
+
+/// Take Lanes' hooks back out of Cursor's `hooks.json`, and nothing else.
+pub fn remove_cursor_hooks(file: &mut Value) -> bool {
+    let Some(hooks) = file.get_mut("hooks").and_then(Value::as_object_mut) else {
+        return false;
+    };
+    let mut changed = false;
+    for list in hooks.values_mut().filter_map(Value::as_array_mut) {
+        let before = list.len();
+        list.retain(|h| !is_cursor_hook(h));
+        changed |= list.len() != before;
+    }
+    hooks.retain(|_, v| v.as_array().is_none_or(|l| !l.is_empty()));
+    changed
+}
+
+/// Whether a hook group holds one of Lanes' hooks.
+fn is_lanes_group(group: &Value) -> bool {
+    group["hooks"].as_array().is_some_and(|hs| {
+        hs.iter().any(|h| {
+            h["command"]
+                .as_str()
+                .is_some_and(|c| c.trim_start().starts_with(HOOK_PREFIX))
+        })
+    })
+}
+
+/// Whether every one of Lanes' hooks is in these Claude Code settings.
+pub fn claude_hooks_present(settings: &Value) -> bool {
+    let Value::Object(ours) = claude_hooks() else {
+        unreachable!("claude_hooks is an object")
+    };
+    ours.keys().all(|event| {
+        settings["hooks"][event]
+            .as_array()
+            .is_some_and(|list| list.iter().any(is_lanes_group))
+    })
+}
+
+/// Take Lanes' hooks back out of Claude Code settings, and nothing else: an event left with no
+/// hooks goes, and so does an empty `hooks`. Returns whether anything was removed.
+pub fn remove_claude_hooks(settings: &mut Value) -> bool {
+    let Some(hooks) = settings.get_mut("hooks").and_then(Value::as_object_mut) else {
+        return false;
+    };
+    let mut changed = false;
+    for list in hooks.values_mut().filter_map(Value::as_array_mut) {
+        let before = list.len();
+        list.retain(|g| !is_lanes_group(g));
+        changed |= list.len() != before;
+    }
+    hooks.retain(|_, v| v.as_array().is_none_or(|l| !l.is_empty()));
+    if hooks.is_empty()
+        && let Some(root) = settings.as_object_mut()
+    {
+        root.remove("hooks");
+    }
+    changed
+}
+
 /// Write Lanes' hooks into the repo's `.claude/settings.local.json`, and keep that file out of
 /// Git if nothing ignores it yet.
 pub fn setup_claude(repo: &Repo) -> Result<Change> {
@@ -320,7 +443,7 @@ pub const POST_CHECKOUT: &str = r#"#!/bin/sh
 # Lanes' own Git commands set LANE_GIT, so its lanes aren't adopted twice.
 case "$1" in
   *[!0]*) ;;
-  *) if [ -z "$LANE_GIT" ] && command -v lane >/dev/null 2>&1; then lane adopt >/dev/null 2>&1; fi ;;
+  *) if [ -z "$LANE_GIT" ] && command -v lane >/dev/null 2>&1; then lane hook git post-checkout "$@" >/dev/null 2>&1; fi ;;
 esac
 before="$(dirname "$0")/post-checkout.before-lanes"
 if [ -x "$before" ]; then exec "$before" "$@"; fi
@@ -378,9 +501,18 @@ pub fn setup_git_hook(repo: &Repo) -> Result<Change> {
     }
     let path = crate::git::git_path(&repo.root, "hooks/post-checkout")?;
     let existing = read_or_empty(&path)?;
-    if existing.contains(HOOK_MARKER) {
+    if existing == POST_CHECKOUT {
         return Ok(Change {
             path,
+            ..Change::default()
+        });
+    }
+    // An older copy of ours (0.0.4 ran `lane adopt`) is replaced; anyone else's is kept below.
+    if existing.contains(HOOK_MARKER) {
+        write_atomic(&path, POST_CHECKOUT)?;
+        return Ok(Change {
+            path,
+            changed: true,
             ..Change::default()
         });
     }

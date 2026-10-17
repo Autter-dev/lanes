@@ -35,6 +35,8 @@ fn main() {
                 telemetry_forced_off: None,
                 animate: false,
                 theme: Theme::new(true, false),
+                agents: true,
+                agents_found: vec!["Claude Code", "Codex", "Cursor"],
             },
             checks.clone(),
         );

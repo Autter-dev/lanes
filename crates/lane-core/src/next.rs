@@ -24,17 +24,16 @@ fn step(run: impl Into<String>, why: impl Into<String>) -> Step {
 fn init() -> Step {
     step(
         "lane init",
-        "write lane.toml, so lanes come with dependencies and their own .env",
+        "write down what Lanes found in lane.toml, so teammates get the same lanes",
     )
 }
 
-/// A repo with no lanes yet: set it up if it isn't, then make the first lane.
+/// A repo with no lanes yet: make the first lane (and write lane.toml, if there isn't one).
 pub fn first_lane(repo: &Repo) -> Vec<Step> {
-    let mut steps = Vec::new();
+    let mut steps = vec![step("lane new fix-auth", "make a lane, any name will do")];
     if !repo.has_lane_toml() {
         steps.push(init());
     }
-    steps.push(step("lane new fix-auth", "make a lane, any name will do"));
     steps
 }
 
@@ -48,9 +47,6 @@ pub fn in_lane(repo: &Repo, lane: &Lane) -> Vec<Step> {
             .unwrap_or_default()
     };
     let mut steps = Vec::new();
-    if !repo.has_lane_toml() {
-        steps.push(init());
-    }
     steps.push(step(
         format!("cd {}", quote(&lane.path)),
         "start your agent here, so it works only in this lane",
@@ -70,6 +66,9 @@ pub fn in_lane(repo: &Repo, lane: &Lane) -> Vec<Step> {
             format!("run your dev server with PORT={}", var("PORT")),
         ),
     });
+    if !repo.has_lane_toml() {
+        steps.push(init());
+    }
     steps
 }
 
@@ -217,13 +216,16 @@ mod tests {
     }
 
     #[test]
-    fn a_repo_without_lane_toml_is_told_to_run_init_first() {
+    fn a_repo_without_lane_toml_is_offered_init_last() {
         let (_d, r) = repo(None, false);
         let steps = in_lane(&r, &lane("/work/app.lanes/fix-auth"));
-        assert_eq!(steps[0].run, "lane init");
-        assert_eq!(steps[2].run, "lane exec fix-auth -- <command>");
-        assert!(steps[2].why.contains("PORT=4100"));
-        assert_eq!(first_lane(&r)[0].run, "lane init");
+        assert!(steps[0].run.starts_with("cd "));
+        assert_eq!(steps[1].run, "lane exec fix-auth -- <command>");
+        assert!(steps[1].why.contains("PORT=4100"));
+        assert_eq!(steps[2].run, "lane init");
+        let first = first_lane(&r);
+        assert_eq!(first[0].run, "lane new fix-auth");
+        assert_eq!(first[1].run, "lane init");
     }
 
     #[test]

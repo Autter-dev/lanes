@@ -61,7 +61,12 @@ impl Repo {
             .next()
             .map(|p| norm(&p))
             .unwrap_or_else(|| norm(&top));
-        let project = Project::load(&root)?;
+        // No lane.toml: use what `lane init` would find, so every lane gets its dependencies.
+        let project = if root.join(crate::project::FILE_NAME).is_file() {
+            Project::load(&root)?
+        } else {
+            Project::detected(&crate::detect::detect(&root))
+        };
         let lanes_dir = norm(&clean(&project.lanes_dir(&root)));
         Ok(Repo {
             root,
@@ -444,6 +449,109 @@ pub fn adopt(
             status: Status::Ready,
         })
     })
+}
+
+/// How an adopted worktree was made ready to run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Deps {
+    /// The repo installs nothing, or the worktree already had its dependency folders.
+    None,
+    /// Cloned from `_base`, whose lockfiles match.
+    Cloned,
+    /// The lockfiles differ from `_base`'s, so the install commands ran in the worktree.
+    Installed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Ready {
+    pub deps: Deps,
+    /// Dependency folders cloned from `_base`, relative to the worktree.
+    pub folders: Vec<PathBuf>,
+    pub fixed_paths: usize,
+    pub env_file: Option<PathBuf>,
+}
+
+/// Folders that hold installed dependencies, cloned from `_base` into an adopted worktree.
+const DEP_DIRS: [&str; 2] = ["node_modules", ".venv"];
+
+/// Make a lane that another tool made (an adopted worktree) ready to run, like one from
+/// `lane new`: its `.env`, the agent settings that live on this machine, and its dependencies.
+/// When its lockfiles match `_base`'s, the dependency folders are cloned from `_base`, which is
+/// instant where the disk clones files; otherwise the install commands run in the lane. Folders
+/// already there are left alone, so running it again is safe.
+pub fn make_ready(store: &mut Store, repo: &Repo, lane: &Lane) -> Result<Ready> {
+    let path = lane.path.as_path();
+    copy_local_agent_files(&repo.root, path)?;
+    let env_file = crate::lane_env::write_dotenv(lane, repo.project.env.template.as_deref())?;
+    let commands = &repo.project.setup.install;
+    let mut ready = Ready {
+        deps: Deps::None,
+        folders: Vec::new(),
+        fixed_paths: 0,
+        env_file,
+    };
+    if commands.is_empty() {
+        return Ok(ready);
+    }
+    fs::create_dir_all(&repo.lanes_dir).map_err(|e| io_error("create", &repo.lanes_dir, e))?;
+    let _lock = RepoLock::acquire(&repo.lanes_dir)?;
+    let base = ensure_base(store, repo)?;
+    let head = git::commit_of(path, "HEAD").unwrap_or_default();
+    let same = !head.is_empty()
+        && git::blobs(path, &head, &LOCKFILES)?
+            == git::blobs(&base.path, &base.commit, &LOCKFILES)?;
+    if !same {
+        install(path, commands)?;
+        ready.deps = Deps::Installed;
+        return Ok(ready);
+    }
+    let method = clone::probe(&repo.lanes_dir);
+    for rel in dep_dirs(&base.path) {
+        let to = path.join(&rel);
+        if to.exists() {
+            continue;
+        }
+        clone::clone_tree(
+            &base.path.join(&rel),
+            &to,
+            clone::backend(method).as_ref(),
+            &clone::Options::default(),
+        )?;
+        ready.folders.push(rel);
+    }
+    if !ready.folders.is_empty() {
+        ready.deps = Deps::Cloned;
+        ready.fixed_paths = fix_paths(&base.path, path)?;
+    }
+    Ok(ready)
+}
+
+/// The dependency folders in a checkout, relative to it: at the top and up to three levels
+/// down, for monorepos (`packages/web/node_modules`). Never inside one, or inside `.git`.
+fn dep_dirs(root: &Path) -> Vec<PathBuf> {
+    fn walk(root: &Path, rel: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = fs::read_dir(root.join(rel)) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            if !entry.file_type().is_ok_and(|t| t.is_dir()) {
+                continue;
+            }
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            let child = rel.join(name.as_ref());
+            if DEP_DIRS.contains(&name.as_ref()) {
+                out.push(child);
+            } else if depth < 3 && name != ".git" && name != "target" {
+                walk(root, &child, depth + 1, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, Path::new(""), 0, &mut out);
+    out.sort();
+    out
 }
 
 /// A lane name from a folder name: lowercase, with anything else turned into hyphens.

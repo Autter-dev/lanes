@@ -161,6 +161,17 @@ fn invalid(key: &str, message: &str) -> Error {
 }
 
 impl Project {
+    /// What Lanes uses in a repo with no lane.toml: the defaults, plus the install steps, dev
+    /// command and `.env` template that `lane init` would write, found the same way. So a lane
+    /// an agent makes on its own is ready to run before anyone has set anything up.
+    pub fn detected(found: &crate::detect::Detected) -> Project {
+        let mut p = Project::default();
+        p.setup.install = found.install.clone();
+        p.dev.command = found.dev.as_ref().map(|d| d.command.clone());
+        p.env.template = found.env_template.clone();
+        p
+    }
+
     /// Read `lane.toml` from a repo's top level, or the defaults when there's no file.
     pub fn load(repo_root: &Path) -> Result<Project> {
         let path = repo_root.join(FILE_NAME);

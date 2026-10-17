@@ -47,12 +47,16 @@ pub struct Input {
     pub telemetry_forced_off: Option<&'static str>,
     pub animate: bool,
     pub theme: Theme,
+    /// Put agents in lanes on this machine (the setting's current value).
+    pub agents: bool,
+    /// The agents found here, by name ("Claude Code", ...).
+    pub agents_found: Vec<&'static str>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
     /// Finished the last step: save these choices.
-    Finished { telemetry: bool },
+    Finished { telemetry: bool, agents: bool },
     /// Left early. Nothing is saved, so onboarding shows again next time.
     Quit,
 }
@@ -104,6 +108,8 @@ pub struct Onboarding {
     step: usize,
     explainer_step: usize,
     telemetry: bool,
+    agents: bool,
+    agents_found: Vec<&'static str>,
     forced_off: Option<&'static str>,
     dir: PathBuf,
     checks: Vec<Option<Check>>,
@@ -159,6 +165,8 @@ impl Onboarding {
             step: 0,
             explainer_step: 0,
             telemetry: input.telemetry && forced_off.is_none(),
+            agents: input.agents,
+            agents_found: input.agents_found,
             forced_off,
             dir: input.dir,
             checks: vec![None; CHECK_IDS.len()],
@@ -393,6 +401,7 @@ impl Onboarding {
         } else if self.step == READY {
             return Some(Outcome::Finished {
                 telemetry: self.telemetry,
+                agents: self.agents,
             });
         } else {
             self.move_to(self.step + 1);
@@ -484,6 +493,7 @@ impl Onboarding {
             KeyCode::Left | KeyCode::BackTab | KeyCode::Backspace | KeyCode::Char('h') => {
                 self.back()
             }
+            KeyCode::Char('a') if self.step == READY => self.agents = !self.agents,
             KeyCode::Char(' ') if self.step == PRIVACY => {
                 if self.forced_off.is_some() {
                     self.say(
@@ -602,7 +612,11 @@ impl Onboarding {
             }
             EXPLAINER => vec![("→", "next"), ("←", "back")],
             PRIVACY => vec![("Space", "switch"), ("Enter", "next"), ("←", "back")],
-            READY => vec![("Enter", "save and finish"), ("←", "back")],
+            READY => vec![
+                ("Enter", "save and finish"),
+                ("a", "agents in lanes on/off"),
+                ("←", "back"),
+            ],
             _ => vec![("Enter", "next"), ("←", "back")],
         };
         keys.extend([("?", "help"), ("q", "quit")]);
@@ -1057,6 +1071,16 @@ impl Onboarding {
             Span::styled("Install count: ", th.strong()),
             Span::styled(tele, th.text()),
         ]));
+        let agents = match (self.agents, self.agents_found.as_slice()) {
+            (false, _) => "off: start agents inside a lane's folder yourself".to_string(),
+            (true, []) => "on, for each agent you install (none found yet)".to_string(),
+            (true, found) => format!("on, for {}", and_list(found)),
+        };
+        lines.push(Line::from(vec![
+            Span::styled("· ", th.muted()),
+            Span::styled("Agents in lanes: ", th.strong()),
+            Span::styled(fit(&agents, (width as usize).saturating_sub(20)), th.text()),
+        ]));
         lines.push(Line::from(vec![
             Span::styled("· ", th.muted()),
             Span::styled("Signed in: ", th.strong()),
@@ -1096,6 +1120,15 @@ impl Onboarding {
             .map(|l| Line::styled(l, th.muted())),
         );
         lines
+    }
+}
+
+/// "A", "A and B", "A, B and C".
+fn and_list(items: &[&str]) -> String {
+    match items {
+        [] => String::new(),
+        [one] => one.to_string(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
     }
 }
 

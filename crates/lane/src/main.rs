@@ -103,13 +103,16 @@ Options:
 const ADOPT_HELP: &str = "\
 lane adopt: turn a worktree you already have into a lane
 
-Usage: lane adopt [<path>] [--name NAME] [--agent NAME] [--json] [--request-id ID]
+Usage: lane adopt [<path>] [--ready] [--name NAME] [--agent NAME] [--json] [--request-id ID]
 
 For worktrees made by `git worktree add` or by an agent's own tool. The folder stays where it
 is; Lanes gives it a block of ports and lists it. Adopting a folder twice is safe. <path>
 defaults to the folder you're in.
 
 Options:
+  --ready          Also make it ready to run, like a lane from `lane new`: its .env, and its
+                   dependencies, cloned from the clean _base copy when the lockfiles match and
+                   installed otherwise. The Git hook `lane init` adds uses this.
   --name NAME      The lane's name (default: from the folder's name)
   --agent NAME     Record which agent works in it
   --json           Print the lane
@@ -185,14 +188,19 @@ Options:
 const SETUP_HELP: &str = "\
 lane setup: check this machine and choose your settings
 
-Usage: lane setup [--json] [--yes] [--telemetry on|off]
+Usage: lane setup [--json] [--yes] [--telemetry on|off] [--agents on|off]
 
 In a terminal, `lane setup` opens the welcome: your machine, how a lane works, privacy and sign-in.
+
+It also puts your agents in lanes, once for this machine: it adds Lanes' hooks and a `lanes`
+skill to each agent's own user settings (Claude Code's in ~/.claude), so every repo gets lanes
+without `lane init`. `--agents off` takes exactly that back out.
 
 Options:
   --json               Print the machine checks and settings as JSON; changes nothing unless --yes is given
   --yes                Save the settings without the terminal app (for scripts, CI and agents)
   --telemetry on|off   With --yes: turn the anonymous install count on or off
+  --agents on|off      With --yes: put agents in lanes on this machine, or take it back out
   -h, --help           Show this help
 ";
 
@@ -510,7 +518,7 @@ fn rm(args: &[String]) -> Result<()> {
 /// `lane adopt [<path>]`: make an existing worktree a lane.
 fn adopt(args: &[String]) -> Result<()> {
     let (common, rest) = args::split(args)?;
-    let (mut path, mut name, mut agent) = (None, None, None);
+    let (mut path, mut name, mut agent, mut ready) = (None, None, None, false);
     let mut it = rest.iter();
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -520,6 +528,7 @@ fn adopt(args: &[String]) -> Result<()> {
             }
             "--name" => name = Some(value(&mut it, "--name", "fix-auth")?),
             "--agent" => agent = Some(value(&mut it, "--agent", "claude")?),
+            "--ready" => ready = true,
             s if s.starts_with('-') => return Err(unknown_option("adopt", s)),
             s if path.is_none() => path = Some(PathBuf::from(s)),
             s => {
@@ -539,9 +548,14 @@ fn adopt(args: &[String]) -> Result<()> {
         agent.as_deref(),
         common.request_id.as_deref(),
     )?;
+    let made_ready = if ready {
+        Some(engine::make_ready(&mut store, &repo, &lane)?)
+    } else {
+        None
+    };
     let steps = next::in_lane(&repo, &lane);
     if common.json {
-        print_json(&serde_json::json!({ "lane": lane, "next": steps }));
+        print_json(&serde_json::json!({ "lane": lane, "ready": made_ready, "next": steps }));
     } else {
         println!(
             "{} is a lane: {}, ports {}.",
@@ -549,6 +563,25 @@ fn adopt(args: &[String]) -> Result<()> {
             lane.path.display(),
             ports(&lane)
         );
+        if let Some(r) = &made_ready {
+            match r.deps {
+                engine::Deps::Cloned => println!(
+                    "  deps    {} cloned from _base",
+                    r.folders
+                        .iter()
+                        .map(|f| f.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                engine::Deps::Installed => {
+                    println!("  deps    installed here: its lockfiles differ from _base's")
+                }
+                engine::Deps::None => {}
+            }
+            if let Some(env) = &r.env_file {
+                println!("  env     {}", env.display());
+            }
+        }
         print!("{}", next::render(&steps));
     }
     Ok(())
@@ -898,14 +931,21 @@ fn run_onboarding(env: &Env, config: &mut Config) -> Result<bool, ExitCode> {
         telemetry_forced_off: env.telemetry_forced_off(),
         animate: !env.no_animation(),
         theme: theme(env),
+        agents: config.agents,
+        agents_found: agents::user::found().iter().map(|a| a.name).collect(),
     };
     match lane_tui::run_onboarding(input) {
-        Ok(onboarding::Outcome::Finished { telemetry }) => {
+        Ok(onboarding::Outcome::Finished { telemetry, agents }) => {
             config.onboarded = Some(VERSION.to_string());
             if env.telemetry_forced_off().is_none() {
                 config.telemetry = telemetry;
             }
+            config.agents = agents;
             config.save().map_err(fail)?;
+            match agents::user::setup(agents) {
+                Ok(done) => print_agent_setup(&done, agents),
+                Err(e) => eprintln!("lane: {e}"),
+            }
             Ok(true)
         }
         Ok(onboarding::Outcome::Quit) => Ok(false),
@@ -976,6 +1016,7 @@ struct SetupFlags {
     json: bool,
     yes: bool,
     telemetry: Option<bool>,
+    agents: Option<bool>,
 }
 
 fn parse_setup(args: &[String]) -> Result<Option<SetupFlags>, String> {
@@ -983,6 +1024,7 @@ fn parse_setup(args: &[String]) -> Result<Option<SetupFlags>, String> {
         json: false,
         yes: false,
         telemetry: None,
+        agents: None,
     };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -997,11 +1039,21 @@ fn parse_setup(args: &[String]) -> Result<Option<SetupFlags>, String> {
                     _ => return Err("--telemetry takes `on` or `off`".into()),
                 })
             }
+            "--agents" => {
+                flags.agents = Some(match it.next().map(String::as_str) {
+                    Some("on") => true,
+                    Some("off") => false,
+                    _ => return Err("--agents takes `on` or `off`".into()),
+                })
+            }
             other => return Err(format!("unknown option '{other}'")),
         }
     }
     if flags.telemetry.is_some() && !flags.yes {
         return Err("--telemetry only works with --yes".into());
+    }
+    if flags.agents.is_some() && !flags.yes {
+        return Err("--agents only works with --yes".into());
     }
     Ok(Some(flags))
 }
@@ -1023,14 +1075,22 @@ fn setup(args: &[String], env: &Env) -> ExitCode {
         Err(e) => return fail(e),
     };
 
+    let mut agent_setup = None;
     if flags.yes {
         config.onboarded = Some(VERSION.to_string());
         if let Some(t) = flags.telemetry {
             config.telemetry = t;
         }
+        if let Some(a) = flags.agents {
+            config.agents = a;
+        }
         if let Err(e) = config.save() {
             return fail(e);
         }
+        agent_setup = Some(match agents::user::setup(config.agents) {
+            Ok(done) => done,
+            Err(e) => return report(Some("setup"), &e, flags.json),
+        });
     }
 
     if flags.json {
@@ -1044,8 +1104,10 @@ fn setup(args: &[String], env: &Env) -> ExitCode {
                 "telemetry": config.telemetry && env.telemetry_forced_off().is_none(),
                 "telemetry_setting": config.telemetry,
                 "telemetry_forced_off": env.telemetry_forced_off(),
+                "agents": config.agents,
                 "saved": flags.yes,
             },
+            "agents": agents_json(agent_setup.as_deref()),
             "config_path": lane_core::config::config_path().ok(),
         });
         println!(
@@ -1082,6 +1144,9 @@ fn setup(args: &[String], env: &Env) -> ExitCode {
             .map(|p| p.display().to_string())
             .unwrap_or_default();
         println!("Saved: install count {tele}. Settings are in {path}.");
+        if let Some(done) = &agent_setup {
+            print_agent_setup(done, config.agents);
+        }
     } else {
         println!("Install count: {tele}. Nothing was changed.");
         println!(
@@ -1089,6 +1154,54 @@ fn setup(args: &[String], env: &Env) -> ExitCode {
         );
     }
     ExitCode::from(exit::OK)
+}
+
+/// The agents found here, whether each is set up, and what `--yes` just changed.
+fn agents_json(done: Option<&[(agents::user::Agent, Vec<agents::Change>)]>) -> serde_json::Value {
+    let found = agents::user::found();
+    serde_json::json!(
+        found
+            .iter()
+            .map(|a| {
+                let changes = done
+                    .and_then(|d| d.iter().find(|(x, _)| x == a))
+                    .map(|(_, c)| c.clone())
+                    .unwrap_or_default();
+                serde_json::json!({
+                    "id": a.id,
+                    "name": a.name,
+                    "set_up": agents::user::is_set_up(*a),
+                    "changes": changes,
+                })
+            })
+            .collect::<Vec<_>>()
+    )
+}
+
+/// What putting agents in lanes did, one line per agent.
+fn print_agent_setup(done: &[(agents::user::Agent, Vec<agents::Change>)], on: bool) {
+    if done.is_empty() {
+        if on {
+            println!(
+                "Agents in lanes: none found yet. Run `lane setup --yes` after you install one."
+            );
+        }
+        return;
+    }
+    println!("Agents in lanes:");
+    for (agent, changes) in done {
+        let changed = changes.iter().any(|c| c.changed);
+        let state = match (on, changed) {
+            (true, true) => "set up: its worktrees become lanes, in every repo",
+            (true, false) => "already set up",
+            (false, true) => "taken back out of its settings",
+            (false, false) => "not set up",
+        };
+        println!("  {:<12} {state}", agent.name);
+        for note in changes.iter().filter_map(|c| c.note.as_deref()) {
+            println!("  {:<12} {note}", "");
+        }
+    }
 }
 
 fn print_checks(checks: &[Check]) {

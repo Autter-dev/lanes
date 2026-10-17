@@ -24,6 +24,9 @@ pub struct Config {
     pub telemetry: bool,
     /// Show tips in the terminal app.
     pub hints: bool,
+    /// Put agents in lanes on this machine: `lane setup` adds Lanes to each agent's own user
+    /// settings, so every repo gets lanes without `lane init`. Off takes it back out.
+    pub agents: bool,
 }
 
 impl Default for Config {
@@ -33,6 +36,7 @@ impl Default for Config {
             onboarded: None,
             telemetry: true,
             hints: true,
+            agents: true,
         }
     }
 }

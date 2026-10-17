@@ -22,6 +22,9 @@ fn lane_in(dir: &PathBuf, cwd: &std::path::Path, args: &[&str]) -> Output {
         .current_dir(cwd)
         .env("LANE_CONFIG_DIR", dir)
         .env("LANE_STATE_DIR", dir.join("state"))
+        // Agents' user settings go here, never in the real ~/.claude of whoever runs the tests.
+        .env("LANE_AGENTS_HOME", dir.join("home"))
+        .env_remove("CLAUDE_CONFIG_DIR")
         .env_remove("LANE_REQUEST_ID")
         .env_remove("DO_NOT_TRACK")
         .env_remove("LANE_TELEMETRY")
@@ -43,6 +46,8 @@ fn lane_hook(
         .current_dir(cwd)
         .env("LANE_CONFIG_DIR", dir)
         .env("LANE_STATE_DIR", dir.join("state"))
+        .env("LANE_AGENTS_HOME", dir.join("home"))
+        .env_remove("CLAUDE_CONFIG_DIR")
         .env_remove("LANE_REQUEST_ID")
         .env_remove("CLAUDE_ENV_FILE")
         .stdin(Stdio::piped())
@@ -306,9 +311,12 @@ fn new_list_and_rm_work_end_to_end() {
         .iter()
         .map(|s| s["run"].as_str().unwrap())
         .collect();
-    assert_eq!(steps[0], "lane init");
-    assert!(steps[1].starts_with("cd "), "{steps:?}");
-    assert!(steps[2].starts_with("lane exec fix-auth -- "), "{steps:?}");
+    assert!(steps[0].starts_with("cd "), "{steps:?}");
+    assert!(steps[1].starts_with("lane exec fix-auth -- "), "{steps:?}");
+    assert_eq!(
+        steps[2], "lane init",
+        "no lane.toml here, so init comes last"
+    );
 
     let listed = json(&lane_in(&dir, &repo, &["list", "--json"]));
     assert_eq!(listed["lanes"].as_array().unwrap().len(), 1);
@@ -724,6 +732,7 @@ fn hooks_stay_quiet_outside_a_lanes_repo() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_lane"))
         .args(["hook", "claude", "pre-tool-use"])
         .env("LANE_STATE_DIR", dir.join("state"))
+        .env("LANE_AGENTS_HOME", dir.join("home"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1032,4 +1041,151 @@ fn with_lefthook_init_prints_the_command_to_add() {
         .iter()
         .find(|s| s["run"].as_str().is_some_and(|r| r.starts_with("git add")));
     assert!(add.is_none(), "nothing new to check in: {v}");
+}
+
+#[test]
+fn setup_puts_agents_in_lanes_once_per_machine_and_takes_it_back() {
+    let dir = config_dir("agents-setup");
+    // An agent's user folder, in a fake home: Claude Code is "installed" here.
+    let claude = dir.join("home/.claude");
+    std::fs::create_dir_all(&claude).unwrap();
+    std::fs::write(
+        claude.join("settings.json"),
+        "{\"theme\": \"dark\"}
+",
+    )
+    .unwrap();
+
+    let v = json(&lane(&dir, &["setup", "--yes", "--json"]));
+    assert_eq!(v["settings"]["agents"], true);
+    let found: Vec<(&str, bool)> = v["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| (a["id"].as_str().unwrap(), a["set_up"].as_bool().unwrap()))
+        .collect();
+    assert!(found.contains(&("claude", true)), "{v}");
+    let settings = std::fs::read_to_string(claude.join("settings.json")).unwrap();
+    assert!(settings.contains("lane hook claude worktree-create"));
+    assert!(settings.contains("\"theme\": \"dark\""));
+    assert!(claude.join("skills/lanes/SKILL.md").is_file());
+
+    // Off: exactly what was added goes, and the setting is remembered.
+    let v = json(&lane(
+        &dir,
+        &["setup", "--yes", "--agents", "off", "--json"],
+    ));
+    assert_eq!(v["settings"]["agents"], false);
+    let settings = std::fs::read_to_string(claude.join("settings.json")).unwrap();
+    assert!(!settings.contains("lane hook"), "{settings}");
+    assert!(settings.contains("\"theme\": \"dark\""));
+    assert!(!claude.join("skills/lanes").exists());
+
+    // --agents needs --yes, like --telemetry.
+    assert_eq!(
+        lane(&dir, &["setup", "--agents", "on"]).status.code(),
+        Some(2)
+    );
+}
+
+/// Run `lane hook <agent> <event>` with these exact bytes on stdin, from `cwd`.
+fn hook_raw(
+    dir: &PathBuf,
+    cwd: &std::path::Path,
+    agent: &str,
+    event: &str,
+    stdin: &[u8],
+) -> Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_lane"))
+        .args(["hook", agent, event])
+        .current_dir(cwd)
+        .env("LANE_CONFIG_DIR", dir)
+        .env("LANE_STATE_DIR", dir.join("state"))
+        .env("LANE_AGENTS_HOME", dir.join("home"))
+        .env_remove("LANE_REQUEST_ID")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("lane runs");
+    child.stdin.take().unwrap().write_all(stdin).unwrap();
+    child.wait_with_output().unwrap()
+}
+
+#[test]
+fn a_cursor_agent_in_its_own_worktree_gets_a_lane() {
+    let dir = config_dir("cursor-hooks");
+    let repo = repo_with_commit("cursor-hooks");
+    std::fs::write(repo.join("lane.toml"), "version = 1\n").unwrap();
+
+    // Cursor makes its worktree with Git, where its hooks may not run, then starts the agent.
+    let worktree = repo.with_file_name("cursor-hooks-zjm");
+    let _ = std::fs::remove_dir_all(&worktree);
+    let ok = Command::new("git")
+        .args([
+            "-C",
+            &repo.to_string_lossy(),
+            "worktree",
+            "add",
+            "-q",
+            "--detach",
+        ])
+        .arg(&worktree)
+        .env("LANE_GIT", "1")
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok);
+
+    // Cursor's sessionStart, from ~/.cursor, with the worktree in workspace_roots. On Windows
+    // Cursor starts the JSON with a byte-order mark.
+    let input = format!(
+        "\u{feff}{}",
+        serde_json::json!({ "hook_event_name": "sessionStart", "workspace_roots": [worktree] })
+    );
+    let out = hook_raw(
+        &dir,
+        &std::env::temp_dir(),
+        "cursor",
+        "session-start",
+        input.as_bytes(),
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v = json(&out);
+    let context = v["additional_context"].as_str().unwrap();
+    assert!(context.contains("lane `cursor-hooks-zjm`"), "{context}");
+    let listed = json(&lane_in(&dir, &repo, &["list", "--json"]));
+    assert_eq!(listed["lanes"][0]["agent"], "cursor");
+
+    // A copy of the repo is turned down with a message for the agent; other commands pass.
+    let deny = serde_json::json!({ "command": "git worktree add ../another", "cwd": worktree });
+    let out = hook_raw(
+        &dir,
+        &std::env::temp_dir(),
+        "cursor",
+        "before-shell",
+        deny.to_string().as_bytes(),
+    );
+    let v = json(&out);
+    assert_eq!(v["permission"], "deny");
+    assert!(v["agent_message"].as_str().unwrap().contains("lane new"));
+    let pass = serde_json::json!({ "command": "npm test", "cwd": worktree });
+    let out = hook_raw(
+        &dir,
+        &std::env::temp_dir(),
+        "cursor",
+        "before-shell",
+        pass.to_string().as_bytes(),
+    );
+    assert_eq!(out.status.code(), Some(0));
+    assert!(
+        out.stdout.is_empty(),
+        "no answer, so Cursor's own approval rules apply"
+    );
+    let _ = std::fs::remove_dir_all(&worktree);
 }

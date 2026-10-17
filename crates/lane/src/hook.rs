@@ -67,6 +67,8 @@ pub fn hook(args: &[String]) -> ExitCode {
         // These never stop a session or a checkout: a problem is noted on stderr and nothing more.
         ["claude", "session-start"] => quiet(session_start()),
         ["claude", "pre-tool-use"] => quiet(pre_tool_use()),
+        ["cursor", "session-start"] => quiet(cursor_session_start()),
+        ["cursor", "before-shell"] => quiet(cursor_before_shell()),
         ["git", "post-checkout", git_args @ ..] => quiet(post_checkout(git_args, json)),
         ["git", ..] => report(
             Some("hook"),
@@ -118,7 +120,8 @@ fn input() -> Result<Value> {
         Error::new(ErrorKind::Io, format!("couldn't read the hook input: {e}"))
             .hint("Run it from a Claude Code hook, which passes its input on stdin.")
     })?;
-    serde_json::from_str(&text).map_err(|e| {
+    // Cursor on Windows starts its JSON with a byte-order mark.
+    serde_json::from_str(text.trim_start_matches('\u{feff}')).map_err(|e| {
         Error::usage(format!("the hook input isn't JSON ({e})"))
             .hint("Run it from a Claude Code hook, which passes JSON on stdin.")
     })
@@ -276,19 +279,7 @@ fn pre_tool_use() -> Result<()> {
     let input = input()?;
     let command = input["tool_input"]["command"].as_str().unwrap_or_default();
     let powershell = input["tool_name"].as_str() == Some("PowerShell");
-    // Most commands stop here, before any Git or disk work.
-    let found = agents::repo_copies(command, powershell);
-    if found.is_empty() {
-        return Ok(());
-    }
-    let cwd = cwd(&input);
-    let Ok(repo) = Repo::open(&cwd) else {
-        return Ok(());
-    };
-    if !is_lanes_repo(&repo, Store::open_existing()?.as_ref())? {
-        return Ok(());
-    }
-    let Some(reason) = agents::deny_reason(&found, &cwd, &repo.root) else {
+    let Some(reason) = denied(command, powershell, &cwd(&input))? else {
         return Ok(());
     };
     print_json(&json!({
@@ -297,6 +288,87 @@ fn pre_tool_use() -> Result<()> {
             "permissionDecision": "deny",
             "permissionDecisionReason": reason,
         }
+    }));
+    Ok(())
+}
+
+/// Why a shell command that copies the repo (a worktree, a clone, a recursive copy) should be
+/// turned down, in a Lanes repo. Most commands stop at the first check, before any Git or disk
+/// work.
+fn denied(command: &str, powershell: bool, cwd: &Path) -> Result<Option<&'static str>> {
+    let found = agents::repo_copies(command, powershell);
+    if found.is_empty() {
+        return Ok(None);
+    }
+    let Ok(repo) = Repo::open(cwd) else {
+        return Ok(None);
+    };
+    if !is_lanes_repo(&repo, Store::open_existing()?.as_ref())? {
+        return Ok(None);
+    }
+    Ok(agents::deny_reason(&found, cwd, &repo.root))
+}
+
+/// The folder a Cursor hook is about: the shell command's `cwd`, else the first workspace root.
+/// (Cursor runs user-level hooks from `~/.cursor`, so the process's own folder says nothing.)
+fn cursor_folder(input: &Value) -> Option<PathBuf> {
+    input["cwd"]
+        .as_str()
+        .or_else(|| input["workspace_roots"][0].as_str())
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+}
+
+/// A Cursor agent starts. Cursor makes its own worktrees (`~/.cursor/worktrees/...`) and its
+/// Git hooks can't be relied on, so a worktree it starts in becomes a lane here, ready to run
+/// like one from `lane new`. Then the agent is told which lane it's in.
+fn cursor_session_start() -> Result<()> {
+    let input = input()?;
+    let Some(folder) = cursor_folder(&input) else {
+        return Ok(());
+    };
+    let Ok(repo) = Repo::open(&folder) else {
+        return Ok(());
+    };
+    let top = engine::norm(&lane_core::repo::top_level(&folder)?);
+    let mut store = Store::open()?;
+    let lane = match store.lane_at(&top)? {
+        Some(lane) => Some(lane),
+        None if !engine::same_path(&top, &repo.root) => {
+            let lane = engine::adopt(&mut store, &repo, &top, None, Some("cursor"), None)?;
+            if let Err(e) = engine::make_ready(&mut store, &repo, &lane) {
+                eprintln!("lane: {} is a lane, but {e}", lane.name);
+            }
+            Some(lane)
+        }
+        None => None,
+    };
+    let context = match lane {
+        Some(lane) if lane.status == Status::Ready => agents::context_in_lane(&repo, &lane),
+        Some(_) => return Ok(()),
+        None if is_lanes_repo(&repo, Some(&store))? => agents::context_in_repo(),
+        None => return Ok(()),
+    };
+    print_json(&json!({ "additional_context": context }));
+    Ok(())
+}
+
+/// Before a Cursor agent runs a shell command: turn down copies of the repo, with a message the
+/// agent reads. Anything else gets no answer, so Cursor's own approval rules still apply.
+fn cursor_before_shell() -> Result<()> {
+    let input = input()?;
+    let command = input["command"].as_str().unwrap_or_default();
+    let Some(folder) = cursor_folder(&input) else {
+        return Ok(());
+    };
+    let powershell = cfg!(windows);
+    let Some(reason) = denied(command, powershell, &folder)? else {
+        return Ok(());
+    };
+    print_json(&json!({
+        "permission": "deny",
+        "user_message": "Lanes turned this down: this repo uses lanes instead of copies.",
+        "agent_message": reason,
     }));
     Ok(())
 }
@@ -324,7 +396,13 @@ fn adopt_here() -> Result<Option<Lane>> {
         return Ok(None);
     }
     let mut store = Store::open()?;
-    engine::adopt(&mut store, &repo, &top, None, None, None).map(Some)
+    let lane = engine::adopt(&mut store, &repo, &top, None, None, None)?;
+    // Ready to run, like a lane from `lane new`. A worktree that can't be readied is still a
+    // lane, and the checkout never fails over it.
+    if let Err(e) = engine::make_ready(&mut store, &repo, &lane) {
+        eprintln!("lane: {} is a lane, but {e}", lane.name);
+    }
+    Ok(Some(lane))
 }
 
 /// A repo set up for Lanes: it has a lane.toml, or lanes.

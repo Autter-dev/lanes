@@ -297,3 +297,100 @@ fn paths_have_one_spelling() {
         PathBuf::from("/work/acme.lanes/x")
     );
 }
+
+#[test]
+fn a_repo_without_lane_toml_uses_what_init_would_find() {
+    let root = std::env::temp_dir().join(format!("lane-detected-{}", std::process::id()));
+    let _ = remove_dir(&root);
+    fs::create_dir_all(&root).unwrap();
+    git_in(&root, &["init", "-q", "-b", "main"]);
+    fs::write(
+        root.join("package-lock.json"),
+        "{}
+",
+    )
+    .unwrap();
+    fs::write(
+        root.join("package.json"),
+        r#"{"scripts": {"dev": "vite"}, "devDependencies": {"vite": "6"}}"#,
+    )
+    .unwrap();
+    let repo = Repo::open(&root).unwrap();
+    assert_eq!(repo.project.setup.install, ["npm ci"]);
+    assert_eq!(
+        repo.project.dev.command.as_deref(),
+        Some("npm run dev -- --port $PORT")
+    );
+    // With a lane.toml, that file wins, even when it says less.
+    fs::write(
+        root.join("lane.toml"),
+        "version = 1
+",
+    )
+    .unwrap();
+    let repo = Repo::open(&root).unwrap();
+    assert!(repo.project.setup.install.is_empty());
+    let _ = remove_dir(&root);
+}
+
+#[test]
+fn a_worktree_another_tool_made_gets_dependencies_from_base() {
+    let (dir, mut store) = repo("ready");
+    // The install step makes a dependency folder, the way `npm ci` makes node_modules.
+    fs::write(
+        dir.join("lane.toml"),
+        "version = 1\n[setup]\ninstall = [\"mkdir node_modules\", \"git --version >> installs.log\"]\n",
+    )
+    .unwrap();
+    fs::write(dir.join(".gitignore"), "installs.log\nnode_modules/\n").unwrap();
+    git_in(&dir, &["add", "-A"]);
+    git_in(&dir, &["commit", "-q", "-m", "deps"]);
+    let repo = Repo::open(&dir).unwrap();
+
+    // Any tool's `git worktree add`: no dependencies of its own.
+    let other = dir.with_file_name("by-a-tool");
+    git_in(
+        &dir,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "--detach",
+            &other.to_string_lossy(),
+        ],
+    );
+    assert!(!other.join("node_modules").exists());
+    let lane = adopt(&mut store, &repo, &other, None, Some("codex"), None).unwrap();
+
+    let ready = make_ready(&mut store, &repo, &lane).unwrap();
+    assert_eq!(ready.deps, Deps::Cloned, "{ready:?}");
+    assert_eq!(ready.folders, [PathBuf::from("node_modules")]);
+    assert!(other.join("node_modules").is_dir());
+    assert_eq!(installs(&repo.base_path()), 1, "installed once, in _base");
+    assert_eq!(installs(&other), 0, "nothing ran in the worktree itself");
+
+    // Again: nothing to do, nothing runs.
+    let again = make_ready(&mut store, &repo, &lane).unwrap();
+    assert_eq!(again.deps, Deps::None);
+    assert_eq!(installs(&repo.base_path()), 1);
+
+    // Different lockfile: the install runs in the worktree instead.
+    let third = dir.with_file_name("other-deps");
+    git_in(
+        &dir,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "--detach",
+            &third.to_string_lossy(),
+        ],
+    );
+    fs::write(third.join("package-lock.json"), "{\"v\": 2}\n").unwrap();
+    git_in(&third, &["add", "-A"]);
+    git_in(&third, &["commit", "-q", "-m", "bump"]);
+    let lane = adopt(&mut store, &repo, &third, None, None, None).unwrap();
+    let ready = make_ready(&mut store, &repo, &lane).unwrap();
+    assert_eq!(ready.deps, Deps::Installed);
+    assert_eq!(installs(&third), 1);
+}
