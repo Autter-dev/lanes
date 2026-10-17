@@ -68,6 +68,7 @@ export function setupMotion() {
   menu();
   copy();
   forYourSystem();
+  guide();
   notFound();
 }
 
@@ -179,6 +180,50 @@ function forYourSystem() {
       const detected = document.querySelector('[data-dl-detected]');
       if (detected) detected.textContent = `This looks like ${OS_NAMES[os]}, so it's first. Each system lists its usual way first, and they all get you the same thing.`;
     }
+  });
+}
+
+// Guide: every system's steps are in the page; show the visitor's. A choice made with the picker
+// is remembered in this browser. On a phone or tablet, say Lanes runs on a computer.
+const SHELLS: Record<Os, string> = { macos: 'Terminal (zsh)', linux: 'your shell (bash or zsh)', windows: 'PowerShell' };
+const GUIDE_KEY = 'lanes-guide-os';
+
+function guide() {
+  onPage(() => {
+    const root = document.querySelector<HTMLElement>('[data-guide]');
+    if (!root) return;
+    const buttons = [...root.querySelectorAll<HTMLButtonElement>('[data-pick]')];
+    const note = root.querySelector<HTMLElement>('[data-pick-note]');
+    const detected = detectOs();
+    const isOs = (v: string | null | undefined): v is Os => !!v && v in OS_NAMES;
+    let saved: string | null = null;
+    try { saved = localStorage.getItem(GUIDE_KEY); } catch { /* private mode: nothing remembered */ }
+
+    const show = (os: Os, why: 'detected' | 'saved' | 'picked' | 'unknown') => {
+      root.dataset.os = os;
+      buttons.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.pick === os)));
+      const name = OS_NAMES[os];
+      if (note) {
+        note.textContent =
+          why === 'detected' ? `This looks like ${name}, so these are the ${name} commands, for ${SHELLS[os]}.`
+          : why === 'unknown' ? `You're on a phone or tablet, and Lanes runs on a computer. These are the ${name} steps; pick the system you'll install it on.`
+          : `Showing the ${name} commands, for ${SHELLS[os]}.${detected && detected !== os ? ` This computer looks like ${OS_NAMES[detected]}.` : ''}`;
+      }
+      ScrollTrigger.refresh();
+    };
+
+    if (isOs(saved)) show(saved, 'saved');
+    else if (detected) show(detected, 'detected');
+    else show('macos', 'unknown');
+
+    const pick = (e: Event) => {
+      const os = (e.currentTarget as HTMLElement).dataset.pick;
+      if (!isOs(os)) return;
+      show(os, 'picked');
+      try { localStorage.setItem(GUIDE_KEY, os); } catch { /* not remembered, still shown */ }
+    };
+    buttons.forEach((b) => b.addEventListener('click', pick));
+    return () => buttons.forEach((b) => b.removeEventListener('click', pick));
   });
 }
 

@@ -1,0 +1,88 @@
+{
+  "url": "http://127.0.0.1:4400/guide/",
+  "errors": [],
+  "failed": [],
+  "desktop": {
+    "loaderMs": 838,
+    "vitals": {
+      "lcpMs": 200,
+      "lcpElement": "h1#guide-title.display",
+      "cls": 0.045
+    },
+    "height": 7679,
+    "overflowX": false,
+    "offenders": [],
+    "h1": [
+      "Your first lanes."
+    ],
+    "smallTargets": [
+      "here's what to do 106x18",
+      "download page 94x18"
+    ],
+    "glHidden": [],
+    "title": "Guide: your first lanes | Lanes",
+    "glOn": false,
+    "scrollFps": {
+      "fps": 60,
+      "worstFrameMs": 17
+    }
+  },
+  "mobile": {
+    "throttled": true,
+    "loaderMs": 2681,
+    "vitals": {
+      "lcpMs": 1408,
+      "lcpElement": "p.lede",
+      "cls": 0.034
+    },
+    "height": 9548,
+    "overflowX": false,
+    "offenders": [],
+    "h1": [
+      "Your first lanes."
+    ],
+    "smallTargets": [
+      "download page 94x18"
+    ],
+    "glHidden": [],
+    "title": "Guide: your first lanes | Lanes",
+    "glOn": false,
+    "scrollFps": {
+      "fps": 60,
+      "worstFrameMs": 17
+    }
+  },
+  "files": "20 screenshots in C:\\Users\\ghosh\\Documents\\lanes\\site\\.shots\\guide",
+  "notes": [
+    "desktop FPS runs headless on a software GPU: treat it as a floor, not a measurement of real hardware",
+    "mobile runs at 4x CPU slowdown on slow 4G: mobile.vitals and mobile.scrollFps are the numbers that count"
+  ],
+  "keyboard": {
+    "stops": [
+      "a \"Skip to content\"",
+      "a \"Lanes.\"",
+      "a \"How it helps\"",
+      "a \"How it works\"",
+      "a \"Get started\"",
+      "a \"Gateway\"",
+      "a \"With Autter\"",
+      "a \"Status\"",
+      "a \"Download\"",
+      "a \"GitHub\"",
+      "a \"Download\"",
+      "button \"macOS\""
+    ],
+    "skipLinkFirst": true,
+    "noVisibleFocus": [],
+    "invisibleFocus": [],
+    "stuck": false
+  },
+  "reduced": {
+    "hiddenText": 0
+  },
+  "a11y": {
+    "violations": [],
+    "serious": 0,
+    "contrastNeedsReview": 10
+  }
+}

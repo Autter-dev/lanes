@@ -1,0 +1,121 @@
+---
+import Base from '../layouts/Base.astro';
+import InstallCommand from '../components/InstallCommand.astro';
+import { release, site } from '../data/site';
+import { notYet, steps, systems, upkeep, type Block } from '../data/guide';
+
+// `code` and [links](url) in guide text, with everything else escaped.
+const md = (s: string) =>
+  s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a class="link" href="$2">$1</a>');
+
+const only = (b: { only?: string[] }) => (b.only ? b.only.join(' ') : undefined);
+const names = (b: { only?: string[] }) =>
+  b.only && b.only.length < systems.length ? systems.filter((s) => b.only!.includes(s.os)).map((s) => s.name).join(' and ') : '';
+const pad = (n: number) => String(n).padStart(2, '0');
+const id = (step: string, i: number, b: Block) => `g-${step}-${i}${b.only ? `-${b.only.join('-')}` : ''}`;
+---
+<Base title="Guide: your first lanes" description="Install Lanes and run two agents side by side in their own lanes, step by step, with the commands for your system: macOS, Linux or Windows.">
+  <div class="guide" data-guide>
+    <script is:inline>
+      // Pick the system before the first paint, so the page doesn't shift once it has loaded.
+      // src/motion/setup.ts guide() makes the same choice and keeps the picker in step.
+      (function (g) {
+        var os = null;
+        try { os = localStorage.getItem('lanes-guide-os'); } catch (e) {}
+        if (!/^(macos|linux|windows)$/.test(os || '')) {
+          var ua = navigator.userAgent.toLowerCase();
+          var p = ((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || ua).toLowerCase();
+          os = /android|iphone|ipad|ipod/.test(ua) ? 'macos' : p.indexOf('win') > -1 ? 'windows' : p.indexOf('mac') > -1 ? 'macos' : /linux|x11|cros/.test(p) ? 'linux' : 'macos';
+        }
+        g.dataset.os = os;
+      })(document.currentScript.parentElement);
+    </script>
+    <section class="page-hero wrap" aria-labelledby="guide-title">
+      <p class="label">Guide · Lanes {release.version}</p>
+      <h1 class="display" id="guide-title" style="margin-top:1.5rem">Your first lanes<span class="dot">.</span></h1>
+      <div class="page-hero__row">
+        <p class="lede">Install Lanes, give one repo two lanes, and run an agent in each. It takes about five minutes, and every command below is written for your system.</p>
+        <div class="guide-pick">
+          <p class="label" id="guide-pick-label">Steps for</p>
+          <div class="guide-pick__buttons" role="group" aria-labelledby="guide-pick-label">
+            {systems.map((s) => (
+              <button type="button" class="guide-pick__btn" data-pick={s.os} aria-pressed="false">{s.name}</button>
+            ))}
+          </div>
+          <p class="guide-pick__note" data-pick-note aria-live="polite">Pick your system to see only its commands.</p>
+        </div>
+      </div>
+    </section>
+
+    <ol class="guide-steps wrap" aria-label="Steps">
+      {steps.map((step, n) => (
+        <li class="guide-step" id={step.id}>
+          <div class="guide-step__copy">
+            <p class="guide-step__n" aria-hidden="true">{pad(n + 1)}</p>
+            <h2 class="h2 guide-step__title">{step.title}</h2>
+            <p set:html={md(step.text)} />
+          </div>
+          <div class="guide-step__work">
+            {systems.map((s) => (
+              <p class="guide-step__bar" data-only={s.os}><span>{s.shell}</span><span class="mono">{step.inRepo ? s.repo : 'any folder'}</span></p>
+            ))}
+            {step.blocks.map((b, i) => (
+              <div class:list={['guide-block', `guide-block--${b.kind}`]} data-only={only(b)}>
+                {names(b) && <span class="guide-os">{names(b)}</span>}
+                {b.kind === 'cmd' && <>
+                  {b.label && <p class="guide-block__label">{b.label}</p>}
+                  <InstallCommand id={id(step.id, i, b)} cmd={b.cmd} block label={`Copy: ${b.cmd}`} />
+                </>}
+                {b.kind === 'out' && <pre class="guide-out" tabindex="0" aria-label="Example output"><code>{b.text}</code></pre>}
+                {b.kind === 'note' && <p class="guide-note" set:html={md(b.text)} />}
+              </div>
+            ))}
+          </div>
+        </li>
+      ))}
+    </ol>
+
+    <section class="section wrap" aria-labelledby="guide-upkeep">
+      <div class="section__head">
+        <h2 class="h2" id="guide-upkeep" data-split="lines">Update, or remove it.</h2>
+        <p>Updating keeps your lanes. Removing Lanes leaves your repos and their lanes' folders where they are.</p>
+      </div>
+      <div class="guide-upkeep">
+        {upkeep.map((u) => {
+          const s = systems.find((x) => x.os === u.os)!;
+          return (
+            <div class="guide-upkeep__os" data-only={u.os}>
+              <h3 class="h3">{s.name}</h3>
+              <p class="guide-block__label">Update</p>
+              <InstallCommand id={`g-up-${u.os}`} cmd={u.update} block label={`Copy: ${u.update}`} />
+              <p class="guide-block__label">Remove</p>
+              <InstallCommand id={`g-rm-${u.os}`} cmd={u.remove} block label={`Copy: ${u.remove}`} />
+              {u.note && <p class="guide-note" set:html={md(u.note)} />}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+
+    <section class="section wrap" aria-labelledby="guide-next" style="padding-top:0">
+      <div class="start">
+        <div class="start__copy">
+          <h2 class="h2" id="guide-next" data-split="lines">Not here yet.</h2>
+          <p class="lede">Lanes is a preview. These are on the way, and the changelog says when each one lands.</p>
+          <div class="start__actions">
+            <a class="btn" href={`${site.repo}/issues`}>Stuck? Open an issue</a>
+            <a class="btn btn--ghost" href={site.changelog}>Read the changelog</a>
+          </div>
+        </div>
+        <ul class="guide-notyet">
+          {notYet.map((t) => <li>{t}</li>)}
+        </ul>
+      </div>
+    </section>
+  </div>
+</Base>

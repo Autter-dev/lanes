@@ -136,7 +136,7 @@ export const uninstall = [
 export const nav = [
   { label: 'How it helps', href: '/#helps' },
   { label: 'How it works', href: '/#works' },
-  { label: 'Get started', href: '/#start' },
+  { label: 'Get started', href: '/guide/' },
   { label: 'Gateway', href: '/#gateway' },
   { label: 'With Autter', href: '/#autter' },
   { label: 'Status', href: '/#status' },

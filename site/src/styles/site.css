@@ -731,3 +731,55 @@ html:not(.motion) .status__rail span { transform: scaleX(0.14); }
   .status__when { grid-column: 2; }
   .status__stop ul { grid-column: 2; }
 }
+
+/* ---------- Guide (/guide/) ----------
+   Every system's blocks are in the page; [data-os] on the guide shows one system's. Without
+   JavaScript all of them show, each with its system's tag, and the picker is hidden. */
+.guide[data-os="macos"] [data-only]:not([data-only~="macos"]),
+.guide[data-os="linux"] [data-only]:not([data-only~="linux"]),
+.guide[data-os="windows"] [data-only]:not([data-only~="windows"]) { display: none; }
+.guide[data-os] .guide-os { display: none; }
+html:not(.js) .guide-pick { display: none; }
+
+.guide-pick { grid-column: 8 / -1; align-self: end; display: flex; flex-direction: column; gap: 0.75rem; }
+.guide-pick__buttons { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.guide-pick__btn { min-height: 2.75rem; padding: 0 1.25rem; border: 1px solid var(--c-fg); border-radius: var(--radius-pill); background: transparent; color: var(--c-fg); font: inherit; font-weight: 500; cursor: pointer; transition: background-color 0.2s, color 0.2s; }
+.guide-pick__btn:hover { background: color-mix(in srgb, var(--c-fg) 8%, transparent); }
+.guide-pick__btn[aria-pressed="true"] { background: var(--c-fg); color: var(--c-bg); }
+.guide-pick__btn:active { scale: 0.97; }
+.guide-pick__note { font-size: var(--t-xs); color: var(--c-muted); line-height: 1.5; min-height: 3em; max-width: 44ch; }
+
+.guide-steps { list-style: none; margin: 0; padding-bottom: clamp(3rem, 7vw, 6rem); }
+.guide-step { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: var(--gutter); row-gap: 1.75rem; padding-block: clamp(2.5rem, 5vw, 4.5rem); border-top: 1px solid var(--c-line); scroll-margin-top: 5rem; }
+.guide-step__copy { grid-column: 1 / span 4; align-self: start; position: sticky; top: 6.5rem; display: flex; flex-direction: column; gap: 1rem; }
+.guide-step__n { font-family: var(--f-mono); font-size: var(--t-xs); color: var(--c-accent); }
+.guide-step__title { font-size: var(--t-l); }
+.guide-step__copy p:last-child { color: #3a3935; max-width: 42ch; }
+.guide-step__work { grid-column: 5 / span 8; min-width: 0; display: flex; flex-direction: column; gap: 1rem; padding: 0 1.5rem 1.5rem; border: 1px solid var(--c-line); border-radius: var(--radius-card); background: var(--c-card); }
+.guide-step__bar { display: flex; justify-content: space-between; gap: 1rem; margin: 0 -1.5rem 0.25rem; padding: 0.9rem 1.5rem; border-bottom: 1px solid var(--c-line); font-family: var(--f-mono); font-size: var(--t-xs); color: var(--c-muted); }
+.guide-step__bar .mono { font-size: 1em; overflow-wrap: anywhere; text-align: right; }
+.guide-block { display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; }
+.guide-block__label { font-size: var(--t-xs); font-weight: 500; color: var(--c-muted); }
+.guide-os { align-self: flex-start; font-family: var(--f-mono); font-size: var(--t-xs); padding: 0.15rem 0.6rem; border-radius: var(--radius-pill); background: var(--c-dot); color: var(--c-fg); }
+.guide-out { margin: 0; padding: 1rem 1.15rem; border-radius: 12px; background: var(--c-bg); font-size: 0.78rem; line-height: 1.6; color: #3a3935; overflow-x: auto; white-space: pre; }
+.guide-out code { font-size: 1em; }
+.guide-note { font-size: var(--t-s); color: var(--c-muted); line-height: 1.55; }
+.guide-note code { color: var(--c-fg); overflow-wrap: anywhere; }
+
+.guide-upkeep { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gutter); }
+.guide[data-os] .guide-upkeep { grid-template-columns: minmax(0, 1fr); max-width: 44rem; }
+.guide-upkeep__os { display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; padding-top: 1.25rem; border-top: 1px solid var(--c-line); }
+.guide-upkeep__os .guide-block__label { margin-top: 0.5rem; }
+.guide-notyet { grid-column: 7 / span 6; list-style: none; margin: 0; padding: 0; }
+.guide-notyet li { padding-block: 1.1rem; border-bottom: 1px solid var(--c-line); }
+.guide-notyet li:first-child { border-top: 1px solid var(--c-line); }
+
+@media (max-width: 900px) {
+  .guide-pick, .guide-step__copy, .guide-step__work, .guide-notyet { grid-column: 1 / -1; }
+  .guide-step__copy { position: static; }
+  .guide-upkeep { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .guide-step__work { padding: 0 1rem 1rem; }
+  .guide-step__bar { margin: 0 -1rem 0.25rem; padding: 0.8rem 1rem; }
+}

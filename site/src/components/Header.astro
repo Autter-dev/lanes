@@ -2,7 +2,11 @@
 import { nav, site } from '../data/site';
 const path = Astro.url.pathname;
 const current = (href: string) =>
-  (href.includes('gateway') && path.startsWith('/gateway')) || (href.startsWith('/download') && path.startsWith('/download')) ? 'page' : undefined;
+  (href.includes('gateway') && path.startsWith('/gateway')) ||
+  (href.startsWith('/download') && path.startsWith('/download')) ||
+  (href.startsWith('/guide') && path.startsWith('/guide'))
+    ? 'page'
+    : undefined;
 ---
 <header class="site-header">
   <div class="wrap site-header__bar">

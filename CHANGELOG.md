@@ -8,6 +8,7 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-17
 
+- `17:17` **Added**: a guide on the website, [lanes.autter.dev/guide](https://lanes.autter.dev/guide/), from install to two agents in their own lanes, in nine steps. It's written for your system: it picks macOS, Linux or Windows from your browser, with that system's commands, shell, folders and example output, and a switch to see another. It remembers your pick. On a phone it says Lanes runs on a computer. Without JavaScript, every system shows, each labelled. The nav's "Get started", the home page and the download page link to it.
 - `17:01` **Changed**: the website offers 0.0.4: the download page's archives, and a 0.0.4 entry on the releases page.
 
 ## 0.0.4 (2026-10-17)
