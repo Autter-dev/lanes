@@ -23,6 +23,53 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --all
 
+  clones:
+    # Copy-on-write clones on each filesystem that has them. APFS is covered by the macOS test
+    # job above; these make a Btrfs, XFS or ReFS disk and run the clone tests on it.
+    name: Clones (${{ matrix.fs }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { fs: btrfs, os: ubuntu-latest }
+          - { fs: xfs, os: ubuntu-latest }
+          - { fs: refs, os: windows-latest }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Make a ${{ matrix.fs }} disk
+        if: matrix.fs != 'refs'
+        env:
+          FS: ${{ matrix.fs }}
+        run: |
+          sudo apt-get update -q
+          if [ "$FS" = btrfs ]; then sudo apt-get install -y -q btrfs-progs; else sudo apt-get install -y -q xfsprogs; fi
+          truncate -s 2G "$RUNNER_TEMP/disk.img"
+          if [ "$FS" = btrfs ]; then mkfs.btrfs -q "$RUNNER_TEMP/disk.img"; else mkfs.xfs -q -m reflink=1 "$RUNNER_TEMP/disk.img"; fi
+          sudo mkdir -p /mnt/lanes
+          sudo mount -o loop "$RUNNER_TEMP/disk.img" /mnt/lanes
+          sudo chown "$USER" /mnt/lanes
+          echo "LANE_TEST_CLONE_DIR=/mnt/lanes" >> "$GITHUB_ENV"
+      - name: Make a ReFS disk
+        if: matrix.fs == 'refs'
+        shell: pwsh
+        run: |
+          $vhd = "$env:RUNNER_TEMP\refs.vhdx"
+          $script = @"
+          create vdisk file="$vhd" maximum=4096 type=expandable
+          attach vdisk
+          create partition primary
+          format fs=refs quick label=lanes
+          assign letter=R
+          "@
+          $script | Set-Content "$env:RUNNER_TEMP\refs.txt"
+          diskpart /s "$env:RUNNER_TEMP\refs.txt"
+          New-Item -ItemType Directory R:\lanes | Out-Null
+          "LANE_TEST_CLONE_DIR=R:\lanes" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Clone tests on ${{ matrix.fs }}
+        run: "cargo test -p lane-core clone:: -- --nocapture"
+
   licenses:
     name: Licenses
     runs-on: ubuntu-latest

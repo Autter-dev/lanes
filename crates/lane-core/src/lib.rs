@@ -1,5 +1,6 @@
 //! Shared core for the Lanes CLI (`lane`) and daemon (`laned`).
 
+pub mod clone;
 pub mod config;
 pub mod env;
 pub mod error;

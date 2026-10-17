@@ -8,6 +8,14 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-17
 
+- `14:05` **Added**: clone backends, the part of `lane new` that copies files.
+  - **How it copies:** every file is a copy-on-write clone where the disk supports it (APFS, Btrfs, XFS, and ReFS on a Windows Dev Drive), and a plain parallel copy everywhere else (NTFS, ext4, …), behind one `CloneBackend` trait.
+  - **Probe and report:** a probe tests each folder for real, and the report counts cloned, copied and empty files separately, so Lanes never claims a clone it didn't get.
+  - **Faithful copies:** modification times and permissions are kept, so builds don't redo everything, and symlinks stay symlinks.
+  - **Measured on a 13,826-file tree** (this repo plus the website's `node_modules`, 247 MB):
+    - Windows Dev Drive: about 2.7 s per lane, every file cloned, about 120 MB of disk per lane;
+    - NTFS plain copy: 7.6 s and a full copy.
+  - **New CI job:** runs the clone tests on Btrfs and XFS loop disks and a ReFS virtual disk; APFS is covered by the macOS job.
 - `13:33` **Added**: the foundations the lane engine builds on, plus `lane list`.
   - **Errors:** one error type for every command. Each has a stable `code`, its exit code and a hint saying what to do next.
   - **`--json` contract:** exactly one JSON object on stdout, the result or `{"error": {code, message, hint, exit}}`, and nothing else. Unbuilt and unknown commands answer the same way.
