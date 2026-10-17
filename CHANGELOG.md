@@ -8,7 +8,7 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-17
 
-- `16:43` **Added**: Claude Code works in lanes. `claude -w fix-auth` makes a lane, and the session works in it, with no other steps once `lane init` has run. Checked end to end with Claude Code 2.1.300 on Windows.
+- `16:43` **Added**: Claude Code works in lanes. `claude -w fix-auth` makes a lane, and the session works in it, with no other steps once `lane init` has run. Checked end to end with Claude Code 2.1.300 on Windows. (`20d009c`)
   - **`lane hook claude <event>`:** what Claude Code's hooks run, reading its JSON on stdin.
     - **`worktree-create`:** makes the lane (or finds the one with that name) and prints its folder. Names like `Fix Auth` become `fix-auth`. Subagents with `isolation: worktree` and background sessions get lanes too.
     - **`worktree-remove`:** removes the lane and frees its ports.
@@ -22,7 +22,7 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
     - Running it again changes nothing. `--no-agents` skips it all.
   - **`lane new`** copies `.claude/settings.local.json` into the lane, so a session started inside a lane has the hooks too.
   - **A Claude Code plugin** in this repo, for every repo at once: `/plugin marketplace add Autter-dev/lanes`, then `/plugin install lanes@autter`. It runs the same hooks.
-- `16:28` **Changed**: the website offers 0.0.3: the download page's archives, and a 0.0.3 entry on the releases page.
+- `16:28` **Changed**: the website offers 0.0.3: the download page's archives, and a 0.0.3 entry on the releases page. (`3f0efa4`)
 
 ## 0.0.3 (2026-10-17)
 
