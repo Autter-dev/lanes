@@ -1,0 +1,64 @@
+name: Update Lanes
+
+# Copies Formula/lanes.rb from the latest Lanes release (github.com/Autter-dev/lanes), then
+# installs it on macOS and Linux to check it. Runs every hour, and by hand from the Actions tab.
+
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Update
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.fetch.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: fetch
+        name: Fetch the formula from the latest release
+        run: |
+          if ! curl -fsSL -o lanes.rb https://github.com/Autter-dev/lanes/releases/latest/download/lanes.rb; then
+            echo "No Lanes release with a formula yet."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if cmp -s lanes.rb Formula/lanes.rb; then
+            echo "Formula/lanes.rb is up to date."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          mkdir -p Formula
+          mv lanes.rb Formula/lanes.rb
+          version=$(sed -n 's/^  version "\(.*\)"/\1/p' Formula/lanes.rb)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/lanes.rb
+          git commit -m "lanes $version"
+          git push
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+  test:
+    name: Install (${{ matrix.os }})
+    needs: update
+    if: needs.update.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: Homebrew/actions/setup-homebrew@master
+      - run: |
+          brew tap autter-dev/tap
+          brew install autter-dev/tap/lanes
+          lane --version
+          brew test autter-dev/tap/lanes

@@ -1,0 +1,62 @@
+name: Update Lanes
+
+# Copies bucket/lanes.json from the latest Lanes release (github.com/Autter-dev/lanes), then
+# installs it on Windows to check it. Runs every hour, and by hand from the Actions tab.
+
+on:
+  schedule:
+    - cron: "41 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Update
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.fetch.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: fetch
+        name: Fetch the manifest from the latest release
+        run: |
+          if ! curl -fsSL -o lanes.json https://github.com/Autter-dev/lanes/releases/latest/download/lanes.json; then
+            echo "No Lanes release with a Scoop manifest yet."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if cmp -s lanes.json bucket/lanes.json; then
+            echo "bucket/lanes.json is up to date."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          mkdir -p bucket
+          mv lanes.json bucket/lanes.json
+          version=$(jq -r .version bucket/lanes.json)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bucket/lanes.json
+          git commit -m "lanes $version"
+          git push
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+  test:
+    name: Install
+    needs: update
+    if: needs.update.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - shell: pwsh
+        run: |
+          # The runner is an administrator account, which Scoop's installer refuses without this flag.
+          iex "& {$(irm get.scoop.sh)} -RunAsAdmin"
+          $env:Path = "$env:USERPROFILE\scoop\shims;$env:Path"
+          scoop bucket add autter https://github.com/Autter-dev/scoop-bucket
+          scoop install autter/lanes
+          lane --version

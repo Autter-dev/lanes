@@ -1,0 +1,23 @@
+{
+  "name": "@autter/lanes",
+  "version": "0.0.0",
+  "description": "Run many coding agents on one repo without them getting in each other's way",
+  "keywords": ["ai-agents", "coding-agents", "claude-code", "codex", "git", "worktree", "cli"],
+  "homepage": "https://lanes.autter.dev",
+  "bugs": "https://github.com/Autter-dev/lanes/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Autter-dev/lanes.git"
+  },
+  "license": "AGPL-3.0-only",
+  "author": "Autter <contact@autter.dev>",
+  "bin": {
+    "lane": "bin/lane.js",
+    "laned": "bin/laned.js"
+  },
+  "files": ["bin", "lib"],
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {}
+}

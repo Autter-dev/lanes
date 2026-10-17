@@ -1,7 +1,7 @@
 // All visible copy for the Lanes website. Every claim here is already made in the repo README.
 //
 // Assumptions (placeholder: true below), mirrored in the hand-off message:
-//   - install: the Homebrew tap, winget, Scoop, npm and installer commands go live with the first release.
+//   - release: the install commands below go live with the first release (release.live).
 //   - the demo lane names and agents in the hero race are examples, not real activity.
 
 export const site = {
@@ -16,8 +16,85 @@ export const site = {
   license: 'https://github.com/autter-dev/lanes/blob/main/LICENSE',
   x: { label: '@sagnik_ghosh_11', href: 'https://x.com/sagnik_ghosh_11' },
   maker: { name: 'Autter', href: 'https://autter.dev' },
-  install: { command: 'brew install autter-dev/tap/lanes', alt: 'npm install -g @autter/lanes', live: false }, // placeholder: true
 };
+
+// ---------- downloads ----------
+
+const releases = 'https://github.com/Autter-dev/lanes/releases';
+
+// The version people get. When a release ships, set its version here and live to true.
+export const release = {
+  version: '0.0.1',
+  live: false, // placeholder: true until v0.0.1 is published
+  page: `${releases}/latest`,
+  file: (name: string) => `${releases}/download/v${release.version}/${name}`,
+};
+
+// lanes.autter.dev/install.sh and /install.ps1 redirect to the scripts on the latest release
+// (public/_redirects); the GitHub URLs work too, and in sandboxes that only allow github.com.
+export const install = {
+  brew: 'brew install autter-dev/tap/lanes',
+  sh: 'curl -fsSL https://lanes.autter.dev/install.sh | sh',
+  shGithub: `curl -fsSL ${releases}/latest/download/lanes-installer.sh | sh`,
+  winget: 'winget install Autter.Lanes',
+  scoop: 'scoop bucket add autter https://github.com/Autter-dev/scoop-bucket; scoop install lanes',
+  ps1: 'irm https://lanes.autter.dev/install.ps1 | iex',
+  ps1Github: `irm ${releases}/latest/download/lanes-installer.ps1 | iex`,
+  npm: 'npm install -g @autter/lanes',
+};
+
+// The hero's command for each system; the page picks one on load (brew without JavaScript).
+export const heroInstall = { macos: install.brew, linux: install.sh, windows: install.winget };
+
+export type Os = 'macos' | 'linux' | 'windows';
+export const downloadPlatforms: { os: Os; name: string; detail: string; methods: { name: string; cmd: string; note: string }[]; note?: string }[] = [
+  {
+    os: 'macos',
+    name: 'macOS',
+    detail: 'Apple silicon and Intel',
+    methods: [
+      { name: 'Homebrew', cmd: install.brew, note: 'Update with brew upgrade lanes.' },
+      { name: 'Install script', cmd: install.sh, note: 'Puts lane and laned in ~/.local/bin. Run it again to update.' },
+    ],
+  },
+  {
+    os: 'linux',
+    name: 'Linux and WSL',
+    detail: 'x64 and arm64, any distribution',
+    methods: [
+      { name: 'Install script', cmd: install.sh, note: 'Puts lane and laned in ~/.local/bin. Run it again to update.' },
+      { name: 'Homebrew', cmd: install.brew, note: 'If you use Homebrew on Linux. Update with brew upgrade lanes.' },
+    ],
+  },
+  {
+    os: 'windows',
+    name: 'Windows',
+    detail: 'x64 and arm64, Windows 10 and 11',
+    methods: [
+      { name: 'winget', cmd: install.winget, note: 'Built into Windows 11. Update with winget upgrade Autter.Lanes.' },
+      { name: 'Scoop', cmd: install.scoop, note: 'Update with scoop update lanes.' },
+      { name: 'PowerShell script', cmd: install.ps1, note: 'Puts lane.exe and laned.exe in your user folder and adds it to PATH.' },
+    ],
+    note: "Builds aren't code-signed yet, so Windows 11 may block them while Smart App Control is on. Signing is on the way.",
+  },
+];
+
+export const archives = [
+  { system: 'macOS, Apple silicon', target: 'aarch64-apple-darwin', ext: 'tar.gz' },
+  { system: 'macOS, Intel', target: 'x86_64-apple-darwin', ext: 'tar.gz' },
+  { system: 'Linux, x64', target: 'x86_64-unknown-linux-musl', ext: 'tar.gz' },
+  { system: 'Linux, arm64', target: 'aarch64-unknown-linux-musl', ext: 'tar.gz' },
+  { system: 'Windows, x64', target: 'x86_64-pc-windows-msvc', ext: 'zip' },
+  { system: 'Windows, arm64', target: 'aarch64-pc-windows-msvc', ext: 'zip' },
+].map((a) => ({ ...a, name: `lanes-${release.version}-${a.target}.${a.ext}` }));
+
+export const uninstall = [
+  { how: 'Homebrew', cmd: 'brew uninstall lanes' },
+  { how: 'winget', cmd: 'winget uninstall Autter.Lanes' },
+  { how: 'Scoop', cmd: 'scoop uninstall lanes' },
+  { how: 'npm', cmd: 'npm uninstall -g @autter/lanes' },
+  { how: 'Install script', cmd: 'delete lane and laned from the folder it printed' },
+];
 
 export const nav = [
   { label: 'How it helps', href: '/#helps' },
@@ -26,6 +103,7 @@ export const nav = [
   { label: 'Gateway', href: '/#gateway' },
   { label: 'With Autter', href: '/#autter' },
   { label: 'Status', href: '/#status' },
+  { label: 'Download', href: '/download/' },
 ];
 
 // Hero race. f0: where each agent starts; fs: the still frame shown without motion
@@ -74,7 +152,7 @@ export const photos = {
 export const agents = ['Claude Code', 'Cursor', 'Codex', 'Gemini CLI', 'GitHub Copilot', 'Conductor', 'Amp', 'OpenCode', 'Cline', 'Aider'];
 
 export const quickstart = [
-  { cmd: 'brew install autter-dev/tap/lanes', note: 'or winget install Autter.Lanes, scoop install lanes, npm install -g @autter/lanes' },
+  { cmd: 'brew install autter-dev/tap/lanes', note: 'or winget, Scoop, npm or a script: lanes.autter.dev/download' },
   { cmd: 'cd your-repo && lane init', note: 'finds your stack and sets up your agents' },
   { cmd: 'lane new fix-auth', note: 'a ready-to-run lane' },
   { cmd: 'lane exec fix-auth -- npm run dev', note: 'then open http://fix-auth.localhost' },

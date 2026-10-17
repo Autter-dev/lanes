@@ -105,6 +105,47 @@ html.on-ink .site-header .btn { background: var(--c-ink-fg); color: var(--c-fg);
 .install__prompt { color: var(--c-muted); }
 /* wrap only between words, so a path like autter-dev/tap/lanes never splits at its hyphen */
 .install__word { white-space: nowrap; }
+/* URLs may break anywhere, so a long one never pushes the page sideways */
+.install__url { overflow-wrap: anywhere; }
+.install code { min-width: 0; }
+/* A command that may run over several lines: a card, with Copy in its corner */
+.install.install--block { position: relative; align-items: flex-start; border-radius: 14px; padding: 0.85rem 5.75rem 0.85rem 1.15rem; font-size: 0.875rem; line-height: 1.5; }
+.install.install--block .install__copy { position: absolute; top: 0.35rem; right: 0.35rem; min-height: 2.4rem; padding: 0 0.95rem; display: inline-flex; align-items: center; }
+.hero__install { display: contents; }
+
+/* Download page */
+.dl-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gutter); align-items: start; }
+/* The first card (your system, once the page knows it) runs the full width, its options side by side */
+.dl-card:first-child { grid-column: 1 / -1; }
+.dl-card:first-child .dl-methods { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr)); column-gap: var(--gutter); }
+.dl-methods { display: flex; flex-direction: column; gap: 1.25rem; }
+.dl-card {
+  display: flex; flex-direction: column; gap: 1.25rem; min-width: 0;
+  padding: clamp(1.25rem, 2.4vw, 2rem); border: 1px solid var(--c-line); border-radius: var(--radius-card); background: var(--c-card);
+}
+.dl-card.is-yours { border-color: var(--c-fg); box-shadow: 0 0 0 1px var(--c-fg); }
+.dl-card__head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.5rem 1rem; }
+.dl-card__head .h3 { font-size: var(--t-l); letter-spacing: -0.035em; }
+.dl-card__head + .label { margin-top: -0.75rem; }
+.dl-card__yours { font-family: var(--f-mono); font-size: var(--t-xs); padding: 0.2rem 0.65rem; border-radius: var(--radius-pill); background: var(--c-dot); color: var(--c-fg); white-space: nowrap; }
+.dl-method { display: flex; flex-direction: column; gap: 0.55rem; padding-top: 1.25rem; border-top: 1px solid var(--c-line); }
+.dl-method__name { font-weight: 500; }
+.dl-method__note, .dl-card__note { font-size: var(--t-xs); color: var(--c-muted); line-height: 1.5; }
+.dl-card__note { padding: 0.9rem 1rem; border-radius: 12px; background: var(--c-bg); }
+.dl-wide { max-width: 40rem; }
+.dl-table-wrap { overflow-x: auto; border-top: 1px solid var(--c-fg); }
+.dl-table { width: 100%; border-collapse: collapse; font-size: var(--t-s); }
+.dl-table th, .dl-table td { text-align: left; padding: 1rem 1.5rem 1rem 0; border-bottom: 1px solid var(--c-line); vertical-align: baseline; }
+.dl-table thead th { font-family: var(--f-mono); font-size: var(--t-xs); font-weight: 400; color: var(--c-muted); }
+.dl-table tbody th { font-weight: 500; white-space: nowrap; }
+.dl-table .mono { font-size: 0.84em; overflow-wrap: anywhere; }
+.dl-notes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gutter); margin-top: 2.5rem; font-size: var(--t-xs); color: var(--c-muted); line-height: 1.55; }
+.dl-notes code { color: var(--c-fg); }
+.dl-break { overflow-wrap: anywhere; }
+@media (max-width: 1000px) {
+  .dl-grid, .dl-notes { grid-template-columns: minmax(0, 1fr); }
+  .dl-card:first-child { grid-column: auto; }
+}
 .install__copy {
   min-height: 2.75rem; padding: 0 1rem; border-radius: var(--radius-pill); background: transparent; color: var(--c-fg); border: 1px solid var(--c-line);
   font-family: var(--f-mono); font-size: var(--t-xs); transition: background-color 0.3s;

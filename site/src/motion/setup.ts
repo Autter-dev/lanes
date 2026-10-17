@@ -67,6 +67,7 @@ export function setupMotion() {
   footer();
   menu();
   copy();
+  forYourSystem();
   notFound();
 }
 
@@ -130,6 +131,54 @@ function copy() {
       timers.push(window.setTimeout(() => { b.textContent = 'Copy'; }, 1600));
     }));
     return () => timers.forEach(clearTimeout);
+  });
+}
+
+// Install commands for the visitor's system: the hero shows its command, and the download page
+// puts its card first. Without JavaScript, or on a phone, every option stays as it is.
+type Os = 'macos' | 'linux' | 'windows';
+const OS_NAMES: Record<Os, string> = { macos: 'macOS', linux: 'Linux', windows: 'Windows' };
+
+function detectOs(): Os | null {
+  const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
+  const ua = navigator.userAgent.toLowerCase();
+  if (/android|iphone|ipad|ipod/.test(ua)) return null;
+  const p = (nav.userAgentData?.platform || navigator.platform || ua).toLowerCase();
+  // iPads ask for desktop sites as "MacIntel", but have a touch screen.
+  if (p.includes('mac')) return navigator.maxTouchPoints > 1 ? null : 'macos';
+  if (p.includes('win')) return 'windows';
+  if (p.includes('linux') || p.includes('x11') || p.includes('cros')) return 'linux';
+  return null;
+}
+
+function forYourSystem() {
+  onPage(() => {
+    const os = detectOs();
+    if (!os) return;
+
+    const hero = document.querySelector<HTMLElement>('[data-install]');
+    const code = hero?.querySelector('code');
+    const cmd = hero && (JSON.parse(hero.dataset.install ?? '{}') as Partial<Record<Os, string>>)[os];
+    if (code && cmd) {
+      code.replaceChildren(...cmd.split(' ').flatMap((word, i) => {
+        const span = document.createElement('span');
+        span.className = /^https?:/.test(word) ? 'install__url' : 'install__word';
+        span.textContent = word;
+        return i > 0 ? [' ', span] : [span];
+      }));
+      const label = document.querySelector('[data-install-os]');
+      if (label) label.textContent = ` for ${OS_NAMES[os]}`;
+    }
+
+    const grid = document.querySelector<HTMLElement>('[data-platforms]');
+    const card = grid?.querySelector<HTMLElement>(`[data-os="${os}"]`);
+    if (grid && card) {
+      card.classList.add('is-yours');
+      card.querySelector<HTMLElement>('[data-yours]')?.removeAttribute('hidden');
+      grid.prepend(card);
+      const detected = document.querySelector('[data-dl-detected]');
+      if (detected) detected.textContent = `This looks like ${OS_NAMES[os]}, so it's first. Each system lists its usual way first, and they all get you the same thing.`;
+    }
   });
 }
 

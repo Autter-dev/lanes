@@ -1,0 +1,208 @@
+name: Release
+
+# Push a tag like v0.1.0 (matching the version in Cargo.toml) to build every target, check it,
+# and publish a GitHub release with the installers and the files Homebrew, Scoop and winget need.
+# npm publishes too once the repo variable NPM_PUBLISH is "true" (see packaging/README.md).
+#
+# Run it by hand (Actions → Release → Run workflow) to build and package everything without
+# publishing anything.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      publish: ${{ steps.v.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: v
+        run: |
+          version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          if [ -z "$version" ]; then
+            echo "::error::No version under [workspace.package] in Cargo.toml."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+              echo "::error::Tag $GITHUB_REF_NAME doesn't match Cargo.toml ($version). Tag v$version, or bump the version first."
+              exit 1
+            fi
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Build (${{ matrix.target }})
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: aarch64-apple-darwin, os: macos-latest }
+          - { target: x86_64-apple-darwin, os: macos-latest, cross: true }
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest, musl: true }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04-arm, musl: true }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest }
+          - { target: aarch64-pc-windows-msvc, os: windows-latest, cross: true }
+    runs-on: ${{ matrix.os }}
+    env:
+      NAME: lanes-${{ needs.version.outputs.version }}-${{ matrix.target }}
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install musl
+        if: matrix.musl
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Build
+        shell: bash
+        env:
+          # A static C runtime on Windows, so lane.exe needs no Visual C++ redistributable.
+          RUSTFLAGS: ${{ contains(matrix.target, 'windows') && '-C target-feature=+crt-static' || '' }}
+        run: cargo build --release --locked --target "$TARGET" -p lane -p laned
+      - name: Smoke test
+        if: ${{ !matrix.cross }}
+        shell: bash
+        run: |
+          "target/$TARGET/release/lane" --version
+          "target/$TARGET/release/laned" --version
+      - name: Package (macOS, Linux)
+        if: ${{ !contains(matrix.target, 'windows') }}
+        run: |
+          mkdir "$NAME"
+          cp "target/$TARGET/release/lane" "target/$TARGET/release/laned" LICENSE README.md "$NAME/"
+          tar -czf "$NAME.tar.gz" "$NAME"
+      - name: Package (Windows)
+        if: contains(matrix.target, 'windows')
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory $env:NAME | Out-Null
+          Copy-Item "target/$env:TARGET/release/lane.exe", "target/$env:TARGET/release/laned.exe", LICENSE, README.md $env:NAME
+          Compress-Archive -Path $env:NAME -DestinationPath "$env:NAME.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.NAME }}
+          path: ${{ env.NAME }}.*
+          if-no-files-found: error
+
+  release:
+    name: Release
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      PUBLISH: ${{ needs.version.outputs.publish }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: lanes-*
+          merge-multiple: true
+      - name: Installers
+        run: |
+          for f in lanes-installer.sh lanes-installer.ps1; do
+            sed "s/__LANES_VERSION__/$VERSION/" "packaging/installers/$f" > "dist/$f"
+          done
+      - name: Checksums
+        working-directory: dist
+        run: |
+          files=(*.tar.gz *.zip lanes-installer.sh lanes-installer.ps1)
+          for f in "${files[@]}"; do sha256sum "$f" > "$f.sha256"; done
+          sha256sum "${files[@]}" > SHA256SUMS
+          cat SHA256SUMS
+      - name: Channel files (Homebrew, Scoop, winget, release notes)
+        run: node packaging/render.mjs --version "$VERSION" --dist dist --notes notes.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: channel-files
+          path: |
+            dist/lanes.rb
+            dist/lanes.json
+            dist/winget
+            notes.md
+      - name: Check the npm packages build
+        run: node packaging/build-npm.mjs --version "$VERSION" --dist dist --out npm
+      - uses: actions/attest-build-provenance@v2
+        if: env.PUBLISH == 'true'
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/lanes-installer.sh
+            dist/lanes-installer.ps1
+      - name: Publish the release
+        if: env.PUBLISH == 'true'
+        run: |
+          shopt -s nullglob
+          assets=(dist/*.tar.gz dist/*.zip dist/*.sha256 dist/SHA256SUMS dist/lanes-installer.sh dist/lanes-installer.ps1 dist/lanes.rb dist/lanes.json)
+          # Safe to rerun: an existing release gets its files replaced.
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            gh release upload "v$VERSION" "${assets[@]}" --clobber
+          else
+            gh release create "v$VERSION" --verify-tag --title "Lanes $VERSION" --notes-file notes.md "${assets[@]}"
+          fi
+
+  npm:
+    name: npm
+    needs: [version, release]
+    if: needs.version.outputs.publish == 'true' && vars.NPM_PUBLISH == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing (no token) needs npm 11.5 or later.
+      - run: npm install -g npm@latest
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: lanes-*
+          merge-multiple: true
+      - run: node packaging/build-npm.mjs --version "$VERSION" --dist dist --out npm
+      - name: Publish
+        env:
+          # Optional: with trusted publishing set up on npmjs.com, no token is needed.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          # Platform packages first, so the main package never points at a missing one.
+          for dir in npm/lanes-* npm/lanes; do
+            name=$(node -p "require('./$dir/package.json').name")
+            if npm view "$name@$VERSION" version >/dev/null 2>&1; then
+              echo "$name@$VERSION is already on npm."
+              continue
+            fi
+            npm publish "./$dir" --access public --provenance
+          done

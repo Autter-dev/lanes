@@ -1,0 +1,16 @@
+---
+// One install command with a Copy button. Words wrap only between words, except URLs, which may
+// break anywhere so a long one never pushes the page sideways. Copy takes the text as shown.
+interface Props {
+  id: string;
+  cmd: string;
+  label?: string;
+  block?: boolean;
+}
+const { id, cmd, label = 'Copy the install command', block = false } = Astro.props;
+---
+<div class:list={['install', block && 'install--block']}>
+  <span class="install__prompt" aria-hidden="true">$</span>
+  <code id={id}>{cmd.split(' ').map((word, i) => <>{i > 0 && ' '}<span class={/^https?:/.test(word) ? 'install__url' : 'install__word'}>{word}</span></>)}</code>
+  <button class="install__copy" type="button" data-copy={`#${id}`} aria-label={label}>Copy</button>
+</div>

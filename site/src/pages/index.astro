@@ -7,7 +7,8 @@ import Status from '../components/Status.astro';
 import GatewayFlow from '../components/GatewayFlow.astro';
 import AutterLoop from '../components/AutterLoop.astro';
 import ReviewFlow from '../components/ReviewFlow.astro';
-import { site, race, helps, extras, agents, quickstart, photos } from '../data/site';
+import InstallCommand from '../components/InstallCommand.astro';
+import { site, race, helps, extras, agents, quickstart, photos, heroInstall, release } from '../data/site';
 ---
 <Base>
   <section class="hero" data-race aria-labelledby="hero-title">
@@ -18,12 +19,10 @@ import { site, race, helps, extras, agents, quickstart, photos } from '../data/s
           <p class="lede">Run as many coding agents as you want on one repo, without them getting in each other's way.</p>
           <div class="hero__act">
             <a class="btn" href={site.repo}>Star on GitHub</a>
-            <div class="install">
-              <span class="install__prompt" aria-hidden="true">$</span>
-              <code id="install-cmd">{site.install.command.split(' ').map((word, i) => <>{i > 0 && ' '}<span class="install__word">{word}</span></>)}</code>
-              <button class="install__copy" type="button" data-copy="#install-cmd" aria-label="Copy the install command">Copy</button>
+            <div class="hero__install" data-install={JSON.stringify(heroInstall)}>
+              <InstallCommand id="install-cmd" cmd={heroInstall.macos} />
             </div>
-            <p class="install__note">Pre-release: install commands go live with the first release.</p>
+            <p class="install__note">{release.live ? <>Version {release.version}<span data-install-os> for macOS</span>. </> : <>Pre-release: install commands go live with the first release. </>}<a class="link" href="/download/">All downloads</a></p>
           </div>
         </div>
       </div>
@@ -102,7 +101,7 @@ import { site, race, helps, extras, agents, quickstart, photos } from '../data/s
         <h2 class="h2" id="start-title" data-split="lines">From install to your first lane.</h2>
         <p class="lede">Lanes finds your stack and sets up the agents you already use. A lane is a normal folder, so your editor, compiler and test runner all just work.</p>
         <div class="start__actions">
-          <a class="btn" href={site.repo}>Star on GitHub</a>
+          <a class="btn" href="/download/">Download Lanes</a>
           <a class="btn btn--ghost" href={site.readme}>Read the README</a>
         </div>
         <p class="label">macOS, Linux and Windows at launch.</p>

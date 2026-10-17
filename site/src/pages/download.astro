@@ -1,0 +1,104 @@
+---
+import Base from '../layouts/Base.astro';
+import InstallCommand from '../components/InstallCommand.astro';
+import { archives, downloadPlatforms, install, release, site, uninstall } from '../data/site';
+---
+<Base title="Download Lanes" description="Install Lanes on macOS, Linux or Windows with Homebrew, winget, Scoop, npm or a one-line script. Free and open source.">
+  <section class="page-hero wrap" aria-labelledby="dl-title">
+    <p class="label">{release.live ? `Version ${release.version} · free and open source` : 'Coming with the first release · free and open source'}</p>
+    <h1 class="display" id="dl-title" style="margin-top:1.5rem">Download Lanes<span class="dot">.</span></h1>
+    <div class="page-hero__row">
+      <p class="lede">One command on macOS, Linux or Windows. Every option installs the same <code>lane</code> command and its <code>laned</code> daemon.</p>
+      {release.live ? (
+        <p class="note">Already installed? Every option updates the same way it installed. <a class="link" href={site.changelog}>See what's new</a>.</p>
+      ) : (
+        <p class="note"><strong>Not released yet.</strong> These commands work from the first release. Until then, <a class="link" href={site.repo}>star the repo</a> to hear when it ships, or build it from source.</p>
+      )}
+    </div>
+  </section>
+
+  <section class="section wrap dl-section" aria-labelledby="dl-systems">
+    <div class="section__head">
+      <h2 class="h2" id="dl-systems" data-split="lines">Pick your system.</h2>
+      <p data-dl-detected>Each system lists its usual way first. They all get you the same thing.</p>
+    </div>
+    <div class="dl-grid" data-platforms>
+      {downloadPlatforms.map((p) => (
+        <article class="dl-card" data-os={p.os} aria-labelledby={`dl-${p.os}`}>
+          <div class="dl-card__head">
+            <h3 class="h3" id={`dl-${p.os}`}>{p.name}</h3>
+            <span class="dl-card__yours" data-yours hidden>Your system</span>
+          </div>
+          <p class="label">{p.detail}</p>
+          <div class="dl-methods">
+          {p.methods.map((m, i) => (
+            <div class="dl-method">
+              <p class="dl-method__name">{m.name}{i === 0 && <span class="label"> · usual way</span>}</p>
+              <InstallCommand id={`dl-${p.os}-${i}`} cmd={m.cmd} block label={`Copy the ${m.name} command for ${p.name}`} />
+              <p class="dl-method__note">{m.note}</p>
+            </div>
+          ))}
+          </div>
+          {p.note && <p class="dl-card__note">{p.note}</p>}
+        </article>
+      ))}
+    </div>
+  </section>
+
+  <section class="section wrap" aria-labelledby="dl-npm" style="padding-top:0">
+    <div class="section__head">
+      <h2 class="h2" id="dl-npm" data-split="lines">With npm.</h2>
+      <p>On any system with Node 18 or later. npm downloads only the build for yours.</p>
+    </div>
+    <div class="dl-wide">
+      <InstallCommand id="dl-npm-cmd" cmd={install.npm} block label="Copy the npm command" />
+    </div>
+  </section>
+
+  <section class="section wrap" aria-labelledby="dl-files" style="padding-top:0">
+    <div class="section__head">
+      <h2 class="h2" id="dl-files" data-split="lines">Or download the files.</h2>
+      <p>Each archive holds <code>lane</code>, <code>laned</code>, the licence and the README. Unpack it and put the two programs anywhere on your PATH.</p>
+    </div>
+    <div class="dl-table-wrap">
+      <table class="dl-table">
+        <thead><tr><th scope="col">System</th><th scope="col">Archive</th><th scope="col">Checksum</th></tr></thead>
+        <tbody>
+          {archives.map((a) => (
+            <tr>
+              <th scope="row">{a.system}</th>
+              <td><a class="link mono" href={release.file(a.name)}>{a.name}</a></td>
+              <td><a class="link mono" href={release.file(`${a.name}.sha256`)}>sha256</a></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+    <div class="dl-notes">
+      <p>Downloaded in a browser on macOS? The archive is quarantined because it isn't signed yet. After unpacking, run <code>xattr -d com.apple.quarantine lane laned</code> once.</p>
+      <p>Check a file: <code>gh attestation verify {archives[0].name} --repo Autter-dev/lanes</code> proves it was built by this repo's release workflow. Or compare it with <a class="link" href={release.file('SHA256SUMS')}>SHA256SUMS</a>.</p>
+      <p>Every file, past versions too, is on the <a class="link" href={release.page}>releases page</a>. The install scripts also work straight from GitHub, for sandboxes that only allow github.com: <code class="dl-break">{install.shGithub}</code></p>
+    </div>
+  </section>
+
+  <section class="section wrap" aria-labelledby="dl-next" style="padding-top:0">
+    <div class="start">
+      <div class="start__copy">
+        <h2 class="h2" id="dl-next" data-split="lines">Then, in your repo.</h2>
+        <p class="lede">Run <code>lane</code> in a terminal. The first time, it checks your machine, shows how a lane works and asks about the install count. Nothing is sent while you look around.</p>
+        <div class="start__actions">
+          <a class="btn" href={site.repo}>Star on GitHub</a>
+          <a class="btn btn--ghost" href={site.readme}>Read the README</a>
+        </div>
+      </div>
+      <div class="start__term">
+        <div class="term__bar"><span>Uninstall</span><span>any time</span></div>
+        <ol class="term__steps">
+          {uninstall.map((u, i) => (
+            <li><span class="n">{i + 1}</span><span>{u.how}<small>{u.cmd}</small></span></li>
+          ))}
+        </ol>
+      </div>
+    </div>
+  </section>
+</Base>

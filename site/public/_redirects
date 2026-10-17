@@ -1,0 +1,4 @@
+# Short install URLs: lanes.autter.dev/install.sh and /install.ps1 point at the scripts
+# on the latest GitHub release.
+/install.sh https://github.com/Autter-dev/lanes/releases/latest/download/lanes-installer.sh 302
+/install.ps1 https://github.com/Autter-dev/lanes/releases/latest/download/lanes-installer.ps1 302
