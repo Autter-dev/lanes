@@ -8,6 +8,14 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-17
 
+- `13:33` **Added**: the foundations the lane engine builds on, plus `lane list`.
+  - **Errors:** one error type for every command. Each has a stable `code`, its exit code and a hint saying what to do next.
+  - **`--json` contract:** exactly one JSON object on stdout, the result or `{"error": {code, message, hint, exit}}`, and nothing else. Unbuilt and unknown commands answer the same way.
+  - **`lane.toml` v1:** `[lanes]`, `[ports]`, `[setup]`, `[env]` and `[cleanup]`. A missing file means the defaults; typos and files from a newer Lanes are refused with what to fix.
+  - **State store:** per-user SQLite (WAL mode) with a single-writer lock, so port blocks never clash across repos. Reads never create files.
+  - **`--request-id` / `LANE_REQUEST_ID`:** a retried write returns the first result instead of running twice.
+  - **`lane list`:** shows this repo's lanes (`--all` for every repo) with their ports, and has `--json`.
+  - The minimum Rust version is now 1.89.
 - `13:25` **Changed**: `AGENTS.md` names the anonymous install count as the one exception to "no network calls unless the user ran `lane login`". It's on by default, opt-out with `lane telemetry off`, `LANE_TELEMETRY=0` or `DO_NOT_TRACK=1`, and never sent from CI. Nothing sends it yet.
 - `12:34` **Added**: the download page says up front that builds aren't code-signed yet, and what that means on each system. macOS needs one `xattr` command, only for archives downloaded in a browser. Windows 11 with Smart App Control on may block `lane.exe` (WSL2 works meanwhile). Linux needs nothing extra.
 - `11:47` **Added**: an "All releases" page at lanes.autter.dev/download/releases. It lists every version, newest first, with its summary, the six archives and their checksums, the installers, a link to the release notes, and the command to install that exact version. The download page has a "Past releases" list linking to it, and the footer links it too. On phones, file tables stack one file per row.

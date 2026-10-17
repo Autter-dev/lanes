@@ -1,9 +1,21 @@
 //! `lane`: the Lanes command-line tool.
+//!
+//! The CLI contract, for scripts and agents:
+//! - `--json` prints exactly one JSON object on stdout: the result, or `{"error": {...}}` with
+//!   `code`, `message`, `hint` and `exit` (see `lane_core::error`). Nothing else goes to stdout.
+//! - Exit codes come from `lane_core::exit` and never change meaning.
+//! - Nothing prompts or opens a pager unless stdout is a terminal and `--json` isn't given.
+//! - Writes take `--request-id <id>` (or `LANE_REQUEST_ID`): a retry with the same id returns
+//!   the first result and changes nothing.
+
+mod args;
 
 use lane_core::config::Config;
 use lane_core::env::Env;
+use lane_core::error::{Error, Result};
 use lane_core::machine::{self, Check};
-use lane_core::{PROGRESS_URL, VERSION, exit};
+use lane_core::state::Store;
+use lane_core::{VERSION, exit};
 use lane_tui::theme::Theme;
 use lane_tui::{home, onboarding};
 use std::path::PathBuf;
@@ -20,14 +32,27 @@ Commands:
   setup    Check this machine and choose your settings
   init     Set up Lanes for this repo and the agents you use
   new      Create a lane
-  list     List lanes with their ports and URLs
+  list     List lanes with their ports and folders
   exec     Run a command inside a lane
   rm       Remove a lane
 
 Options:
-  --json         Machine-readable output
-  -h, --help     Show this help
-  -V, --version  Show the version
+  --json             Machine-readable output: one JSON object on stdout, errors included
+  --request-id ID    Make a write safe to retry: the same id never runs twice (or LANE_REQUEST_ID)
+  -h, --help         Show this help
+  -V, --version      Show the version
+";
+
+const LIST_HELP: &str = "lane list: list lanes with their ports and folders
+
+Usage: lane list [--all] [--json]
+
+Lists the lanes of the repo you're in, oldest first.
+
+Options:
+  --all, -a    List lanes in every repo on this machine
+  --json       Print {\"repo\": ..., \"lanes\": [...]} instead of a table
+  -h, --help   Show this help
 ";
 
 const SETUP_HELP: &str = "\
@@ -44,7 +69,8 @@ Options:
   -h, --help           Show this help
 ";
 
-const COMMANDS: [&str; 5] = ["init", "new", "list", "exec", "rm"];
+/// Commands that are listed but not built yet.
+const COMING: [&str; 4] = ["init", "new", "exec", "rm"];
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -61,15 +87,111 @@ fn main() -> ExitCode {
             ExitCode::from(exit::OK)
         }
         Some("setup") => setup(&args[1..], &env),
-        Some(cmd) if COMMANDS.contains(&cmd) => {
-            eprintln!("lane {cmd}: not built yet. Follow progress at {PROGRESS_URL}");
-            ExitCode::from(exit::NOT_IMPLEMENTED)
-        }
-        Some(other) => {
-            eprintln!("lane: unknown command '{other}'. Run `lane --help` to see the commands.");
-            ExitCode::from(exit::USAGE)
+        Some("list") => run("list", &args[1..], list),
+        Some(cmd) if COMING.contains(&cmd) => report(
+            Some(cmd),
+            &Error::not_implemented(cmd),
+            args::wants_json(&args),
+        ),
+        Some(other) => report(
+            None,
+            &Error::usage(format!("unknown command `{other}`"))
+                .hint("Run `lane --help` to see the commands."),
+            args::wants_json(&args),
+        ),
+    }
+}
+
+/// Run a command and turn its error, if any, into output and an exit code.
+fn run(name: &str, args: &[String], command: fn(&[String]) -> Result<()>) -> ExitCode {
+    match command(args) {
+        Ok(()) => ExitCode::from(exit::OK),
+        Err(e) => report(Some(name), &e, args::wants_json(args)),
+    }
+}
+
+/// Print an error: one JSON object on stdout with `--json`, otherwise a line on stderr.
+fn report(command: Option<&str>, e: &Error, json: bool) -> ExitCode {
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&e.to_json()).expect("errors serialize")
+        );
+    } else {
+        match command {
+            Some(c) => eprintln!("lane {c}: {e}"),
+            None => eprintln!("lane: {e}"),
         }
     }
+    ExitCode::from(e.exit_code())
+}
+
+fn print_json(value: &serde_json::Value) {
+    println!(
+        "{}",
+        serde_json::to_string_pretty(value).expect("output serializes")
+    );
+}
+
+/// `lane list`: the lanes of this repo (or every repo), from the state store. Writes nothing.
+fn list(args: &[String]) -> Result<()> {
+    let (common, rest) = args::split(args)?;
+    let mut all = false;
+    for arg in &rest {
+        match arg.as_str() {
+            "--all" | "-a" => all = true,
+            "-h" | "--help" => {
+                print!("{LIST_HELP}");
+                return Ok(());
+            }
+            other => {
+                return Err(Error::usage(format!("unknown option `{other}`"))
+                    .hint("Run `lane list --help` to see the options."));
+            }
+        }
+    }
+    let repo = if all {
+        None
+    } else {
+        Some(lane_core::repo::top_level(&here())?)
+    };
+    let lanes = match Store::open_existing()? {
+        Some(store) => store.lanes(repo.as_deref())?,
+        None => Vec::new(),
+    };
+    if common.json {
+        print_json(&serde_json::json!({ "repo": repo, "lanes": lanes }));
+        return Ok(());
+    }
+    if lanes.is_empty() {
+        match &repo {
+            Some(r) => println!("No lanes in {} yet.", r.display()),
+            None => println!("No lanes yet."),
+        }
+        println!("`lane new <name>` will make one; it's being built now.");
+        return Ok(());
+    }
+    let name_w = lanes.iter().map(|l| l.name.len()).max().unwrap_or(4).max(4);
+    println!(
+        "{:<name_w$}  {:<11}  {:<10}  PATH",
+        "NAME", "PORTS", "STATE"
+    );
+    for l in &lanes {
+        let ports = format!("{}-{}", l.ports.start, l.ports.end());
+        let state = match l.outcome {
+            None => "active".to_string(),
+            Some(o) => serde_json::to_value(o)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_string))
+                .unwrap_or_default(),
+        };
+        println!(
+            "{:<name_w$}  {ports:<11}  {state:<10}  {}",
+            l.name,
+            l.path.display()
+        );
+    }
+    Ok(())
 }
 
 fn fail(msg: impl std::fmt::Display) -> ExitCode {

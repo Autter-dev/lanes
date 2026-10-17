@@ -48,7 +48,7 @@ const COMMANDS: [(&str, &str, bool); 6] = [
         "make a lane: an instant, ready-to-run copy",
         false,
     ),
-    ("lane list", "your lanes with their ports and URLs", false),
+    ("lane list", "your lanes with their ports and folders", true),
     (
         "lane exec <name> -- <cmd>",
         "run a command inside a lane",

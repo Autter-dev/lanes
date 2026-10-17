@@ -2,7 +2,11 @@
 
 pub mod config;
 pub mod env;
+pub mod error;
 pub mod machine;
+pub mod project;
+pub mod repo;
+pub mod state;
 
 /// The Lanes version, shared by every binary.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
