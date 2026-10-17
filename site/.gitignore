@@ -25,4 +25,5 @@ pnpm-debug.log*
 
 # QA output
 .shots/
+.shots-*.log
 .photos/
