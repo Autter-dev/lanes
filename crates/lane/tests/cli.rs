@@ -791,3 +791,245 @@ fn a_worktree_made_with_git_becomes_a_lane() {
     assert_eq!(listed["lanes"].as_array().unwrap().len(), 2);
     let _ = std::fs::remove_dir_all(&other);
 }
+
+/// Run Git in `dir`, as a test user.
+fn git_in(dir: &std::path::Path, args: &[&str]) {
+    let ok = Command::new("git")
+        .args([
+            "-c",
+            "user.name=Lanes Test",
+            "-c",
+            "user.email=test@lanes.invalid",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok, "git {args:?}");
+}
+
+/// PATH with the `lane` under test first, so Git hooks find it.
+fn path_with_lane() -> std::ffi::OsString {
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lane"));
+    std::env::join_paths(std::iter::once(bin.parent().unwrap().to_path_buf()).chain(
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+    ))
+    .unwrap()
+}
+
+#[test]
+fn clones_and_copies_of_the_repo_are_turned_down() {
+    let dir = config_dir("claude-copies");
+    let repo = repo_with_commit("claude-copies");
+    std::fs::write(repo.join("lane.toml"), "version = 1\n").unwrap();
+    git_in(
+        &repo,
+        &["remote", "add", "origin", "https://github.com/acme/app.git"],
+    );
+    let name = repo.file_name().unwrap().to_string_lossy().to_string();
+    // The reason a command is turned down, or None when it may run.
+    let decide = |tool: &str, command: &str| -> Option<String> {
+        let input = serde_json::json!({ "cwd": repo, "tool_name": tool, "tool_input": { "command": command } });
+        let out = lane_hook(&dir, &repo, "pre-tool-use", input, &[]);
+        assert_eq!(out.status.code(), Some(0), "{command}");
+        if out.stdout.is_empty() {
+            return None;
+        }
+        let v = json(&out);
+        assert_eq!(v["hookSpecificOutput"]["hookEventName"], "PreToolUse");
+        assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "deny");
+        Some(
+            v["hookSpecificOutput"]["permissionDecisionReason"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        )
+    };
+
+    // Each kind of copy has its own reason, and each says what to run instead.
+    let worktree = decide("Bash", "git worktree add ../x").unwrap();
+    let clone = decide("Bash", "git clone . ../app-2").unwrap();
+    let copy = decide("Bash", "cp -r . ../app-copy").unwrap();
+    for reason in [&worktree, &clone, &copy] {
+        assert!(reason.contains("lane new <name> --print-path"), "{reason}");
+    }
+    assert!(worktree != clone && clone != copy && copy != worktree);
+
+    for (tool, command, want) in [
+        (
+            "Bash",
+            format!("cd .. && git clone {name} {name}-2"),
+            &clone,
+        ),
+        (
+            "Bash",
+            "git clone git@github.com:acme/app ../app-2".into(),
+            &clone,
+        ),
+        (
+            "Bash",
+            "git clone \"$(git remote get-url origin)\" ../app-2".into(),
+            &clone,
+        ),
+        ("Bash", format!("cd .. && cp -R {name} {name}-copy"), &copy),
+        ("Bash", "robocopy . ../app-copy /E".into(), &copy),
+        (
+            "PowerShell",
+            "Copy-Item -Recurse . ..\\app-copy".into(),
+            &copy,
+        ),
+        ("PowerShell", "cp -r . ..\\app-copy".into(), &copy),
+    ] {
+        assert_eq!(decide(tool, &command).as_ref(), Some(want), "{command}");
+    }
+    for command in [
+        "git clone https://github.com/acme/other ../other",
+        "cp -r src ../src-copy",
+        "robocopy . ../app-export /E /XD .git",
+        "git status",
+    ] {
+        assert_eq!(decide("Bash", command), None, "{command}");
+    }
+}
+
+#[test]
+fn with_husky_init_adds_a_line_and_worktrees_still_become_lanes() {
+    let dir = config_dir("husky");
+    let repo = repo_with_commit("husky");
+    // Husky 9's layout: Git runs .husky/_/<hook>, which runs .husky/<hook> with `sh -e`.
+    std::fs::create_dir_all(repo.join(".husky/_")).unwrap();
+    std::fs::write(repo.join(".husky/_/.gitignore"), "*\n").unwrap();
+    std::fs::write(
+        repo.join(".husky/_/h"),
+        "n=$(basename \"$0\")\ns=$(dirname \"$(dirname \"$0\")\")/$n\n[ ! -f \"$s\" ] && exit 0\nsh -e \"$s\" \"$@\"\n",
+    )
+    .unwrap();
+    let stub = repo.join(".husky/_/post-checkout");
+    std::fs::write(&stub, "#!/usr/bin/env sh\n. \"$(dirname \"$0\")/h\"\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    git_in(&repo, &["config", "core.hooksPath", ".husky/_"]);
+
+    // init says it changed a file that's checked in, and to add it.
+    let out = lane_in(&dir, &repo, &["init"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{text}");
+    assert!(
+        text.contains("added a line to .husky/post-checkout"),
+        "{text}"
+    );
+    assert!(
+        text.contains("git add lane.toml .husky/post-checkout AGENTS.md"),
+        "{text}"
+    );
+    assert!(!repo.join(".git/hooks/post-checkout").exists());
+    let hook = std::fs::read_to_string(repo.join(".husky/post-checkout")).unwrap();
+    assert!(hook.contains("lane hook git post-checkout"), "{hook}");
+
+    // A second run finds it set up.
+    let v = json(&lane_in(&dir, &repo, &["init", "--json"]));
+    let git_hook = v["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["what"] == "git_hook")
+        .unwrap();
+    assert_eq!(git_hook["changed"], false, "{v}");
+    assert_eq!(git_hook["check_in"], true, "{v}");
+    assert_eq!(
+        std::fs::read_to_string(repo.join(".husky/post-checkout")).unwrap(),
+        hook
+    );
+
+    // Any tool's `git worktree add` runs Husky's hook, which runs the line, which adopts it.
+    let other = repo.with_file_name("husky-by-hand");
+    let _ = std::fs::remove_dir_all(&other);
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(&repo)
+        .args(["worktree", "add", "--detach", "-q"])
+        .arg(&other)
+        .env("PATH", path_with_lane())
+        .env("LANE_CONFIG_DIR", &dir)
+        .env("LANE_STATE_DIR", dir.join("state"))
+        .env_remove("LANE_GIT")
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let listed = json(&lane_in(&dir, &repo, &["list", "--json"]));
+    assert_eq!(listed["lanes"][0]["name"], "husky-by-hand", "{listed}");
+    let _ = std::fs::remove_dir_all(&other);
+
+    // By hand: a branch switch (a previous HEAD that isn't zeros) or the repo itself is no lane.
+    for previous in ["1a2b3c", "0000000000000000000000000000000000000000"] {
+        let args = [
+            "hook",
+            "git",
+            "post-checkout",
+            previous,
+            "4d5e6f",
+            "1",
+            "--json",
+        ];
+        let out = lane_in(&dir, &repo, &args);
+        assert_eq!(out.status.code(), Some(0));
+        assert_eq!(json(&out)["lane"], serde_json::Value::Null);
+    }
+}
+
+#[test]
+fn with_lefthook_init_prints_the_command_to_add() {
+    let dir = config_dir("lefthook");
+    let repo = repo_with_commit("lefthook");
+    std::fs::write(
+        repo.join("lefthook.yml"),
+        "post-checkout:\n  commands:\n    deps:\n      run: npm install\n",
+    )
+    .unwrap();
+    let out = lane_in(&dir, &repo, &["init"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{text}");
+    assert!(
+        text.contains("add the `lanes` command below to post-checkout in lefthook.yml"),
+        "{text}"
+    );
+    assert!(
+        text.contains("\n      post-checkout:\n        commands:\n          lanes:\n"),
+        "{text}"
+    );
+    // lefthook owns the hook file, so nothing is written there, and lefthook.yml is untouched.
+    assert!(!repo.join(".git/hooks/post-checkout").exists());
+    assert!(
+        !std::fs::read_to_string(repo.join("lefthook.yml"))
+            .unwrap()
+            .contains("lanes")
+    );
+
+    let v = json(&lane_in(&dir, &repo, &["init", "--json"]));
+    let git_hook = v["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["what"] == "git_hook")
+        .unwrap();
+    assert_eq!(git_hook["changed"], false);
+    assert!(
+        git_hook["snippet"]
+            .as_str()
+            .unwrap()
+            .contains("lane hook git post-checkout {0}")
+    );
+    let add = v["next"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["run"].as_str().is_some_and(|r| r.starts_with("git add")));
+    assert!(add.is_none(), "nothing new to check in: {v}");
+}

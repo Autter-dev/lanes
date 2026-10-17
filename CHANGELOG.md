@@ -8,6 +8,17 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-17
 
+- `17:15` **Added**: `lane init` sets up the post-checkout hook in repos whose Git hooks belong to Husky or lefthook, so worktrees other tools make become lanes there too.
+  - **Husky 9** (`core.hooksPath` is `.husky/_`): one line goes at the top of `.husky/post-checkout`, which is made if it isn't there. The file is checked in, so `lane init` says so and puts it in its `git add` step. Where `lane` isn't installed the line does nothing, and it never fails a checkout.
+  - **lefthook** with a post-checkout hook: nothing is written, because lefthook moves aside hooks it didn't write and never runs them. `lane init` prints the `lanes` command to add to lefthook's config, in its format (YAML, TOML or JSON). When lefthook doesn't run post-checkout, the hook goes in `.git/hooks` as before.
+  - **Any other `core.hooksPath`**, Husky 8 and older included: nothing is written, and `lane init` prints the line to add.
+  - **`lane hook git post-checkout`:** what that line and that command run. A new worktree becomes a lane. Branch switches, the repo's own folder and Lanes' own worktrees are left alone.
+  - **In `--json`,** an entry in `agents` has `check_in` when its file belongs in Git, and `snippet` with the text to add by hand.
+- `17:15` **Added**: Claude Code is turned down when it tries to copy the repo, not only when it runs `git worktree add`. In a Lanes repo, the `pre-tool-use` hook turns down:
+  - **A `git clone` of this repo:** by one of its folders (`.`, `..`, a path, `cd .. && git clone app app-2`, `git -C`), by its `origin` URL however it's written (`https://`, `git@host:`, `ssh://`), by `"$(git remote get-url origin)"`, or with `gh repo clone owner/repo`. Clones of other repos, and `--bare` or `--mirror` clones, run as usual.
+  - **A recursive copy of one of the repo's folders:** `cp -r`, `-R` or `-a`; `xcopy /E` or `/S`; `robocopy /E`, `/S` or `/MIR`; `Copy-Item -Recurse` and PowerShell's `cp -r`; also inside `bash -c`, `cmd /c` and `pwsh -Command`. Copies of a subfolder, and copies that leave `.git` out (`robocopy /XD .git`), run as usual.
+  - **Each has its own reason**, pointing to `lane new <name> --print-path`. A copy's reason also points to `git archive` for an export.
+  - Most commands still return before any Git or disk work. A session told about lanes now hears that clones and copies are out too.
 - `16:43` **Added**: Claude Code works in lanes. `claude -w fix-auth` makes a lane, and the session works in it, with no other steps once `lane init` has run. Checked end to end with Claude Code 2.1.300 on Windows. (`20d009c`)
   - **`lane hook claude <event>`:** what Claude Code's hooks run, reading its JSON on stdin.
     - **`worktree-create`:** makes the lane (or finds the one with that name) and prints its folder. Names like `Fix Auth` become `fix-auth`. Subagents with `isolation: worktree` and background sessions get lanes too.

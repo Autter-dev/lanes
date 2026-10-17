@@ -1,9 +1,14 @@
 //! Putting agents in lanes. Claude Code gets hooks: `claude -w` makes a lane, a session in a lane
-//! learns its ports, and `git worktree add` is turned down with a pointer to `lane new`. Every
-//! other tool's worktrees become lanes through a Git `post-checkout` hook. `AGENTS.md` gets a
-//! short note. `lane init` writes all of it; everything here is safe to run again.
+//! learns its ports, and `git worktree add`, a clone of the repo or a copy of its folder is
+//! turned down with a pointer to `lane new`. Every other tool's worktrees become lanes through a
+//! Git `post-checkout` hook (or a line in Husky's, or a command in lefthook's config). `AGENTS.md`
+//! gets a short note. `lane init` writes all of it; everything here is safe to run again.
 
-use crate::engine::Repo;
+mod copies;
+
+pub use copies::{RepoCopy, deny_reason, makes_worktree, repo_copies};
+
+use crate::engine::{Repo, same_path};
 use crate::error::{Error, ErrorKind, Result};
 use crate::lane_env;
 use crate::state::Lane;
@@ -23,14 +28,21 @@ pub const LOCAL_AGENT_FILES: [&str; 1] = [CLAUDE_SETTINGS];
 const HOOK_PREFIX: &str = "lane hook claude";
 
 /// What one setup step did, for `lane init`'s report.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Change {
     pub path: PathBuf,
     /// False when it was already set up, so nothing was written.
     pub changed: bool,
+    /// The file is checked in, so a change to it should be committed: `lane init` lists it in
+    /// its `git add` step.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub check_in: bool,
     /// Why it was skipped or what to know, when there's something to say.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// Text to add to `path` by hand, when Lanes leaves a file that isn't its own alone.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snippet: Option<String>,
 }
 
 /// A lane name from whatever a tool called its worktree: lowercase letters, digits and
@@ -62,75 +74,25 @@ pub fn lane_name(raw: &str, fallback: &str) -> String {
     name
 }
 
-/// Whether a shell command runs `git worktree add`, in any segment of it and with any of Git's
-/// own options in between (`git -C ../app worktree add ...`).
-pub fn makes_worktree(command: &str) -> bool {
-    if !command.contains("worktree") {
-        return false;
-    }
-    command.split(['\n', ';', '&', '|']).any(|segment| {
-        let words = shell_words(segment);
-        // The command word: past `NAME=value` assignments and wrappers like `sudo`.
-        let Some(at) = words.iter().position(|w| {
-            !w.contains('=')
-                && !["sudo", "command", "exec", "env", "time", "nohup"].contains(&w.as_str())
-        }) else {
-            return false;
-        };
-        let program = words[at].rsplit(['/', '\\']).next().unwrap_or_default();
-        if !program.eq_ignore_ascii_case("git") && !program.eq_ignore_ascii_case("git.exe") {
-            return false;
-        }
-        let mut rest = words[at + 1..].iter();
-        while let Some(w) = rest.next() {
-            match w.as_str() {
-                "-C" | "-c" => {
-                    rest.next();
-                }
-                w if w.starts_with('-') => {}
-                "worktree" => {
-                    return rest.find(|w| !w.starts_with('-')).map(String::as_str) == Some("add");
-                }
-                _ => return false,
-            }
-        }
-        false
-    })
-}
-
-/// Split a command into words the way a shell would, near enough: whitespace separates, and
-/// single or double quotes keep a word together (`"C:\Program Files\Git\cmd\git.exe"`).
-fn shell_words(s: &str) -> Vec<String> {
-    let (mut words, mut word, mut quote, mut started) = (Vec::new(), String::new(), None, false);
-    for c in s.chars() {
-        match (quote, c) {
-            (Some(q), c) if c == q => quote = None,
-            (Some(_), c) => word.push(c),
-            (None, '"' | '\'') => {
-                quote = Some(c);
-                started = true;
-            }
-            (None, c) if c.is_whitespace() => {
-                if started || !word.is_empty() {
-                    words.push(std::mem::take(&mut word));
-                    started = false;
-                }
-            }
-            (None, '(' | ')') => {}
-            (None, c) => word.push(c),
-        }
-    }
-    if started || !word.is_empty() {
-        words.push(word);
-    }
-    words
-}
-
 /// Why `git worktree add` was turned down, for the agent to read.
 pub const WORKTREE_DENIED: &str = "This repo uses Lanes, so make a lane instead of a Git worktree: \
 run `lane new <name> --print-path` and work in the folder it prints. A lane is a real Git \
 worktree with its own ports and .env, and `lane list` shows it. It starts from the base branch; \
 to work on another branch, run `git switch <branch>` (or `git switch -c <branch>`) inside it.";
+
+/// Why a `git clone` of this same repo was turned down.
+pub const CLONE_DENIED: &str = "This repo uses Lanes, so make a lane instead of cloning the repo \
+again: run `lane new <name> --print-path` and work in the folder it prints. A lane is a Git \
+worktree of this same repo, with its own ports and .env: it shares this repo's commits and \
+branches, so there's nothing to push or pull between copies, and `lane list` shows it. To work \
+on another branch, run `git switch <branch>` (or `git switch -c <branch>`) inside it.";
+
+/// Why a recursive copy of the repo's folder was turned down.
+pub const COPY_DENIED: &str = "This repo uses Lanes, so make a lane instead of copying the repo's \
+folder: run `lane new <name> --print-path` and work in the folder it prints. A lane is a Git \
+worktree of this same repo, with its own ports and .env, and `lane list` shows it; a copied \
+folder would share this one's ports and drift away from its branches. If you need the files \
+outside Git (an export or a deploy), use `git archive`, or leave `.git` out of the copy.";
 
 /// Lines for Claude Code's `CLAUDE_ENV_FILE`, so every command in the session has the lane's
 /// ports. Only plain `export NAME=value` lines with values a shell takes as written, so Claude
@@ -168,7 +130,7 @@ pub fn context_in_lane(repo: &Repo, lane: &Lane) -> String {
          own ports, so it doesn't clash with other agents' lanes. PORT={port} and \
          LANE_URL={url} are set; ports {ports} belong to this lane.{run} Stay in this folder. \
          If you need another copy of the repo, run `lane new <name> --print-path` instead of \
-         `git worktree add`.",
+         `git worktree add`, a clone or a copy of the folder.",
         name = lane.name,
         url = lane_env::url(lane),
         ports = format_args!("{}-{}", port, lane.ports.end()),
@@ -179,7 +141,8 @@ pub fn context_in_lane(repo: &Repo, lane: &Lane) -> String {
 pub fn context_in_repo() -> String {
     "This repo uses Lanes. If you need a separate copy of the repo to work in, run \
      `lane new <name> --print-path` and work in the folder it prints, instead of \
-     `git worktree add`. Each lane has its own ports and .env; `lane list` shows them."
+     `git worktree add`, a clone or a copy of the folder. Each lane has its own ports and .env; \
+     `lane list` shows them."
         .to_string()
 }
 
@@ -262,7 +225,7 @@ pub fn setup_claude(repo: &Repo) -> Result<Change> {
     Ok(Change {
         path,
         changed,
-        note: None,
+        ..Change::default()
     })
 }
 
@@ -325,7 +288,8 @@ pub fn setup_agents_md(repo: &Repo) -> Result<Vec<Change>> {
     let mut changes = vec![Change {
         path,
         changed,
-        note: None,
+        check_in: true,
+        ..Change::default()
     }];
     let claude_md = repo.root.join("CLAUDE.md");
     if claude_md.is_file() {
@@ -342,7 +306,8 @@ pub fn setup_agents_md(repo: &Repo) -> Result<Vec<Change>> {
         changes.push(Change {
             path: claude_md,
             changed: !has,
-            note: None,
+            check_in: true,
+            ..Change::default()
         });
     }
     Ok(changes)
@@ -364,29 +329,59 @@ exit 0
 
 const HOOK_MARKER: &str = "# Added by `lane init`: a worktree any tool makes";
 
-/// Install the `post-checkout` hook in the repo's hooks folder. A hook that's already there is
-/// kept and run after ours. With `core.hooksPath` set (Husky, lefthook), nothing is written,
-/// because that folder is usually checked in.
+/// The same hook as one line, for a post-checkout script Lanes doesn't own: Husky's, which is
+/// checked in, or one in another `core.hooksPath` folder. `lane hook git post-checkout` does the
+/// work, so the line never needs to change. Where `lane` isn't installed it does nothing, and it
+/// never fails the checkout.
+pub const HOOK_LINE: &str = "command -v lane >/dev/null 2>&1 && lane hook git post-checkout \"$@\" >/dev/null 2>&1 || true # Added by `lane init`: a worktree any tool makes becomes a lane";
+
+/// How a second `lane init` finds the line, or the lefthook command, whatever its comment says.
+const HOOK_LINE_MARKER: &str = "lane hook git post-checkout";
+
+/// The command for lefthook's config; lefthook puts the hook's arguments in `{0}`.
+const LEFTHOOK_RUN: &str =
+    "command -v lane >/dev/null 2>&1 && lane hook git post-checkout {0} >/dev/null 2>&1 || true";
+
+/// Where lefthook looks for its config, in order. Each has a `lefthook-local` twin.
+const LEFTHOOK_CONFIGS: [&str; 15] = [
+    "lefthook.yml",
+    ".lefthook.yml",
+    "lefthook.yaml",
+    ".lefthook.yaml",
+    ".config/lefthook.yml",
+    ".config/lefthook.yaml",
+    "lefthook.toml",
+    ".lefthook.toml",
+    ".config/lefthook.toml",
+    "lefthook.json",
+    ".lefthook.json",
+    ".config/lefthook.json",
+    "lefthook.jsonc",
+    ".lefthook.jsonc",
+    ".config/lefthook.jsonc",
+];
+
+/// Set up the `post-checkout` hook that turns a worktree any tool makes into a lane:
+/// - lefthook running post-checkout: nothing is written, since lefthook moves aside hooks it
+///   didn't write; the note gives the command to add to its config.
+/// - Husky 9 (`core.hooksPath` is `.husky/_`): one line goes first in `.husky/post-checkout`,
+///   which is checked in.
+/// - Any other `core.hooksPath`: nothing is written; the note gives the line to add.
+/// - Otherwise the hook goes in the repo's own hooks folder. A hook that's already there is kept
+///   and run after ours.
 pub fn setup_git_hook(repo: &Repo) -> Result<Change> {
-    if let Some(custom) = crate::git::try_run(&repo.root, &["config", "core.hooksPath"])
-        .filter(|s| !s.trim().is_empty())
-    {
-        return Ok(Change {
-            path: PathBuf::from(custom.trim()),
-            changed: false,
-            note: Some(format!(
-                "Git hooks are in {} (core.hooksPath), so Lanes didn't add its post-checkout hook there. Worktrees other tools make won't become lanes on their own; run `lane adopt <folder>` for them.",
-                custom.trim()
-            )),
-        });
+    if let Some(change) = lefthook(&repo.root)? {
+        return Ok(change);
+    }
+    if let Some(custom) = hooks_path(repo)? {
+        return custom_hooks(repo, &custom);
     }
     let path = crate::git::git_path(&repo.root, "hooks/post-checkout")?;
     let existing = read_or_empty(&path)?;
     if existing.contains(HOOK_MARKER) {
         return Ok(Change {
             path,
-            changed: false,
-            note: None,
+            ..Change::default()
         });
     }
     if path.exists() {
@@ -408,7 +403,145 @@ pub fn setup_git_hook(repo: &Repo) -> Result<Change> {
     Ok(Change {
         path,
         changed: true,
-        note: None,
+        ..Change::default()
+    })
+}
+
+/// lefthook writes the hook files for the hooks in its config, and moves any other file in the
+/// way aside as `<hook>.old`, which it never runs. So when it runs post-checkout here, Lanes
+/// writes nothing and says what to add to lefthook's config. `None` when lefthook doesn't run
+/// post-checkout here, so the hook file is free.
+fn lefthook(root: &Path) -> Result<Option<Change>> {
+    let mut configs = Vec::new();
+    for local in [false, true] {
+        let found = LEFTHOOK_CONFIGS
+            .iter()
+            .map(|n| match local {
+                true => n.replace("lefthook", "lefthook-local"),
+                false => n.to_string(),
+            })
+            .find(|n| root.join(n).is_file());
+        if let Some(name) = found {
+            let text = read_or_empty(&root.join(&name))?;
+            configs.push((name, text));
+        }
+    }
+    let runs_it = |text: &str| {
+        text.lines().any(|l| {
+            l.trim_start()
+                .trim_start_matches(['{', '[', '"', '\''])
+                .starts_with("post-checkout")
+        })
+    };
+    let Some((name, _)) = configs.iter().find(|(_, text)| runs_it(text)) else {
+        return Ok(None);
+    };
+    let path = in_repo(root, name);
+    if let Some((name, _)) = configs.iter().find(|(_, t)| t.contains(HOOK_LINE_MARKER)) {
+        return Ok(Some(Change {
+            path: in_repo(root, name),
+            note: Some(format!(
+                "a command in {name} (lefthook): worktrees other tools make become lanes (already set up)"
+            )),
+            ..Change::default()
+        }));
+    }
+    let snippet = match name.rsplit('.').next() {
+        Some("toml") => format!("[post-checkout.commands.lanes]\nrun = \"{LEFTHOOK_RUN}\"\n"),
+        Some("json" | "jsonc") => format!(
+            "\"post-checkout\": {{ \"commands\": {{ \"lanes\": {{ \"run\": \"{LEFTHOOK_RUN}\" }} }} }}\n"
+        ),
+        _ => format!("post-checkout:\n  commands:\n    lanes:\n      run: {LEFTHOOK_RUN}\n"),
+    };
+    Ok(Some(Change {
+        path,
+        note: Some(format!(
+            "lefthook runs post-checkout here and moves aside hooks it didn't write, so Lanes left the hooks alone. For worktrees other tools make to become lanes, add the `lanes` command below to post-checkout in {name} and check it in:"
+        )),
+        snippet: Some(snippet),
+        ..Change::default()
+    }))
+}
+
+/// `core.hooksPath`, unless it's unset or names the repo's own hooks folder anyway.
+fn hooks_path(repo: &Repo) -> Result<Option<String>> {
+    let Some(custom) = crate::git::try_run(&repo.root, &["config", "--path", "core.hooksPath"])
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+    else {
+        return Ok(None);
+    };
+    let own = crate::git::common_dir(&repo.root)?.join("hooks");
+    Ok((!same_path(&repo.root.join(&custom), &own)).then_some(custom))
+}
+
+/// Hooks in a `core.hooksPath` folder. Husky 9's gets a line in its post-checkout script. Any
+/// other is left alone, with the line to add: it may be checked in, or shared by every repo.
+fn custom_hooks(repo: &Repo, custom: &str) -> Result<Change> {
+    let folder = custom.replace('\\', "/");
+    let folder = folder.trim_end_matches('/');
+    // Husky 9 points Git at `.husky/_`, whose scripts run the ones in `.husky`.
+    if let Some(husky) = folder.strip_suffix("/_")
+        && husky.rsplit('/').next() == Some(".husky")
+        && !Path::new(husky).has_root()
+        && !husky.split('/').any(|c| c == "..")
+    {
+        return setup_husky(repo, husky);
+    }
+    Ok(Change {
+        path: match Path::new(custom).has_root() {
+            true => PathBuf::from(custom).join("post-checkout"),
+            false => in_repo(&repo.root, &format!("{folder}/post-checkout")),
+        },
+        note: Some(format!(
+            "Git hooks are in {custom} (core.hooksPath), so Lanes didn't change them. For worktrees other tools make to become lanes, add the line below to {folder}/post-checkout, an executable sh script:"
+        )),
+        snippet: Some(format!("{HOOK_LINE}\n")),
+        ..Change::default()
+    })
+}
+
+/// Husky 9's `.husky/post-checkout`: a plain sh script, checked in, made if it isn't there.
+/// Lanes' line goes first (after a `#!` line), so an `exit` further down can't skip it and the
+/// script's own commands still decide how it ends.
+fn setup_husky(repo: &Repo, husky: &str) -> Result<Change> {
+    let rel = format!("{husky}/post-checkout");
+    let path = in_repo(&repo.root, &rel);
+    let text = read_or_empty(&path)?;
+    let changed = !text.contains(HOOK_LINE_MARKER);
+    if changed {
+        let nl = if text.contains("\r\n") { "\r\n" } else { "\n" };
+        let at = match text.starts_with("#!") {
+            true => text.find('\n').map_or(text.len(), |i| i + 1),
+            false => 0,
+        };
+        let mut out = text[..at].to_string();
+        if !out.is_empty() && !out.ends_with('\n') {
+            out.push_str(nl);
+        }
+        out.push_str(HOOK_LINE);
+        out.push_str(nl);
+        out.push_str(&text[at..]);
+        let permissions = fs::metadata(&path).ok().map(|m| m.permissions());
+        write_atomic(&path, &out)?;
+        if let Some(p) = permissions {
+            fs::set_permissions(&path, p).map_err(|e| io_error("keep the mode of", &path, e))?;
+        }
+    }
+    let note = match changed {
+        true => format!(
+            "added a line to {rel} (Husky's hook, checked in): worktrees other tools make become lanes. It does nothing where `lane` isn't installed."
+        ),
+        false => format!(
+            "a line in {rel} (Husky): worktrees other tools make become lanes (already set up)"
+        ),
+    };
+    Ok(Change {
+        path,
+        changed,
+        check_in: true,
+        note: Some(note),
+        ..Change::default()
     })
 }
 
@@ -429,6 +562,13 @@ fn on_path(program: &str) -> bool {
                 .any(|e| dir.join(format!("{program}{e}")).is_file())
         })
     })
+}
+
+/// A path in the repo from a `/`-separated one, spelled the system's way.
+fn in_repo(root: &Path, rel: &str) -> PathBuf {
+    rel.split('/')
+        .filter(|c| !c.is_empty())
+        .fold(root.to_path_buf(), |p, c| p.join(c))
 }
 
 fn read_or_empty(path: &Path) -> Result<String> {

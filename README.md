@@ -199,14 +199,14 @@ open http://fix-auth.localhost:4100
 
 Each command ends by saying what to run next, with the lane's own folder, command and URL. `lane --help` lists every command, and every command takes `--help`.
 
-**With Claude Code** (next release, on `main` now): `lane init` also sets up Claude Code's hooks in `.claude/settings.local.json`, which stays on your machine and out of Git. Then `claude -w fix-auth` starts a session in a new lane, with `PORT` and `LANE_URL` set. If Claude Code tries `git worktree add`, it's pointed to `lane new` instead. When you're done, removing the worktree removes the lane. For every repo at once, install the plugin in Claude Code:
+**With Claude Code** (next release, on `main` now): `lane init` also sets up Claude Code's hooks in `.claude/settings.local.json`, which stays on your machine and out of Git. Then `claude -w fix-auth` starts a session in a new lane, with `PORT` and `LANE_URL` set. If Claude Code tries `git worktree add`, a `git clone` of the repo or a recursive copy of its folder (`cp -r`, `xcopy`, `robocopy`, `Copy-Item -Recurse`), it's pointed to `lane new` instead. When you're done, removing the worktree removes the lane. For every repo at once, install the plugin in Claude Code:
 
 ```
 /plugin marketplace add Autter-dev/lanes
 /plugin install lanes@autter
 ```
 
-Other agents' worktrees become lanes through a Git `post-checkout` hook that `lane init` adds, and `AGENTS.md` gets a short note on working in lanes. `lane init --no-agents` skips all of this.
+Other agents' worktrees become lanes through a Git `post-checkout` hook that `lane init` adds, and `AGENTS.md` gets a short note on working in lanes. With Husky, the hook is one line at the top of `.husky/post-checkout`. That file is checked in, so `lane init` says to `git add` it, and the line does nothing for a teammate without `lane`. With lefthook or another `core.hooksPath`, `lane init` changes nothing there and prints the command or line to add. `lane init --no-agents` skips all of this.
 
 <br>
 

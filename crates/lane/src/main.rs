@@ -165,9 +165,12 @@ nothing and installs nothing. Check lane.toml in, so teammates get the same lane
 
 Then it puts agents in lanes:
   Claude Code   hooks in .claude/settings.local.json (kept out of Git): `claude -w <name>`
-                makes a lane, a session in a lane gets its ports, and `git worktree add` is
-                turned down with a pointer to `lane new`. Only when Claude Code is in use here.
-  Git hook      post-checkout: a worktree any other tool makes becomes a lane
+                makes a lane, a session in a lane gets its ports, and `git worktree add`, a
+                clone of the repo or a copy of its folder is turned down with a pointer to
+                `lane new`. Only when Claude Code is in use here.
+  Git hook      post-checkout: a worktree any other tool makes becomes a lane. With Husky, a
+                line in .husky/post-checkout (checked in, so it's in the `git add` step). With
+                lefthook or another core.hooksPath, nothing is written: init prints what to add.
   AGENTS.md     a short note on working in lanes (and `@AGENTS.md` in CLAUDE.md)
 Running it again changes nothing that's already set up.
 
@@ -738,14 +741,10 @@ fn init(args: &[String]) -> Result<()> {
     if write {
         to_add.push(lane_core::project::FILE_NAME.to_string());
     }
-    for (what, change) in &setup {
-        if change.changed && matches!(*what, "agents_md" | "claude_md") {
-            to_add.extend(
-                change
-                    .path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned()),
-            );
+    for (_, change) in &setup {
+        if change.changed && change.check_in {
+            let rel = change.path.strip_prefix(&repo.root).unwrap_or(&change.path);
+            to_add.push(rel.to_string_lossy().replace('\\', "/"));
         }
     }
     let steps = if print_only {
@@ -827,6 +826,9 @@ fn init(args: &[String]) -> Result<()> {
                 (None, false) => format!("{done} (already set up)"),
             };
             println!("  {label:<12} {state}");
+            for line in change.snippet.iter().flat_map(|s| s.lines()) {
+                println!("      {line}");
+            }
         }
     }
     print!("{}", next::render(&steps));
