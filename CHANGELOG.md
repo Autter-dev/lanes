@@ -6,6 +6,10 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ## Unreleased
 
+### 2026-10-17
+
+- `17:01` **Changed**: the website offers 0.0.4: the download page's archives, and a 0.0.4 entry on the releases page.
+
 ## 0.0.4 (2026-10-17)
 
 **Claude Code works in lanes.** Run `lane init` once, then `claude -w <name>` starts a session in a lane of its own, with its own ports. Still a preview.
