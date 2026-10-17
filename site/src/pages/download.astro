@@ -1,7 +1,7 @@
 ---
 import Base from '../layouts/Base.astro';
 import InstallCommand from '../components/InstallCommand.astro';
-import { archives, channels, downloadPlatforms, install, release, site, uninstall, unsigned } from '../data/site';
+import { archives, channels, downloadPlatforms, heroInstall, install, release, site, uninstall, unsigned } from '../data/site';
 import { allReleases, longDate } from '../data/releases';
 const slug = (v: string) => v.replace(/[^0-9A-Za-z]+/g, '-');
 ---
@@ -10,31 +10,20 @@ const slug = (v: string) => v.replace(/[^0-9A-Za-z]+/g, '-');
     <p class="label">{release.live ? `Version ${release.version} · free and open source` : 'Coming with the first release · free and open source'}</p>
     <h1 class="display" id="dl-title" style="margin-top:1.5rem">Download Lanes<span class="dot">.</span></h1>
     <div class="page-hero__row">
-      <p class="lede">One command on macOS, Linux or Windows. Every option installs the same <code>lane</code> command and its <code>laned</code> daemon.</p>
+      <div class="dl-quick">
+        <p class="lede">One command on macOS, Linux or Windows. Every option installs the same <code>lane</code> command and its <code>laned</code> daemon.</p>
+        {release.live && (
+          <div class="dl-quick__cmd" data-install={JSON.stringify(heroInstall)}>
+            <InstallCommand id="dl-quick-cmd" cmd={heroInstall.macos} block label="Copy the install command" />
+            <p class="install__note">The quickest way<span data-install-os> for macOS</span>. Every other way is below.</p>
+          </div>
+        )}
+      </div>
       {release.live ? (
         <p class="note">Already installed? Every option updates the same way it installed. <a class="link" href={site.changelog}>See what's new</a>.</p>
       ) : (
         <p class="note"><strong>Not released yet.</strong> These commands work from the first release. Until then, <a class="link" href={site.repo}>star the repo</a> to hear when it ships, or build it from source.</p>
       )}
-    </div>
-  </section>
-
-  <section class="wrap" aria-labelledby="dl-unsigned">
-    <div class="dl-callout">
-      <div class="dl-callout__head">
-        <p class="label">For early testers</p>
-        <h2 class="h3" id="dl-unsigned">These builds aren't code-signed yet.</h2>
-        <p>Signing is on the way. Until then, here's what it means on each system.</p>
-      </div>
-      <ul class="dl-callout__list">
-        {unsigned.map((u, i) => (
-          <li>
-            <h3 class="dl-method__name">{u.os}</h3>
-            <p>{u.text}</p>
-            {u.cmd && <InstallCommand id={`dl-unsigned-${i}`} cmd={u.cmd} block label={`Copy the ${u.os} command`} />}
-          </li>
-        ))}
-      </ul>
     </div>
   </section>
 
@@ -60,7 +49,7 @@ const slug = (v: string) => v.replace(/[^0-9A-Za-z]+/g, '-');
             </div>
           ))}
           </div>
-          {p.note && <p class="dl-card__note">{p.note}</p>}
+          {p.note && <p class="dl-card__note">{p.note} <a class="link" href="#dl-unsigned">What to do</a></p>}
         </article>
       ))}
     </div>
@@ -96,9 +85,27 @@ const slug = (v: string) => v.replace(/[^0-9A-Za-z]+/g, '-');
       </table>
     </div>
     <div class="dl-notes">
-      <p>Downloaded in a browser on macOS? The archive is quarantined because it isn't signed yet. After unpacking, run <code>xattr -d com.apple.quarantine lane laned</code> once.</p>
       <p>Check a file: <code>gh attestation verify {archives[0].name} --repo Autter-dev/lanes</code> proves it was built by this repo's release workflow. Or compare it with <a class="link" href={release.file('SHA256SUMS')}>SHA256SUMS</a>.</p>
       <p>Every file, past versions too, is on the <a class="link" href={release.page}>releases page</a>. The install scripts also work straight from GitHub, for sandboxes that only allow github.com: <code class="dl-break">{install.shGithub}</code></p>
+    </div>
+  </section>
+
+  <section class="section wrap" aria-labelledby="dl-unsigned" style="padding-top:0">
+    <div class="dl-callout">
+      <div class="dl-callout__head">
+        <p class="label">If your system warns you</p>
+        <h2 class="h3" id="dl-unsigned">These builds aren't code-signed yet.</h2>
+        <p>Signing is on the way. Until then, here's what it means on each system.</p>
+      </div>
+      <ul class="dl-callout__list">
+        {unsigned.map((u, i) => (
+          <li>
+            <h3 class="dl-method__name">{u.os}</h3>
+            <p>{u.text}</p>
+            {u.cmd && <InstallCommand id={`dl-unsigned-${i}`} cmd={u.cmd} block label={`Copy the ${u.os} command`} />}
+          </li>
+        ))}
+      </ul>
     </div>
   </section>
 

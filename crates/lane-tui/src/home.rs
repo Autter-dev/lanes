@@ -1,7 +1,9 @@
-//! The home screen `lane` opens after onboarding. Until the daemon exists it shows the commands
+//! The home screen `lane` opens after onboarding: your lanes, what to do next, the commands
 //! (with what's built and what's coming), the settings, and keys to change them.
 
 use crate::theme::Theme;
+use lane_core::lane_env;
+use lane_core::state::Lane;
 use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Alignment, Constraint, Layout, Margin};
@@ -13,6 +15,17 @@ pub struct Input {
     pub telemetry: bool,
     pub telemetry_forced_off: Option<&'static str>,
     pub theme: Theme,
+    /// The repo `lane` was opened in, if any.
+    pub repo: Option<HomeRepo>,
+    /// This repo's lanes, or every repo's when `lane` was opened outside one.
+    pub lanes: Vec<Lane>,
+}
+
+pub struct HomeRepo {
+    /// The repo's folder name.
+    pub name: String,
+    /// Whether it has a lane.toml yet.
+    pub set_up: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,11 +51,7 @@ const COMMANDS: [(&str, &str, bool); 6] = [
         "run the welcome and machine checks again",
         true,
     ),
-    (
-        "lane init",
-        "set up Lanes for this repo and your agents",
-        true,
-    ),
+    ("lane init", "find your stack and write lane.toml", true),
     (
         "lane new <name>",
         "make a lane: an instant, ready-to-run copy",
@@ -145,22 +154,74 @@ impl Home {
             header,
         );
 
-        let mut lines = if body.height >= 20 {
+        let lanes = &self.input.lanes;
+        let mut lines = if body.height >= 20 && lanes.is_empty() {
             let mut big = crate::widgets::wordmark(th, f64::INFINITY, 0.6);
             big.push(Line::default());
             big
         } else {
             Vec::new()
         };
-        lines.extend([
-            Line::styled("No lanes yet.", th.strong()),
-            Line::styled(
-                "Your lanes will show here, each with its agent, URL, changed files and tests.",
-                th.muted(),
-            ),
-            Line::default(),
-            Line::styled("Commands", th.strong()),
-        ]);
+        if lanes.is_empty() {
+            lines.extend([
+                Line::styled("No lanes yet.", th.strong()),
+                Line::styled(
+                    "Your lanes will show here, each with its agent, URL, changed files and tests.",
+                    th.muted(),
+                ),
+            ]);
+        } else {
+            lines.push(Line::styled(
+                match &self.input.repo {
+                    Some(r) => format!("Lanes in {}", r.name),
+                    None => "Your lanes".to_string(),
+                },
+                th.strong(),
+            ));
+            // Everything below the lanes takes 16 rows; the lanes get what's left.
+            let room = (body.height as usize).saturating_sub(16).max(1);
+            let shown = if lanes.len() > room {
+                room - 1
+            } else {
+                lanes.len()
+            };
+            let name_w = lanes
+                .iter()
+                .map(|l| l.name.len())
+                .max()
+                .unwrap_or(4)
+                .min(24);
+            let urls: Vec<String> = lanes[..shown].iter().map(lane_env::url).collect();
+            let url_w = urls.iter().map(String::len).max().unwrap_or(0);
+            for (l, url) in lanes[..shown].iter().zip(&urls) {
+                lines.push(Line::from(vec![
+                    Span::styled(format!("  {:<name_w$}  ", l.name), th.accent()),
+                    Span::styled(format!("{url:<url_w$}"), th.text()),
+                    Span::styled(format!("  {}", l.state()), th.muted()),
+                ]));
+            }
+            if shown < lanes.len() {
+                lines.push(Line::styled(
+                    format!("  and {} more: lane list", lanes.len() - shown),
+                    th.muted(),
+                ));
+            }
+        }
+        lines.push(Line::default());
+        let next = match &self.input.repo {
+            Some(r) if !r.set_up => Some(("This repo isn't set up yet: ", "lane init")),
+            Some(_) if lanes.is_empty() => Some(("Make your first lane: ", "lane new fix-auth")),
+            Some(_) => Some(("Run the app in one: ", "lane exec <name> -- <dev command>")),
+            None => Some(("Go to a repo you work on: ", "cd your-project")),
+        };
+        if let Some((what, cmd)) = next {
+            lines.push(Line::from(vec![
+                Span::styled(what, th.text()),
+                Span::styled(cmd, th.accent()),
+            ]));
+            lines.push(Line::default());
+        }
+        lines.push(Line::styled("Commands", th.strong()));
         for (cmd, what, built) in COMMANDS {
             let mut spans = vec![
                 Span::styled(

@@ -19,7 +19,7 @@ use lane_core::machine::{self, Check};
 use lane_core::project::Project;
 use lane_core::state::{Lane, Status, Store};
 use lane_core::{VERSION, exit};
-use lane_core::{detect, lane_env};
+use lane_core::{detect, lane_env, next};
 use lane_tui::theme::Theme;
 use lane_tui::{home, onboarding};
 use std::path::PathBuf;
@@ -34,13 +34,19 @@ Run `lane` on its own in a terminal to open the Lanes app (a short welcome on th
 
 Commands:
   setup    Check this machine and choose your settings
-  init     Set up Lanes for this repo and the agents you use
+  init     Find this repo's stack and write lane.toml
   new      Create a lane
   list     List lanes with their ports and folders
   exec     Run a command inside a lane, with its ports
   env      Print a lane's variables (PORT, LANE_URL, ...)
   rm       Remove a lane
   adopt    Turn a worktree you already have into a lane
+
+Start in a repo:
+  lane init                            find your stack and write lane.toml
+  lane new fix-auth                    make a lane
+  lane exec fix-auth -- npm run dev    run the app in it, on the lane's own port
+Each command ends by saying what to run next.
 
 Options:
   --json             Machine-readable output: one JSON object on stdout, errors included
@@ -117,11 +123,12 @@ Usage: lane exec [<name>] [--json] -- <command> [args...]
 Runs the command in the lane's folder with PORT, VITE_PORT, LANE_URL, LANE_NAME, LANE_ID,
 LANE_PORTS and LANE_PATH set, so two lanes can run the same dev server at once. $PORT, ${PORT}
 and %PORT% in the arguments are filled in too (likewise the other names), with no shell needed.
-Without <name>, the lane you're in. Exits with the command's own exit code.
+Quote them, so your own shell leaves them for Lanes. Without <name>, the lane you're in. Exits
+with the command's own exit code.
 
 Examples:
   lane exec fix-auth -- npm run dev
-  lane exec fix-auth -- pnpm dev --port $PORT
+  lane exec fix-auth -- pnpm dev --port '$PORT'
 
 Options:
   --json       The command's output goes to stderr; stdout gets {\"lane\", \"exit\", \"millis\"}
@@ -257,22 +264,27 @@ fn list(args: &[String]) -> Result<()> {
     let repo = if all {
         None
     } else {
-        Some(Repo::open(&here())?.root)
+        Some(Repo::open(&here())?)
     };
+    let root = repo.as_ref().map(|r| r.root.as_path());
     let lanes = match Store::open_existing()? {
-        Some(store) => store.lanes(repo.as_deref())?,
+        Some(store) => store.lanes(root)?,
         None => Vec::new(),
     };
+    let steps = match &repo {
+        Some(r) if lanes.is_empty() => next::first_lane(r),
+        _ => Vec::new(),
+    };
     if common.json {
-        print_json(&serde_json::json!({ "repo": repo, "lanes": lanes }));
+        print_json(&serde_json::json!({ "repo": root, "lanes": lanes, "next": steps }));
         return Ok(());
     }
     if lanes.is_empty() {
-        match &repo {
+        match root {
             Some(r) => println!("No lanes in {} yet.", r.display()),
-            None => println!("No lanes yet."),
+            None => println!("No lanes yet. Run `lane new <name>` in a repo to make one."),
         }
-        println!("Make one with `lane new <name>`, like `lane new fix-auth`.");
+        print!("{}", next::render(&steps));
         return Ok(());
     }
     let name_w = lanes.iter().map(|l| l.name.len()).max().unwrap_or(4).max(4);
@@ -282,17 +294,10 @@ fn list(args: &[String]) -> Result<()> {
     );
     for l in &lanes {
         let ports = format!("{}-{}", l.ports.start, l.ports.end());
-        let state = match (l.status, l.outcome) {
-            (Status::Creating, _) => "creating".to_string(),
-            (Status::Ready, None) => "ready".to_string(),
-            (Status::Ready, Some(o)) => serde_json::to_value(o)
-                .ok()
-                .and_then(|v| v.as_str().map(str::to_string))
-                .unwrap_or_default(),
-        };
         println!(
-            "{:<name_w$}  {ports:<11}  {state:<10}  {}",
+            "{:<name_w$}  {ports:<11}  {:<10}  {}",
             l.name,
+            l.state(),
             l.path.display()
         );
     }
@@ -385,8 +390,11 @@ fn new(args: &[String]) -> Result<()> {
         common.request_id.as_deref(),
     )?;
     let total = started.elapsed().as_secs_f64();
+    let steps = next::in_lane(&repo, &made.lane);
     if common.json {
-        print_json(&serde_json::to_value(&made).expect("lanes serialize"));
+        let mut value = serde_json::to_value(&made).expect("lanes serialize");
+        value["next"] = serde_json::json!(steps);
+        print_json(&value);
         return Ok(());
     }
     if print_path {
@@ -424,7 +432,7 @@ fn new(args: &[String]) -> Result<()> {
     if made.fixed_paths > 0 {
         println!("  fixed   {} files that pointed at _base", made.fixed_paths);
     }
-    println!("Start working: cd {}", made.lane.path.display());
+    print!("{}", next::render(&steps));
     copied_note(&made);
     Ok(())
 }
@@ -461,9 +469,12 @@ fn rm(args: &[String]) -> Result<()> {
         keep_files,
         common.request_id.as_deref(),
     )?;
+    let steps = next::after_rm(&repo, store.lanes(Some(&repo.root))?.len());
     if common.json {
-        print_json(&serde_json::json!({ "removed": lane }));
-    } else if keep_files {
+        print_json(&serde_json::json!({ "removed": lane, "next": steps }));
+        return Ok(());
+    }
+    if keep_files {
         println!(
             "Forgot lane {}; its folder is still at {}. Ports {} are free.",
             lane.name,
@@ -477,6 +488,7 @@ fn rm(args: &[String]) -> Result<()> {
             ports(&lane)
         );
     }
+    print!("{}", next::render(&steps));
     Ok(())
 }
 
@@ -512,8 +524,9 @@ fn adopt(args: &[String]) -> Result<()> {
         agent.as_deref(),
         common.request_id.as_deref(),
     )?;
+    let steps = next::in_lane(&repo, &lane);
     if common.json {
-        print_json(&serde_json::json!({ "lane": lane }));
+        print_json(&serde_json::json!({ "lane": lane, "next": steps }));
     } else {
         println!(
             "{} is a lane: {}, ports {}.",
@@ -521,6 +534,7 @@ fn adopt(args: &[String]) -> Result<()> {
             lane.path.display(),
             ports(&lane)
         );
+        print!("{}", next::render(&steps));
     }
     Ok(())
 }
@@ -701,6 +715,11 @@ fn init(args: &[String]) -> Result<()> {
                 .hint("Check that you can write to the repo's folder.")
             })?;
     }
+    let steps = if print_only {
+        Vec::new()
+    } else {
+        next::after_init(write)
+    };
     if common.json {
         print_json(&serde_json::json!({
             "repo": repo.root,
@@ -709,6 +728,7 @@ fn init(args: &[String]) -> Result<()> {
             "written": write,
             "kept_existing": existed && !write && !print_only,
             "text": text,
+            "next": steps,
         }));
         return Ok(());
     }
@@ -738,15 +758,13 @@ fn init(args: &[String]) -> Result<()> {
         println!("  note     {note}");
     }
     if write {
-        println!(
-            "Wrote {}. Check it in, then make a lane: lane new fix-auth",
-            path.display()
-        );
+        println!("Wrote {}.", path.display());
     } else {
         println!(
             "lane.toml is already there, so it was left as is. `lane init --print` shows what it would write; `--force` rewrites it."
         );
     }
+    print!("{}", next::render(&steps));
     Ok(())
 }
 
@@ -815,11 +833,14 @@ fn run_onboarding(env: &Env, config: &mut Config) -> Result<bool, ExitCode> {
 
 fn run_home(env: &Env, mut config: Config) -> ExitCode {
     loop {
+        let (repo, lanes) = home_lanes();
         let input = home::Input {
             version: VERSION,
             telemetry: config.telemetry,
             telemetry_forced_off: env.telemetry_forced_off(),
             theme: theme(env),
+            repo,
+            lanes,
         };
         let (outcome, telemetry) = match lane_tui::run_home(input) {
             Ok(home::Outcome::Quit { telemetry }) => (None, telemetry),
@@ -845,6 +866,26 @@ fn run_home(env: &Env, mut config: Config) -> ExitCode {
             }
         }
     }
+}
+
+/// What the home screen lists: the repo `lane` was opened in and its lanes, or every lane on
+/// this machine outside a repo. Nothing to show when the state can't be read.
+fn home_lanes() -> (Option<home::HomeRepo>, Vec<Lane>) {
+    let repo = Repo::open(&here()).ok();
+    let lanes = Store::open_existing()
+        .ok()
+        .flatten()
+        .and_then(|s| s.lanes(repo.as_ref().map(|r| r.root.as_path())).ok())
+        .unwrap_or_default();
+    let repo = repo.map(|r| home::HomeRepo {
+        name: r
+            .root
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        set_up: r.has_lane_toml(),
+    });
+    (repo, lanes)
 }
 
 struct SetupFlags {

@@ -267,6 +267,16 @@ fn new_list_and_rm_work_end_to_end() {
     let path = PathBuf::from(made["lane"]["path"].as_str().unwrap());
     assert!(path.join("src/app.ts").exists());
     assert!(made["clone"]["files"].as_u64().unwrap() >= 1);
+    // What to do next: this repo has no lane.toml, so init comes first, then work in the lane.
+    let steps: Vec<&str> = made["next"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["run"].as_str().unwrap())
+        .collect();
+    assert_eq!(steps[0], "lane init");
+    assert!(steps[1].starts_with("cd "), "{steps:?}");
+    assert!(steps[2].starts_with("lane exec fix-auth -- "), "{steps:?}");
 
     let listed = json(&lane_in(&dir, &repo, &["list", "--json"]));
     assert_eq!(listed["lanes"].as_array().unwrap().len(), 1);
@@ -298,7 +308,9 @@ fn new_list_and_rm_work_end_to_end() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert_eq!(json(&out)["removed"]["name"], "fix-auth");
+    let removed = json(&out);
+    assert_eq!(removed["removed"]["name"], "fix-auth");
+    assert_eq!(removed["next"][0]["run"], "lane list");
     assert!(!path.exists());
     let listed = json(&lane_in(&dir, &repo, &["list", "--json"]));
     assert_eq!(
@@ -309,6 +321,18 @@ fn new_list_and_rm_work_end_to_end() {
 
     let out = lane_in(&dir, &repo, &["rm", "fix-auth", "--json"]);
     assert_eq!(json(&out)["error"]["code"], "not_found");
+
+    // The last lane gone: the plain output says how to start again.
+    let out = lane_in(&dir, &repo, &["rm", "add-tests"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains(
+            "Next:
+"
+        ),
+        "{text}"
+    );
+    assert!(text.contains("lane new fix-auth"), "{text}");
 }
 
 #[test]
@@ -457,6 +481,8 @@ fn init_finds_the_stack_and_writes_lane_toml_once() {
     assert_eq!(v["written"], true);
     assert_eq!(v["found"]["install"][0], "npm ci");
     assert_eq!(v["found"]["dev"]["command"], "npm run dev -- --port $PORT");
+    assert_eq!(v["next"][0]["run"], "lane new fix-auth");
+    assert_eq!(v["next"][1]["run"], "git add lane.toml");
     let text = std::fs::read_to_string(repo.join("lane.toml")).unwrap();
     assert!(text.contains("template = \".env.example\""), "{text}");
 

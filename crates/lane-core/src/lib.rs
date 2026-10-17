@@ -9,6 +9,7 @@ pub mod error;
 pub mod git;
 pub mod lane_env;
 pub mod machine;
+pub mod next;
 pub mod project;
 pub mod repo;
 pub mod state;

@@ -222,7 +222,11 @@ fn help_opens_and_closes() {
 fn ready_screen_tailors_next_steps() {
     let text = screen_text(&at(5, 0), 100, 30);
     assert!(text.contains("Next, in this repo:"));
-    assert!(text.contains("  soon"));
+    assert!(text.contains("lane new fix-auth"));
+    assert!(
+        !text.contains("soon"),
+        "every command on the ready screen is built"
+    );
 
     let mut checks = sample_checks();
     checks[3] = check(
@@ -244,6 +248,8 @@ fn home_renders_and_switches_the_install_count() {
         telemetry: true,
         telemetry_forced_off: None,
         theme: Theme::new(true, false),
+        repo: None,
+        lanes: Vec::new(),
     });
     let mut terminal = Terminal::new(TestBackend::new(90, 26)).unwrap();
     terminal.draw(|f| app.render(f)).unwrap();
@@ -260,7 +266,9 @@ fn home_renders_and_switches_the_install_count() {
             version: "0.0.1",
             telemetry: true,
             telemetry_forced_off: None,
-            theme: Theme::new(true, false)
+            theme: Theme::new(true, false),
+            repo: None,
+            lanes: Vec::new(),
         })
         .on_key(key(KeyCode::Char('s'))),
         Some(home::Outcome::Setup { telemetry: true })
@@ -441,4 +449,77 @@ fn enter_still_moves_on_from_the_machine_step() {
     let mut app = with_fixes();
     app.on_key(key(KeyCode::Enter));
     assert!(screen_text(&app, 100, 30).contains("How a lane works"));
+}
+
+fn home_with(repo: Option<home::HomeRepo>, lanes: Vec<lane_core::state::Lane>) -> String {
+    let app = Home::new(home::Input {
+        version: "0.0.3",
+        telemetry: false,
+        telemetry_forced_off: None,
+        theme: Theme::new(true, false),
+        repo,
+        lanes,
+    });
+    let mut terminal = Terminal::new(TestBackend::new(90, 26)).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    buffer_text(&terminal)
+}
+
+fn a_lane(name: &str, port: u16) -> lane_core::state::Lane {
+    lane_core::state::Lane {
+        id: format!("l_{name}"),
+        repo: PathBuf::from("/work/app"),
+        name: name.into(),
+        path: PathBuf::from(format!("/work/app.lanes/{name}")),
+        base_commit: None,
+        ports: lane_core::state::PortBlock {
+            start: port,
+            count: 10,
+        },
+        agent: None,
+        outcome: None,
+        status: lane_core::state::Status::Ready,
+        created_at: 0,
+    }
+}
+
+#[test]
+fn home_lists_the_lanes_with_their_urls() {
+    let repo = || {
+        Some(home::HomeRepo {
+            name: "app".into(),
+            set_up: true,
+        })
+    };
+    let text = home_with(
+        repo(),
+        vec![a_lane("fix-auth", 4100), a_lane("dark-mode", 4110)],
+    );
+    assert!(text.contains("Lanes in app"));
+    assert!(text.contains("http://fix-auth.localhost:4100"));
+    assert!(text.contains("http://dark-mode.localhost:4110"));
+    assert!(!text.contains("No lanes yet."));
+
+    // More lanes than fit: the rest are counted, and the settings still show.
+    let many = (0..12)
+        .map(|i| a_lane(&format!("lane-{i}"), 4100 + i * 10))
+        .collect();
+    let text = home_with(repo(), many);
+    assert!(text.contains("more: lane list"));
+    assert!(text.contains("Install count"));
+}
+
+#[test]
+fn home_says_what_to_do_next() {
+    let set_up = |set_up| {
+        Some(home::HomeRepo {
+            name: "app".into(),
+            set_up,
+        })
+    };
+    assert!(home_with(set_up(false), Vec::new()).contains("This repo isn't set up yet: lane init"));
+    assert!(
+        home_with(set_up(true), Vec::new()).contains("Make your first lane: lane new fix-auth")
+    );
+    assert!(home_with(None, Vec::new()).contains("cd your-project"));
 }

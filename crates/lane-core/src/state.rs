@@ -138,6 +138,17 @@ pub struct Lane {
     pub created_at: i64,
 }
 
+impl Lane {
+    /// One word for where the lane stands: `creating`, `ready`, or how it ended.
+    pub fn state(&self) -> &'static str {
+        match (self.status, self.outcome) {
+            (Status::Creating, _) => Status::Creating.as_str(),
+            (Status::Ready, None) => Status::Ready.as_str(),
+            (Status::Ready, Some(o)) => o.as_str(),
+        }
+    }
+}
+
 /// A repo's clean `_base` lane: where it is, the commit it's at, and what its dependencies
 /// were installed from (so they're installed again only when that changes).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

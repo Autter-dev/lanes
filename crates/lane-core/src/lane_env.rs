@@ -29,8 +29,13 @@ pub fn vars(lane: &Lane) -> Vec<(&'static str, String)> {
         ("LANE_NAME", lane.name.clone()),
         ("LANE_ID", lane.id.clone()),
         ("LANE_PATH", lane.path.to_string_lossy().into_owned()),
-        ("LANE_URL", format!("http://{}.localhost:{p}", lane.name)),
+        ("LANE_URL", url(lane)),
     ]
+}
+
+/// The lane's URL: `http://<name>.localhost:<PORT>`.
+pub fn url(lane: &Lane) -> String {
+    format!("http://{}.localhost:{}", lane.name, lane.ports.start)
 }
 
 /// The keys Lanes writes into a lane's `.env`.

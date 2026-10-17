@@ -178,7 +178,7 @@ macOS, Linux and Windows at launch. On Windows, Lanes is fastest on a Windows 11
 
 ## 07 / Quick start
 
-Lanes 0.0.1 is a preview: `lane` opens the welcome and the home screen, and `lane setup` checks your machine. The lane commands come next. Every option installs the same `lane` command; winget is on the way.
+Lanes is a preview. The lane commands work: `init`, `new`, `exec`, `env`, `list`, `rm` and `adopt`. Agents don't move into lanes on their own yet, so start yours inside a lane's folder for now. Every option installs the same `lane` command; winget is on the way.
 
 | On | Install with |
 | --- | --- |
@@ -191,11 +191,13 @@ Or download an archive from [GitHub Releases](https://github.com/Autter-dev/lane
 ```sh
 brew install autter-dev/tap/lanes
 cd your-repo
-lane init                    # finds your stack and sets up your agents
-lane new fix-auth            # a ready-to-run lane
+lane init                    # finds your stack and writes lane.toml
+lane new fix-auth            # a ready-to-run lane with its own ports
 lane exec fix-auth -- npm run dev
-open http://fix-auth.localhost
+open http://fix-auth.localhost:4100
 ```
+
+Each command ends by saying what to run next, with the lane's own folder, command and URL. `lane --help` lists every command, and every command takes `--help`.
 
 <br>
 
@@ -205,18 +207,26 @@ open http://fix-auth.localhost
 | --- | --- |
 | `lane` | Opens the terminal app, with a short welcome the first time |
 | `lane setup` | Checks your machine and chooses your settings (`--json` and `--yes` for scripts) |
-| `lane init` | Sets up Lanes for your repo and the agents you use |
+| `lane init` | Finds your stack and writes `lane.toml`: how to install dependencies, start the dev server and fill each lane's `.env` |
 | `lane new <name>` | Creates a lane |
-| `lane list` | Lists your lanes with their ports and URLs |
-| `lane exec <name> -- <cmd>` | Runs a command inside a lane |
+| `lane list` | Lists your lanes with their ports and folders |
+| `lane exec <name> -- <cmd>` | Runs a command inside a lane, with its own `PORT` and `LANE_URL` |
+| `lane env <name>` | Prints a lane's variables for sh, PowerShell, cmd or a `.env` file |
+| `lane adopt <path>` | Turns a worktree you already have into a lane |
+| `lane rm <name>` | Removes a lane and frees its ports |
+
+Coming next:
+
+| Command | What it does |
+| --- | --- |
 | `lane run -- <agent>` | Starts any agent in a fresh lane |
 | `lane undo` / `lane restore` | Takes back a step, or returns to a checkpoint |
 | `lane race -n <N> "<task>"` | One task, N agents, best result wins |
 | `lane combine <a> <b>` | Tries two lanes together |
 | `lane promote <name>` | Turns a lane into one clean PR |
-| `lane rm <name>` / `lane gc` | Removes one lane, or every finished one |
+| `lane gc` | Removes every finished lane |
 | `lane login` | Signs in to Autter and connects the Lanes gateway (optional) |
-| `lane telemetry off` | Turns off the anonymous install count |
+| `lane telemetry off` | Turns off the anonymous install count (today: `lane setup --yes --telemetry off`, or `LANE_TELEMETRY=0`) |
 
 <br>
 

@@ -77,6 +77,11 @@ impl Repo {
     pub fn lane_path(&self, name: &str) -> PathBuf {
         self.lanes_dir.join(name)
     }
+
+    /// Whether the repo has a lane.toml (`lane init` writes one).
+    pub fn has_lane_toml(&self) -> bool {
+        self.root.join(crate::project::FILE_NAME).is_file()
+    }
 }
 
 /// One spelling per path, so the same folder never looks like two: Windows paths with `\` and

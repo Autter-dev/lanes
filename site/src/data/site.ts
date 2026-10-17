@@ -75,10 +75,10 @@ export const downloadPlatforms: { os: Os; name: string; detail: string; methods:
     detail: 'x64 and arm64, Windows 10 and 11',
     methods: [
       { name: 'winget', cmd: install.winget, note: 'Built into Windows 11. Update with winget upgrade Autter.Lanes.', soon: channels.winget ? undefined : "Waiting for Microsoft's review of the winget package." },
-      { name: 'Scoop', cmd: install.scoop, note: 'Update with scoop update lanes.' },
-      { name: 'PowerShell script', cmd: install.ps1, note: 'Puts lane.exe and laned.exe in your user folder and adds it to PATH.' },
+      { name: 'PowerShell script', cmd: install.ps1, note: 'Nothing to install first. Puts lane.exe and laned.exe in your user folder and adds it to PATH.' },
+      { name: 'Scoop', cmd: install.scoop, note: 'If you use Scoop. Update with scoop update lanes.' },
     ],
-    note: "Builds aren't code-signed yet, so Windows 11 may block them while Smart App Control is on. Signing is on the way.",
+    note: "Builds aren't code-signed yet, so Smart App Control on Windows 11 may block them.",
   },
 ];
 
@@ -190,9 +190,9 @@ export const agents = ['Claude Code', 'Cursor', 'Codex', 'Gemini CLI', 'GitHub C
 
 export const quickstart = [
   { cmd: 'brew install autter-dev/tap/lanes', note: 'or winget, Scoop, npm or a script: lanes.autter.dev/download' },
-  { cmd: 'cd your-repo && lane init', note: 'finds your stack and sets up your agents' },
-  { cmd: 'lane new fix-auth', note: 'a ready-to-run lane' },
-  { cmd: 'lane exec fix-auth -- npm run dev', note: 'then open http://fix-auth.localhost' },
+  { cmd: 'cd your-repo && lane init', note: 'finds your stack and writes lane.toml' },
+  { cmd: 'lane new fix-auth', note: 'a ready-to-run lane with its own ports' },
+  { cmd: 'lane exec fix-auth -- npm run dev', note: 'then open http://fix-auth.localhost:4100' },
 ];
 
 export const gateway = {

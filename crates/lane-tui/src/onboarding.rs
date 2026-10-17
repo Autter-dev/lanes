@@ -1071,29 +1071,24 @@ impl Onboarding {
             },
             th.strong(),
         ));
-        // Commands on the left, what they do in the middle, "soon" in its own column on the right.
-        let desc_w = (width as usize).saturating_sub(2 + 20 + 6).min(44);
-        let cmd = |c: &'static str, what: &'static str, soon: bool| {
+        // Commands on the left, what they do beside them.
+        let desc_w = (width as usize).saturating_sub(2 + 20).min(50);
+        let cmd = |c: &'static str, what: &'static str| {
             Line::from(vec![
                 Span::styled(format!("  {c:<20}"), th.accent()),
-                Span::styled(format!("{:<desc_w$}", fit(what, desc_w)), th.text()),
-                Span::styled(if soon { "  soon" } else { "" }, th.muted()),
+                Span::styled(fit(what, desc_w), th.text()),
             ])
         };
         if !in_repo {
-            lines.push(cmd(
-                "cd your-project",
-                "go to a Git repo you work on",
-                false,
-            ));
+            lines.push(cmd("cd your-project", "go to a Git repo you work on"));
         }
-        lines.push(cmd("lane init", "set up this repo and your agents", true));
-        lines.push(cmd("lane new fix-auth", "make your first lane", true));
-        lines.push(cmd("lane", "open Lanes any time", false));
+        lines.push(cmd("lane init", "find your stack and write lane.toml"));
+        lines.push(cmd("lane new fix-auth", "make your first lane"));
+        lines.push(cmd("lane", "open Lanes any time"));
         lines.push(Line::default());
         lines.extend(
             wrap(
-                "Commands marked soon are being built in the open: github.com/Autter-dev/lanes",
+                "Each command ends by saying what to run next. `lane --help` lists them all.",
                 (width as usize).min(78),
                 0,
             )
