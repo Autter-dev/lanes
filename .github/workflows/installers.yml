@@ -1,0 +1,59 @@
+name: Installers
+
+# Installs the latest release the way users do, on every system, and runs it. Runs after each
+# published release, and by hand from the Actions tab.
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  script:
+    name: Script (${{ matrix.os }})
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Install from lanes.autter.dev
+        run: curl -fsSL https://lanes.autter.dev/install.sh | sh
+      - name: Run it
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          lane --version
+          laned --version
+          lane setup --json > setup.json
+          head -c 300 setup.json
+      - name: Install from GitHub into another folder
+        run: |
+          curl -fsSL https://github.com/Autter-dev/lanes/releases/latest/download/lanes-installer.sh | sh -s -- --dir "$RUNNER_TEMP/lanes-bin"
+          "$RUNNER_TEMP/lanes-bin/lane" --version
+
+  powershell:
+    name: Script (Windows, ${{ matrix.shell }})
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [pwsh, powershell]
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - name: Install from lanes.autter.dev
+        run: |
+          $env:LANES_INSTALL_DIR = "$env:RUNNER_TEMP\lanes-$env:SHELL_NAME"
+          irm https://lanes.autter.dev/install.ps1 | iex
+          lane --version
+          laned --version
+          lane setup --json | Select-Object -First 8
+        env:
+          SHELL_NAME: ${{ matrix.shell }}
