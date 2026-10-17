@@ -8,6 +8,19 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-17
 
+- `15:07` **Added**: lanes run things. Every command in the CLI now works.
+  - **`lane exec [<name>] -- <command>`:** runs a command in a lane with its own ports and URL. `PORT`, `VITE_PORT`, `LANE_URL`, `LANE_NAME`, `LANE_ID`, `LANE_PORTS` and `LANE_PATH` are set.
+    - `$PORT`, `${PORT}` and `%PORT%` in arguments are filled in without a shell.
+    - It exits with the command's own code.
+    - On Windows it finds npm-style `.cmd` and `.ps1` launchers.
+    - Inside a lane, the name is optional.
+    - Two lanes ran the same dev server at once on ports 4100 and 4110.
+  - **`lane env [<name>]`:** prints those variables for sh, PowerShell, cmd or dotenv, or as `--json`.
+  - **`lane init`:** looks at the repo and writes a commented `lane.toml`, running and installing nothing. `--print` and `--force` are there too.
+    - It finds the package manager (pnpm, npm, Yarn, Bun, uv, Poetry, Bundler, Go, Cargo), the dev command and its usual port, the `.env` template, a Compose file and migration tools (Prisma, Drizzle, Rails, Django, Alembic).
+    - Frameworks that don't read `PORT` get `--port $PORT`.
+  - **The lane's `.env`:** a lane gets one from `[env] template`, with its own `PORT` and `LANE_URL` and every other line kept.
+  - **`[dev] command`** in `lane.toml`.
 - `14:21` **Added**: the lane engine: `lane new`, `lane rm` and `lane adopt` work.
   - **`lane new <name>`:** makes a lane from a clean `_base` copy of the base branch (`main`), with dependencies installed once from `[setup] install` in `lane.toml`.
     - Files are cloned where the disk can, and copied otherwise, with a note saying so.

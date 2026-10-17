@@ -13,10 +13,13 @@ mod args;
 use lane_core::config::Config;
 use lane_core::engine::{self, Made, Repo};
 use lane_core::env::Env;
+use lane_core::error::ErrorKind;
 use lane_core::error::{Error, Result};
 use lane_core::machine::{self, Check};
+use lane_core::project::Project;
 use lane_core::state::{Lane, Status, Store};
 use lane_core::{VERSION, exit};
+use lane_core::{detect, lane_env};
 use lane_tui::theme::Theme;
 use lane_tui::{home, onboarding};
 use std::path::PathBuf;
@@ -34,7 +37,8 @@ Commands:
   init     Set up Lanes for this repo and the agents you use
   new      Create a lane
   list     List lanes with their ports and folders
-  exec     Run a command inside a lane
+  exec     Run a command inside a lane, with its ports
+  env      Print a lane's variables (PORT, LANE_URL, ...)
   rm       Remove a lane
   adopt    Turn a worktree you already have into a lane
 
@@ -105,6 +109,58 @@ Options:
   -h, --help       Show this help
 ";
 
+const EXEC_HELP: &str = "\
+lane exec: run a command inside a lane, with its own ports
+
+Usage: lane exec [<name>] [--json] -- <command> [args...]
+
+Runs the command in the lane's folder with PORT, VITE_PORT, LANE_URL, LANE_NAME, LANE_ID,
+LANE_PORTS and LANE_PATH set, so two lanes can run the same dev server at once. $PORT, ${PORT}
+and %PORT% in the arguments are filled in too (likewise the other names), with no shell needed.
+Without <name>, the lane you're in. Exits with the command's own exit code.
+
+Examples:
+  lane exec fix-auth -- npm run dev
+  lane exec fix-auth -- pnpm dev --port $PORT
+
+Options:
+  --json       The command's output goes to stderr; stdout gets {\"lane\", \"exit\", \"millis\"}
+  -h, --help   Show this help
+";
+
+const ENV_HELP: &str = "\
+lane env: print a lane's variables
+
+Usage: lane env [<name>] [--shell sh|powershell|cmd|dotenv] [--json]
+
+The variables `lane exec` sets: PORT, VITE_PORT, LANE_PORTS, LANE_NAME, LANE_ID, LANE_PATH and
+LANE_URL. Without <name>, the lane you're in. Load them in a shell:
+  eval \"$(lane env fix-auth --shell sh)\"
+  lane env fix-auth --shell powershell | Invoke-Expression
+
+Options:
+  --shell NAME   Print for sh, powershell, cmd or dotenv (default: dotenv, KEY=value)
+  --json         Print {\"lane\": ..., \"vars\": {...}}
+  -h, --help     Show this help
+";
+
+const INIT_HELP: &str = "\
+lane init: set up Lanes for this repo
+
+Usage: lane init [--force] [--print] [--json]
+
+Looks at the repo (package manager, dev server and its port, .env template, Compose file,
+migration tool) and writes lane.toml with what it found: how to install dependencies in the
+clean _base lane, how to start the dev server, and where each lane's .env starts from. Runs
+nothing and installs nothing. Check lane.toml in, so teammates get the same lanes.
+
+Options:
+  --force      Rewrite lane.toml even if it's already there
+  --print      Show the lane.toml it would write, and write nothing
+  --json       Print what was found and what was written
+  -h, --help   Show this help
+";
+
 const SETUP_HELP: &str = "\
 lane setup: check this machine and choose your settings
 
@@ -118,9 +174,6 @@ Options:
   --telemetry on|off   With --yes: turn the anonymous install count on or off
   -h, --help           Show this help
 ";
-
-/// Commands that are listed but not built yet.
-const COMING: [&str; 2] = ["init", "exec"];
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -141,11 +194,9 @@ fn main() -> ExitCode {
         Some("new") => run("new", &args[1..], new),
         Some("rm") => run("rm", &args[1..], rm),
         Some("adopt") => run("adopt", &args[1..], adopt),
-        Some(cmd) if COMING.contains(&cmd) => report(
-            Some(cmd),
-            &Error::not_implemented(cmd),
-            args::wants_json(&args),
-        ),
+        Some("exec") => exec(&args[1..]),
+        Some("env") => run("env", &args[1..], env_vars),
+        Some("init") => run("init", &args[1..], init),
         Some(other) => report(
             None,
             &Error::usage(format!("unknown command `{other}`"))
@@ -469,6 +520,231 @@ fn adopt(args: &[String]) -> Result<()> {
             lane.name,
             lane.path.display(),
             ports(&lane)
+        );
+    }
+    Ok(())
+}
+
+/// The lane named `name` in this repo, or the lane the current folder is in.
+fn lane_here(name: Option<&str>, command: &str) -> Result<Lane> {
+    let repo = Repo::open(&here())?;
+    let store = Store::open_existing()?;
+    let lane = match (name, &store) {
+        (Some(n), Some(s)) => s.lane(&repo.root, n)?,
+        (None, Some(s)) => s.lane_at(&engine::norm(&lane_core::repo::top_level(&here())?))?,
+        (_, None) => None,
+    };
+    let lane = lane.ok_or_else(|| match name {
+        Some(n) => Error::new(
+            ErrorKind::NotFound,
+            format!("no lane called `{n}` in this repo"),
+        )
+        .hint("Run `lane list` to see this repo's lanes."),
+        None => Error::usage("you're not inside a lane").hint(format!(
+            "Name one, like `lane {command} fix-auth`, or run it from inside a lane's folder."
+        )),
+    })?;
+    if lane.status == Status::Creating {
+        return Err(Error::new(
+            ErrorKind::Conflict,
+            format!("the lane `{}` is still being created", lane.name),
+        )
+        .hint("Wait for `lane new` to finish, then try again."));
+    }
+    Ok(lane)
+}
+
+/// `lane exec [<name>] -- <command>`: run a command in a lane. Exits with the command's code.
+fn exec(args: &[String]) -> ExitCode {
+    // Everything after `--` (or after the lane's name) belongs to the command, not to Lanes.
+    let (ours, command): (Vec<String>, Vec<String>) = match args.iter().position(|a| a == "--") {
+        Some(i) => (args[..i].to_vec(), args[i + 1..].to_vec()),
+        None => match args.iter().position(|a| !a.starts_with('-')) {
+            Some(i) => (args[..=i].to_vec(), args[i + 1..].to_vec()),
+            None => (args.to_vec(), Vec::new()),
+        },
+    };
+    let json = args::wants_json(&ours);
+    match exec_in(&ours, &command) {
+        Ok(code) => ExitCode::from(code),
+        Err(e) => report(Some("exec"), &e, json),
+    }
+}
+
+fn exec_in(ours: &[String], command: &[String]) -> Result<u8> {
+    let (common, rest) = args::split(ours)?;
+    let mut name = None;
+    for arg in &rest {
+        match arg.as_str() {
+            "-h" | "--help" => {
+                print!("{EXEC_HELP}");
+                return Ok(exit::OK);
+            }
+            s if s.starts_with('-') => return Err(unknown_option("exec", s)),
+            s if name.is_none() => name = Some(s.to_string()),
+            s => {
+                return Err(Error::usage(format!("unexpected `{s}` before `--`")).hint(
+                    "Put the command after `--`, like `lane exec fix-auth -- npm run dev`.",
+                ));
+            }
+        }
+    }
+    let lane = lane_here(name.as_deref(), "exec")?;
+    let mut cmd = lane_env::command(&lane, command)?;
+    if common.json {
+        cmd.stdout(std::process::Stdio::from(std::io::stderr()));
+    }
+    let started = std::time::Instant::now();
+    let status = cmd.status().map_err(|e| {
+        Error::new(
+            ErrorKind::Failure,
+            format!("couldn't start `{}`: {e}", command[0]),
+        )
+        .hint("Check that it's installed and on PATH.")
+    })?;
+    let code = exit_code(status);
+    if common.json {
+        print_json(&serde_json::json!({
+            "lane": lane.name,
+            "command": command,
+            "exit": code,
+            "millis": started.elapsed().as_millis() as u64,
+        }));
+    }
+    Ok(code)
+}
+
+/// A child's exit status as one byte: its own code, or 128 plus the signal that ended it.
+fn exit_code(status: std::process::ExitStatus) -> u8 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(sig) = status.signal() {
+            return (128 + sig).min(255) as u8;
+        }
+    }
+    match status.code() {
+        Some(c) if (0..=255).contains(&c) => c as u8,
+        Some(_) | None => exit::FAILURE,
+    }
+}
+
+/// `lane env [<name>]`: print the lane's variables.
+fn env_vars(args: &[String]) -> Result<()> {
+    let (common, rest) = args::split(args)?;
+    let (mut name, mut shell) = (None, "dotenv".to_string());
+    let mut it = rest.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "-h" | "--help" => {
+                print!("{ENV_HELP}");
+                return Ok(());
+            }
+            "--shell" => shell = value(&mut it, "--shell", "sh")?,
+            s if s.starts_with('-') => return Err(unknown_option("env", s)),
+            s if name.is_none() => name = Some(s.to_string()),
+            s => {
+                return Err(Error::usage(format!("unexpected `{s}`"))
+                    .hint("`lane env` takes one lane name."));
+            }
+        }
+    }
+    let lane = lane_here(name.as_deref(), "env")?;
+    let vars = lane_env::vars(&lane);
+    if common.json {
+        let map: serde_json::Map<String, serde_json::Value> = vars
+            .iter()
+            .map(|(k, v)| (k.to_string(), serde_json::Value::String(v.clone())))
+            .collect();
+        print_json(&serde_json::json!({ "lane": lane.name, "vars": map }));
+    } else {
+        print!("{}", lane_env::render(&vars, &shell)?);
+    }
+    Ok(())
+}
+
+/// `lane init`: find what the repo needs and write lane.toml.
+fn init(args: &[String]) -> Result<()> {
+    let (common, rest) = args::split(args)?;
+    let (mut force, mut print_only) = (false, false);
+    for arg in &rest {
+        match arg.as_str() {
+            "-h" | "--help" => {
+                print!("{INIT_HELP}");
+                return Ok(());
+            }
+            "--force" => force = true,
+            "--print" => print_only = true,
+            s => return Err(unknown_option("init", s)),
+        }
+    }
+    let repo = Repo::open(&here())?;
+    let found = detect::detect(&repo.root);
+    let text = Project::init_text(
+        &found.install,
+        found.dev.as_ref().map(|d| d.command.as_str()),
+        found.env_template.as_deref(),
+    );
+    let path = repo.root.join(lane_core::project::FILE_NAME);
+    let existed = path.exists();
+    let write = !print_only && (!existed || force);
+    if write {
+        // Same text, same file: running it again is safe.
+        let tmp = path.with_extension("toml.tmp");
+        std::fs::write(&tmp, &text)
+            .and_then(|()| std::fs::rename(&tmp, &path))
+            .map_err(|e| {
+                Error::new(
+                    ErrorKind::Io,
+                    format!("couldn't write {}: {e}", path.display()),
+                )
+                .hint("Check that you can write to the repo's folder.")
+            })?;
+    }
+    if common.json {
+        print_json(&serde_json::json!({
+            "repo": repo.root,
+            "found": found,
+            "lane_toml": path,
+            "written": write,
+            "kept_existing": existed && !write && !print_only,
+            "text": text,
+        }));
+        return Ok(());
+    }
+    if print_only {
+        print!("{text}");
+        return Ok(());
+    }
+    if found.stack.is_empty() {
+        println!("Nothing recognised in {}.", repo.root.display());
+    } else {
+        println!("Found: {}", found.stack.join(", "));
+    }
+    if !found.install.is_empty() {
+        println!("  install  {}", found.install.join(" && "));
+    }
+    if let Some(dev) = &found.dev {
+        let port = dev
+            .default_port
+            .map(|p| format!(" (usually port {p})"))
+            .unwrap_or_default();
+        println!("  dev      {}{port}", dev.command);
+    }
+    if let Some(t) = &found.env_template {
+        println!("  env      each lane's .env starts from {}", t.display());
+    }
+    for note in &found.notes {
+        println!("  note     {note}");
+    }
+    if write {
+        println!(
+            "Wrote {}. Check it in, then make a lane: lane new fix-auth",
+            path.display()
+        );
+    } else {
+        println!(
+            "lane.toml is already there, so it was left as is. `lane init --print` shows what it would write; `--force` rewrites it."
         );
     }
     Ok(())

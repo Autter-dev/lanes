@@ -146,6 +146,9 @@ pub struct Made {
     pub clone: CloneSummary,
     /// Files whose paths pointed at `_base` and now point at the lane.
     pub fixed_paths: usize,
+    /// The lane's `.env`, when one was written (from `env.template`, or `_base`'s own).
+    #[serde(default)]
+    pub env_file: Option<PathBuf>,
 }
 
 fn io_error(what: &str, path: &Path, e: io::Error) -> Error {
@@ -212,8 +215,8 @@ pub fn new_lane(
         })
     })?;
 
-    match build_lane(store, repo, &path) {
-        Ok((base, clone, fixed_paths)) => store.write(request, |tx| {
+    match build_lane(store, repo, &reserved) {
+        Ok((base, clone, fixed_paths, env_file)) => store.write(request, |tx| {
             tx.finish_lane(&reserved.id, &base.commit)?;
             let mut lane = reserved.clone();
             lane.status = Status::Ready;
@@ -223,6 +226,7 @@ pub fn new_lane(
                 base,
                 clone,
                 fixed_paths,
+                env_file,
             })
         }),
         Err(e) => {
@@ -233,11 +237,10 @@ pub fn new_lane(
     }
 }
 
-fn build_lane(
-    store: &mut Store,
-    repo: &Repo,
-    path: &Path,
-) -> Result<(BaseInfo, CloneSummary, usize)> {
+type Built = (BaseInfo, CloneSummary, usize, Option<PathBuf>);
+
+fn build_lane(store: &mut Store, repo: &Repo, lane: &Lane) -> Result<Built> {
+    let path = lane.path.as_path();
     let base = ensure_base(store, repo)?;
     // The name is reserved for us, so anything already at the path is left from a crash.
     if path.exists() {
@@ -259,6 +262,7 @@ fn build_lane(
     fs::copy(&from, &to).map_err(|e| io_error("copy the Git index to", &to, e))?;
     git::refresh_index(path);
     let fixed = fix_paths(&base.path, path)?;
+    let env_file = crate::lane_env::write_dotenv(lane, repo.project.env.template.as_deref())?;
     let summary = CloneSummary {
         method: report.method,
         filesystem: crate::machine::filesystem_name(&repo.lanes_dir),
@@ -268,7 +272,7 @@ fn build_lane(
         bytes: report.bytes,
         millis: report.elapsed.as_millis() as u64,
     };
-    Ok((base, summary, fixed))
+    Ok((base, summary, fixed, env_file))
 }
 
 /// Make `_base` if it's missing, move it to the base branch's latest commit, and install

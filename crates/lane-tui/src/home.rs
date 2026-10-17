@@ -41,7 +41,7 @@ const COMMANDS: [(&str, &str, bool); 6] = [
     (
         "lane init",
         "set up Lanes for this repo and your agents",
-        false,
+        true,
     ),
     (
         "lane new <name>",
@@ -52,7 +52,7 @@ const COMMANDS: [(&str, &str, bool); 6] = [
     (
         "lane exec <name> -- <cmd>",
         "run a command inside a lane",
-        false,
+        true,
     ),
     (
         "lane promote <name>",

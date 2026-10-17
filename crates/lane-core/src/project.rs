@@ -21,6 +21,9 @@
 //! [env]
 //! template = ".env.example"    # each lane's `.env` starts from this
 //!
+//! [dev]
+//! command = "pnpm dev"      # the dev server; Lanes sets PORT (and VITE_PORT) per lane
+//!
 //! [cleanup]
 //! keep_failed = "3d"        # how long a failed lane is kept for debugging
 //! keep_db = true            # keep a failed lane's database (hosted branches are dumped, then deleted)
@@ -53,6 +56,8 @@ pub struct Project {
     pub setup: Setup,
     #[serde(default)]
     pub env: Env,
+    #[serde(default)]
+    pub dev: Dev,
     #[serde(default)]
     pub cleanup: Cleanup,
 }
@@ -99,6 +104,14 @@ pub struct Env {
     pub template: Option<PathBuf>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Dev {
+    /// The command that starts the dev server, run with `lane exec <name> -- <command>`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Cleanup {
@@ -127,6 +140,7 @@ impl Default for Project {
             ports: Ports::default(),
             setup: Setup::default(),
             env: Env::default(),
+            dev: Dev::default(),
             cleanup: Cleanup::default(),
         }
     }
@@ -238,9 +252,38 @@ impl Project {
         }
     }
 
-    /// The file as TOML, for `lane init` to write.
+    /// The file as TOML.
     pub fn to_toml(&self) -> String {
         toml::to_string(self).expect("lane.toml always serializes")
+    }
+
+    /// The `lane.toml` that `lane init` writes, with a comment on each setting.
+    pub fn init_text(install: &[String], dev: Option<&str>, env_template: Option<&Path>) -> String {
+        let q = |s: &str| toml::Value::String(s.to_string()).to_string();
+        let mut out = String::from(
+            "# Lanes settings for this repo. Check it in, so teammates get the same lanes.\n\
+             # Every setting and its default: https://github.com/Autter-dev/lanes\n\n",
+        );
+        out.push_str(&format!("version = {PROJECT_VERSION}\n\n"));
+        out.push_str(
+            "[setup]\n# Run once in the clean `_base` lane, and again when a lockfile changes.\n",
+        );
+        let list = install.iter().map(|c| q(c)).collect::<Vec<_>>().join(", ");
+        out.push_str(&format!("install = [{list}]\n"));
+        if let Some(cmd) = dev {
+            out.push_str("\n[dev]\n# Start it in a lane with `lane exec <name> -- <command>`; Lanes sets PORT for each lane.\n");
+            out.push_str(&format!("command = {}\n", q(cmd)));
+        }
+        if let Some(t) = env_template {
+            out.push_str(
+                "\n[env]\n# Each lane's `.env` starts from this, with its own PORT and URL.\n",
+            );
+            out.push_str(&format!(
+                "template = {}\n",
+                q(&t.to_string_lossy().replace('\\', "/"))
+            ));
+        }
+        out
     }
 }
 
@@ -317,6 +360,8 @@ per_lane = 20
 install = ["pnpm install", "pnpm build"]
 [env]
 template = ".env.example"
+[dev]
+command = "pnpm dev"
 [cleanup]
 keep_failed = "12h"
 keep_db = false
@@ -334,6 +379,7 @@ parked_cap = "500MB"
             }
         );
         assert_eq!(p.setup.install.len(), 2);
+        assert_eq!(p.dev.command.as_deref(), Some("pnpm dev"));
         assert_eq!(
             p.cleanup.keep_failed().unwrap(),
             Duration::from_secs(12 * 3600)
@@ -401,6 +447,29 @@ parked_cap = "500MB"
         p.setup.install = vec!["npm ci".into()];
         let back = parse(&p.to_toml()).unwrap();
         assert_eq!(back, p);
+    }
+
+    #[test]
+    fn the_init_file_is_valid_and_says_what_each_part_does() {
+        let text = Project::init_text(
+            &[
+                "pnpm install --frozen-lockfile".into(),
+                "uv sync --frozen".into(),
+            ],
+            Some("pnpm dev"),
+            Some(Path::new(".env.example")),
+        );
+        let p = parse(&text).unwrap();
+        assert_eq!(
+            p.setup.install,
+            ["pnpm install --frozen-lockfile", "uv sync --frozen"]
+        );
+        assert_eq!(p.dev.command.as_deref(), Some("pnpm dev"));
+        assert_eq!(p.env.template.as_deref(), Some(Path::new(".env.example")));
+        assert!(text.contains("# Run once in the clean `_base` lane"));
+        let bare = Project::init_text(&[], None, None);
+        assert_eq!(parse(&bare).unwrap().setup.install, Vec::<String>::new());
+        assert!(!bare.contains("[dev]") && !bare.contains("[env]"));
     }
 
     #[test]

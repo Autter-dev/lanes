@@ -170,20 +170,6 @@ fn list_outside_a_repo_says_what_to_do() {
 }
 
 #[test]
-fn unbuilt_commands_answer_in_json_with_exit_3() {
-    let out = lane(&config_dir("unbuilt"), &["init", "--json"]);
-    assert_eq!(out.status.code(), Some(3));
-    let v = json(&out);
-    assert_eq!(v["error"]["code"], "not_implemented");
-    assert!(out.stderr.is_empty());
-    // Without --json it's a line on stderr, as before.
-    let text = lane(&config_dir("unbuilt-text"), &["init"]);
-    assert_eq!(text.status.code(), Some(3));
-    assert!(text.stdout.is_empty());
-    assert!(String::from_utf8_lossy(&text.stderr).contains("isn't built yet"));
-}
-
-#[test]
 fn unknown_commands_and_options_are_usage_errors() {
     let out = lane(&config_dir("unknown"), &["frobnicate", "--json"]);
     assert_eq!(out.status.code(), Some(2));
@@ -345,4 +331,192 @@ fn new_without_a_name_and_adopt_of_the_repo_are_usage_errors() {
             .unwrap()
             .contains("repo itself")
     );
+}
+
+/// `argv` that prints the lane's PORT and LANE_NAME, and one that exits with `code`.
+fn print_port() -> Vec<&'static str> {
+    if cfg!(windows) {
+        vec!["cmd", "/C", "echo %PORT% %LANE_NAME%"]
+    } else {
+        vec!["sh", "-c", "echo $PORT $LANE_NAME"]
+    }
+}
+fn exit_with_7() -> Vec<&'static str> {
+    if cfg!(windows) {
+        vec!["cmd", "/C", "exit 7"]
+    } else {
+        vec!["sh", "-c", "exit 7"]
+    }
+}
+
+#[test]
+fn exec_gives_each_lane_its_own_ports_and_passes_the_exit_code_through() {
+    let dir = config_dir("exec");
+    let repo = repo_with_commit("exec");
+    for name in ["a", "b"] {
+        let out = lane_in(&dir, &repo, &["new", name, "--json"]);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let run = |lane: &str| {
+        let mut args = vec!["exec", lane, "--"];
+        args.extend(print_port());
+        let out = lane_in(&dir, &repo, &args);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    assert_eq!(run("a"), "4100 a");
+    assert_eq!(run("b"), "4110 b");
+
+    let mut args = vec!["exec", "a", "--"];
+    args.extend(exit_with_7());
+    assert_eq!(
+        lane_in(&dir, &repo, &args).status.code(),
+        Some(7),
+        "the command's own exit code"
+    );
+
+    // From inside the lane, no name is needed; --json reports the exit code on stdout.
+    let made = json(&lane_in(&dir, &repo, &["list", "--json"]));
+    let lane_a = PathBuf::from(made["lanes"][0]["path"].as_str().unwrap());
+    let mut args = vec!["exec", "--json", "--"];
+    args.extend(exit_with_7());
+    let out = lane_in(&dir, &lane_a, &args);
+    assert_eq!(out.status.code(), Some(7));
+    let v = json(&out);
+    assert_eq!(
+        (v["lane"].as_str(), v["exit"].as_u64()),
+        (Some("a"), Some(7))
+    );
+
+    // Outside any lane, without a name, it says what to do.
+    let mut args = vec!["exec", "--json", "--"];
+    args.extend(print_port());
+    let out = lane_in(&dir, &repo, &args);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        json(&out)["error"]["hint"]
+            .as_str()
+            .unwrap()
+            .contains("lane exec fix-auth")
+    );
+}
+
+#[test]
+fn env_prints_the_lanes_variables_for_each_shell() {
+    let dir = config_dir("env");
+    let repo = repo_with_commit("env");
+    assert_eq!(
+        lane_in(&dir, &repo, &["new", "web", "--json"])
+            .status
+            .code(),
+        Some(0)
+    );
+    let v = json(&lane_in(&dir, &repo, &["env", "web", "--json"]));
+    assert_eq!(v["vars"]["PORT"], "4100");
+    assert_eq!(v["vars"]["LANE_URL"], "http://web.localhost:4100");
+    let sh = lane_in(&dir, &repo, &["env", "web", "--shell", "sh"]);
+    assert!(String::from_utf8_lossy(&sh.stdout).contains("export PORT='4100'"));
+    let bad = lane_in(&dir, &repo, &["env", "web", "--shell", "fish"]);
+    assert_eq!(bad.status.code(), Some(2));
+}
+
+#[test]
+fn init_finds_the_stack_and_writes_lane_toml_once() {
+    let dir = config_dir("init");
+    let repo = git_repo("init");
+    std::fs::write(repo.join("package-lock.json"), "{}\n").unwrap();
+    std::fs::write(
+        repo.join("package.json"),
+        r#"{"scripts": {"dev": "vite"}, "devDependencies": {"vite": "6"}}"#,
+    )
+    .unwrap();
+    std::fs::write(repo.join(".env.example"), "API_KEY=\n").unwrap();
+
+    let printed = lane_in(&dir, &repo, &["init", "--print"]);
+    assert!(String::from_utf8_lossy(&printed.stdout).contains("npm ci"));
+    assert!(!repo.join("lane.toml").exists(), "--print writes nothing");
+
+    let out = lane_in(&dir, &repo, &["init", "--json"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v = json(&out);
+    assert_eq!(v["written"], true);
+    assert_eq!(v["found"]["install"][0], "npm ci");
+    assert_eq!(v["found"]["dev"]["command"], "npm run dev -- --port $PORT");
+    let text = std::fs::read_to_string(repo.join("lane.toml")).unwrap();
+    assert!(text.contains("template = \".env.example\""), "{text}");
+
+    // Run again: the file is kept as it is.
+    std::fs::write(repo.join("lane.toml"), "version = 1\n# mine\n").unwrap();
+    let v = json(&lane_in(&dir, &repo, &["init", "--json"]));
+    assert_eq!(
+        (v["written"].as_bool(), v["kept_existing"].as_bool()),
+        (Some(false), Some(true))
+    );
+    assert!(
+        std::fs::read_to_string(repo.join("lane.toml"))
+            .unwrap()
+            .contains("# mine")
+    );
+    // --force rewrites it.
+    let v = json(&lane_in(&dir, &repo, &["init", "--force", "--json"]));
+    assert_eq!(v["written"], true);
+    assert!(
+        !std::fs::read_to_string(repo.join("lane.toml"))
+            .unwrap()
+            .contains("# mine")
+    );
+}
+
+#[test]
+fn a_lane_gets_a_dotenv_from_the_template() {
+    let dir = config_dir("dotenv");
+    let repo = repo_with_commit("dotenv");
+    std::fs::write(repo.join(".env.example"), "PORT=3000\nAPI_KEY=\n").unwrap();
+    std::fs::write(
+        repo.join("lane.toml"),
+        "version = 1\n[env]\ntemplate = \".env.example\"\n",
+    )
+    .unwrap();
+    for args in [vec!["add", "-A"], vec!["commit", "-q", "-m", "env"]] {
+        let ok = Command::new("git")
+            .args([
+                "-c",
+                "user.name=Lanes Test",
+                "-c",
+                "user.email=test@lanes.invalid",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .arg("-C")
+            .arg(&repo)
+            .args(&args)
+            .status()
+            .unwrap();
+        assert!(ok.success());
+    }
+    let made = json(&lane_in(&dir, &repo, &["new", "api", "--json"]));
+    let env_file = PathBuf::from(made["env_file"].as_str().expect("an env file"));
+    let text = std::fs::read_to_string(env_file).unwrap();
+    assert!(
+        text.contains("PORT=4100")
+            && text.contains("API_KEY=")
+            && text.contains("LANE_URL=http://api.localhost:4100"),
+        "{text}"
+    );
+    assert!(!text.contains("3000"), "{text}");
 }
