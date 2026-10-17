@@ -11,7 +11,7 @@
 //! claims a clone it didn't get.
 
 use crate::error::{Error, ErrorKind, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 
 /// How a lane's files get there.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Method {
     /// Copy-on-write clones: instant, sharing disk blocks.
@@ -184,8 +184,9 @@ pub fn clone_tree(
     opts: &Options,
 ) -> Result<Report> {
     let started = Instant::now();
+    // Skipped names may already be there (a lane's own `.git` file comes first).
     if let Ok(mut entries) = fs::read_dir(dst)
-        && entries.next().is_some()
+        && entries.any(|e| e.is_ok_and(|e| !opts.skip.contains(&e.file_name())))
     {
         return Err(Error::new(
             ErrorKind::Conflict,
@@ -284,7 +285,7 @@ pub fn clone_tree(
     }
 
     for rel in &links {
-        copy_link(&src.join(rel), &dst.join(rel))?;
+        copy_link(&src.join(rel), &dst.join(rel), src, dst)?;
     }
 
     let cloned = cloned.into_inner();
@@ -360,16 +361,33 @@ fn open_for_attributes(path: &Path) -> io::Result<File> {
     File::open(path)
 }
 
+/// A link that points into the source tree by absolute path points into the copy instead, so a
+/// lane never reaches back into `_base`. Relative links need nothing.
+fn rebase(target: PathBuf, src_root: &Path, dst_root: &Path) -> PathBuf {
+    match target.strip_prefix(src_root) {
+        Ok(inside) if target.is_absolute() => dst_root.join(inside),
+        _ => target,
+    }
+}
+
 #[cfg(unix)]
-fn copy_link(src: &Path, dst: &Path) -> Result<()> {
-    let target = fs::read_link(src).map_err(|e| io_error("read", src, e))?;
+fn copy_link(src: &Path, dst: &Path, src_root: &Path, dst_root: &Path) -> Result<()> {
+    let target = rebase(
+        fs::read_link(src).map_err(|e| io_error("read", src, e))?,
+        src_root,
+        dst_root,
+    );
     std::os::unix::fs::symlink(&target, dst).map_err(|e| io_error("create the link", dst, e))
 }
 
 #[cfg(windows)]
-fn copy_link(src: &Path, dst: &Path) -> Result<()> {
+fn copy_link(src: &Path, dst: &Path, src_root: &Path, dst_root: &Path) -> Result<()> {
     use std::os::windows::fs::{symlink_dir, symlink_file};
-    let target = fs::read_link(src).map_err(|e| io_error("read", src, e))?;
+    let target = rebase(
+        fs::read_link(src).map_err(|e| io_error("read", src, e))?,
+        src_root,
+        dst_root,
+    );
     let is_dir = fs::metadata(src).map(|m| m.is_dir()).unwrap_or(false);
     let made = if is_dir {
         symlink_dir(&target, dst)
@@ -580,6 +598,39 @@ mod tests {
         );
         assert_eq!(report.files, 6);
         unlock(&dir);
+    }
+
+    #[test]
+    fn skipped_names_may_already_be_in_the_destination() {
+        let dir = temp("own-git");
+        let src = sample(&dir);
+        let dst = dir.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(dst.join(".git"), "gitdir: elsewhere\n").unwrap();
+        clone_tree(&src, &dst, &PlainCopy, &Options::default()).unwrap();
+        assert_eq!(
+            fs::read_to_string(dst.join(".git")).unwrap(),
+            "gitdir: elsewhere\n",
+            "kept, not overwritten"
+        );
+        assert!(dst.join("app/routes/auth.ts").exists());
+        unlock(&dir);
+    }
+
+    #[test]
+    fn absolute_links_into_the_source_are_rebased() {
+        let root = std::env::temp_dir().join("acme.lanes");
+        let (src, dst) = (root.join("_base"), root.join("fix"));
+        assert_eq!(
+            rebase(src.join("node_modules/x"), &src, &dst),
+            dst.join("node_modules/x")
+        );
+        assert_eq!(
+            rebase(PathBuf::from("../x"), &src, &dst),
+            PathBuf::from("../x")
+        );
+        let elsewhere = std::env::temp_dir().join("tools/node");
+        assert_eq!(rebase(elsewhere.clone(), &src, &dst), elsewhere);
     }
 
     #[cfg(unix)]

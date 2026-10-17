@@ -171,13 +171,13 @@ fn list_outside_a_repo_says_what_to_do() {
 
 #[test]
 fn unbuilt_commands_answer_in_json_with_exit_3() {
-    let out = lane(&config_dir("unbuilt"), &["new", "fix-auth", "--json"]);
+    let out = lane(&config_dir("unbuilt"), &["init", "--json"]);
     assert_eq!(out.status.code(), Some(3));
     let v = json(&out);
     assert_eq!(v["error"]["code"], "not_implemented");
     assert!(out.stderr.is_empty());
     // Without --json it's a line on stderr, as before.
-    let text = lane(&config_dir("unbuilt-text"), &["new", "fix-auth"]);
+    let text = lane(&config_dir("unbuilt-text"), &["init"]);
     assert_eq!(text.status.code(), Some(3));
     assert!(text.stdout.is_empty());
     assert!(String::from_utf8_lossy(&text.stderr).contains("isn't built yet"));
@@ -201,4 +201,148 @@ fn unknown_commands_and_options_are_usage_errors() {
     );
     assert_eq!(out.status.code(), Some(2));
     assert_eq!(json(&out)["error"]["code"], "usage");
+}
+
+/// A repo with one commit on `main`.
+fn repo_with_commit(name: &str) -> PathBuf {
+    let dir = git_repo(name);
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(dir.join("src/app.ts"), "export const app = 1;\n").unwrap();
+    let ok = Command::new("git")
+        .args([
+            "-c",
+            "user.name=Lanes Test",
+            "-c",
+            "user.email=test@lanes.invalid",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args([
+            "-C",
+            &dir.to_string_lossy(),
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "first",
+        ])
+        .status()
+        .unwrap();
+    assert!(ok.success());
+    let ok = Command::new("git")
+        .args([
+            "-c",
+            "user.name=Lanes Test",
+            "-c",
+            "user.email=test@lanes.invalid",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(["-C", &dir.to_string_lossy(), "add", "-A"])
+        .status()
+        .unwrap();
+    assert!(ok.success());
+    let ok = Command::new("git")
+        .args([
+            "-c",
+            "user.name=Lanes Test",
+            "-c",
+            "user.email=test@lanes.invalid",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(["-C", &dir.to_string_lossy(), "commit", "-q", "-m", "app"])
+        .status()
+        .unwrap();
+    assert!(ok.success());
+    dir
+}
+
+#[test]
+fn new_list_and_rm_work_end_to_end() {
+    let dir = config_dir("e2e");
+    let repo = repo_with_commit("e2e");
+
+    let out = lane_in(
+        &dir,
+        &repo,
+        &["new", "fix-auth", "--agent", "claude", "--json"],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let made = json(&out);
+    assert_eq!(made["lane"]["name"], "fix-auth");
+    assert_eq!(made["lane"]["status"], "ready");
+    assert_eq!(made["lane"]["agent"], "claude");
+    let path = PathBuf::from(made["lane"]["path"].as_str().unwrap());
+    assert!(path.join("src/app.ts").exists());
+    assert!(made["clone"]["files"].as_u64().unwrap() >= 1);
+
+    let listed = json(&lane_in(&dir, &repo, &["list", "--json"]));
+    assert_eq!(listed["lanes"].as_array().unwrap().len(), 1);
+    // From inside the lane, it's the same repo.
+    let inside = json(&lane_in(&dir, &path, &["list", "--json"]));
+    assert_eq!(inside["lanes"][0]["name"], "fix-auth");
+
+    // The same name again is a conflict, with a hint.
+    let again = lane_in(&dir, &repo, &["new", "fix-auth", "--json"]);
+    assert_eq!(again.status.code(), Some(1));
+    assert_eq!(json(&again)["error"]["code"], "conflict");
+
+    // --print-path prints just the folder, for agent hooks.
+    let out = lane_in(&dir, &repo, &["new", "add-tests", "--print-path"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let printed = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(printed.lines().count(), 1, "{printed}");
+    assert!(PathBuf::from(printed.trim()).join("src/app.ts").exists());
+
+    let out = lane_in(&dir, &repo, &["rm", "fix-auth", "--json"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(json(&out)["removed"]["name"], "fix-auth");
+    assert!(!path.exists());
+    let listed = json(&lane_in(&dir, &repo, &["list", "--json"]));
+    assert_eq!(
+        listed["lanes"].as_array().unwrap().len(),
+        1,
+        "add-tests is left"
+    );
+
+    let out = lane_in(&dir, &repo, &["rm", "fix-auth", "--json"]);
+    assert_eq!(json(&out)["error"]["code"], "not_found");
+}
+
+#[test]
+fn new_without_a_name_and_adopt_of_the_repo_are_usage_errors() {
+    let dir = config_dir("usage-e2e");
+    let repo = repo_with_commit("usage-e2e");
+    let out = lane_in(&dir, &repo, &["new", "--json"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        json(&out)["error"]["hint"]
+            .as_str()
+            .unwrap()
+            .contains("lane new fix-auth")
+    );
+    let out = lane_in(&dir, &repo, &["adopt", "--json"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        json(&out)["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("repo itself")
+    );
 }

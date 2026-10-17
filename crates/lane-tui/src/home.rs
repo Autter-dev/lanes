@@ -46,7 +46,7 @@ const COMMANDS: [(&str, &str, bool); 6] = [
     (
         "lane new <name>",
         "make a lane: an instant, ready-to-run copy",
-        false,
+        true,
     ),
     ("lane list", "your lanes with their ports and folders", true),
     (

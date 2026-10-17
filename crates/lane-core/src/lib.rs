@@ -2,8 +2,10 @@
 
 pub mod clone;
 pub mod config;
+pub mod engine;
 pub mod env;
 pub mod error;
+pub mod git;
 pub mod machine;
 pub mod project;
 pub mod repo;

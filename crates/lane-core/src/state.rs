@@ -20,10 +20,13 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The schema version in `PRAGMA user_version`. Bump only with a migration below.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// How long request ids are remembered.
 const REQUEST_TTL_SECS: i64 = 7 * 24 * 60 * 60;
+
+/// A lane still being created after this long was left behind by a crash.
+const STALE_CREATING_SECS: i64 = 15 * 60;
 
 /// The highest port a block may end on.
 const MAX_PORT: u32 = 65_535;
@@ -83,6 +86,23 @@ impl Outcome {
     }
 }
 
+/// Whether a lane is ready to use. A lane is `creating` while `lane new` copies its files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Status {
+    Creating,
+    Ready,
+}
+
+impl Status {
+    fn as_str(self) -> &'static str {
+        match self {
+            Status::Creating => "creating",
+            Status::Ready => "ready",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PortBlock {
     pub start: u16,
@@ -113,8 +133,19 @@ pub struct Lane {
     /// The agent working in it, when known (`claude`, `codex`, …).
     pub agent: Option<String>,
     pub outcome: Option<Outcome>,
+    pub status: Status,
     /// Unix seconds.
     pub created_at: i64,
+}
+
+/// A repo's clean `_base` lane: where it is, the commit it's at, and what its dependencies
+/// were installed from (so they're installed again only when that changes).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Base {
+    pub path: PathBuf,
+    pub commit: String,
+    pub install_key: Option<String>,
+    pub updated_at: i64,
 }
 
 /// What a new lane needs; the store adds its id and time.
@@ -126,6 +157,8 @@ pub struct NewLane<'a> {
     pub base_commit: Option<&'a str>,
     pub ports: PortBlock,
     pub agent: Option<&'a str>,
+    /// `Creating` for `lane new` (finished with [`Tx::finish_lane`]); `Ready` for `lane adopt`.
+    pub status: Status,
 }
 
 /// A write that's safe to retry: the same `id` with the same `command` runs once.
@@ -210,6 +243,21 @@ CREATE TABLE requests (
 );
 ";
 
+const MIGRATE_2: &str = "
+ALTER TABLE lanes ADD COLUMN status TEXT NOT NULL DEFAULT 'ready';
+CREATE TABLE bases (
+  repo_id INTEGER PRIMARY KEY REFERENCES repos(id),
+  path TEXT NOT NULL,
+  base_commit TEXT NOT NULL,
+  install_key TEXT,
+  updated_at INTEGER NOT NULL
+);
+";
+
+const LANE_COLUMNS: &str =
+    "l.id, r.root, l.name, l.path, l.base_commit, l.port_start, l.port_count,
+     l.agent, l.outcome, l.created_at, l.status";
+
 pub struct Store {
     conn: Connection,
     lock_path: PathBuf,
@@ -282,6 +330,9 @@ impl Store {
         if version < 1 {
             tx.execute_batch(SCHEMA).map_err(db_err)?;
         }
+        if version < 2 {
+            tx.execute_batch(MIGRATE_2).map_err(db_err)?;
+        }
         tx.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(db_err)?;
         tx.commit().map_err(db_err)
@@ -289,15 +340,97 @@ impl Store {
 
     /// Every lane, or only the lanes of one repo, oldest first.
     pub fn lanes(&self, repo: Option<&Path>) -> Result<Vec<Lane>> {
-        let sql = "SELECT l.id, r.root, l.name, l.path, l.base_commit, l.port_start, l.port_count,
-                          l.agent, l.outcome, l.created_at
-                   FROM lanes l JOIN repos r ON r.id = l.repo_id
-                   WHERE ?1 IS NULL OR r.root = ?1
-                   ORDER BY l.created_at, l.name";
+        let sql = format!(
+            "SELECT {LANE_COLUMNS} FROM lanes l JOIN repos r ON r.id = l.repo_id
+             WHERE ?1 IS NULL OR r.root = ?1
+             ORDER BY l.created_at, l.name"
+        );
         let repo = repo.map(|p| p.to_string_lossy().into_owned());
-        let mut stmt = self.conn.prepare(sql).map_err(db_err)?;
+        let mut stmt = self.conn.prepare(&sql).map_err(db_err)?;
         let rows = stmt.query_map([repo], row_to_lane).map_err(db_err)?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)
+    }
+
+    /// One lane of a repo, by name.
+    pub fn lane(&self, repo: &Path, name: &str) -> Result<Option<Lane>> {
+        self.conn
+            .query_row(
+                &format!(
+                    "SELECT {LANE_COLUMNS} FROM lanes l JOIN repos r ON r.id = l.repo_id
+                     WHERE r.root = ?1 AND l.name = ?2"
+                ),
+                params![repo.to_string_lossy(), name],
+                row_to_lane,
+            )
+            .optional()
+            .map_err(db_err)
+    }
+
+    /// The lane whose folder is `path`, in any repo.
+    pub fn lane_at(&self, path: &Path) -> Result<Option<Lane>> {
+        self.conn
+            .query_row(
+                &format!(
+                    "SELECT {LANE_COLUMNS} FROM lanes l JOIN repos r ON r.id = l.repo_id
+                     WHERE l.path = ?1"
+                ),
+                [path.to_string_lossy()],
+                row_to_lane,
+            )
+            .optional()
+            .map_err(db_err)
+    }
+
+    /// A repo's `_base`, if it has one.
+    pub fn base(&self, repo: &Path) -> Result<Option<Base>> {
+        self.conn
+            .query_row(
+                "SELECT b.path, b.base_commit, b.install_key, b.updated_at
+                 FROM bases b JOIN repos r ON r.id = b.repo_id WHERE r.root = ?1",
+                [repo.to_string_lossy()],
+                |r| {
+                    Ok(Base {
+                        path: PathBuf::from(r.get::<_, String>(0)?),
+                        commit: r.get(1)?,
+                        install_key: r.get(2)?,
+                        updated_at: r.get(3)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(db_err)
+    }
+
+    /// The stored result of a request that already ran, without taking the write lock. Lets a
+    /// long command answer a retry before doing any work.
+    pub fn request_result<T: DeserializeOwned>(&self, request: Request<'_>) -> Result<Option<T>> {
+        let seen: Option<(String, String)> = self
+            .conn
+            .query_row(
+                "SELECT command, result FROM requests WHERE id = ?1",
+                [request.id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .map_err(db_err)?;
+        match seen {
+            None => Ok(None),
+            Some((command, _)) if command != request.command => Err(Error::new(
+                ErrorKind::Conflict,
+                format!(
+                    "request id `{}` was already used for `{command}`",
+                    request.id
+                ),
+            )
+            .hint("Use a new request id for a different command.")),
+            Some((_, result)) => serde_json::from_str(&result).map(Some).map_err(|e| {
+                Error::new(
+                    ErrorKind::State,
+                    format!("couldn't read the stored result: {e}"),
+                )
+                .hint("Run the command again with a new request id.")
+            }),
+        }
     }
 
     /// Run `f` as the only writer, in one transaction. With a request, a retry of the same
@@ -372,6 +505,10 @@ fn row_to_lane(r: &rusqlite::Row<'_>) -> rusqlite::Result<Lane> {
         agent: r.get(7)?,
         outcome: outcome.as_deref().and_then(Outcome::parse),
         created_at: r.get(9)?,
+        status: match r.get::<_, String>(10)?.as_str() {
+            "creating" => Status::Creating,
+            _ => Status::Ready,
+        },
     })
 }
 
@@ -434,15 +571,30 @@ impl Tx<'_> {
                 r.get(0)
             })
             .map_err(db_err)?;
-        let taken: bool = self
+        // A lane left `creating` by a crash long ago doesn't hold its name forever.
+        self.tx
+            .execute(
+                "DELETE FROM lanes WHERE repo_id = ?1 AND name = ?2 AND status = 'creating' AND updated_at < ?3",
+                params![repo_id, new.name, at - STALE_CREATING_SECS],
+            )
+            .map_err(db_err)?;
+        let existing: Option<String> = self
             .tx
             .query_row(
-                "SELECT EXISTS (SELECT 1 FROM lanes WHERE repo_id = ?1 AND name = ?2)",
+                "SELECT status FROM lanes WHERE repo_id = ?1 AND name = ?2",
                 params![repo_id, new.name],
                 |r| r.get(0),
             )
+            .optional()
             .map_err(db_err)?;
-        if taken {
+        if existing.as_deref() == Some("creating") {
+            return Err(Error::new(
+                ErrorKind::Conflict,
+                format!("the lane `{}` is being created right now", new.name),
+            )
+            .hint("Wait for it to finish, or pick another name."));
+        }
+        if existing.is_some() {
             return Err(Error::new(
                 ErrorKind::Conflict,
                 format!("there's already a lane called `{}` in this repo", new.name),
@@ -461,8 +613,8 @@ impl Tx<'_> {
         self.tx
             .execute(
                 "INSERT INTO lanes (id, repo_id, name, path, base_commit, port_start, port_count,
-                                    agent, outcome, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, ?9)",
+                                    agent, outcome, created_at, updated_at, status)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, ?9, ?10)",
                 params![
                     id,
                     repo_id,
@@ -472,7 +624,8 @@ impl Tx<'_> {
                     new.ports.start,
                     new.ports.count,
                     new.agent,
-                    at
+                    at,
+                    new.status.as_str()
                 ],
             )
             .map_err(db_err)?;
@@ -486,8 +639,72 @@ impl Tx<'_> {
             ports: new.ports,
             agent: new.agent.map(str::to_string),
             outcome: None,
+            status: new.status,
             created_at: at,
         })
+    }
+
+    /// Mark a lane `creating` → `ready`, with the commit it started from.
+    pub fn finish_lane(&self, lane_id: &str, base_commit: &str) -> Result<()> {
+        let changed = self
+            .tx
+            .execute(
+                "UPDATE lanes SET status = 'ready', base_commit = ?2, updated_at = ?3 WHERE id = ?1",
+                params![lane_id, base_commit, now()],
+            )
+            .map_err(db_err)?;
+        if changed == 0 {
+            return Err(
+                Error::new(ErrorKind::NotFound, format!("no lane with id `{lane_id}`"))
+                    .hint("Run `lane list` to see your lanes."),
+            );
+        }
+        self.log(
+            Some(lane_id),
+            "ready",
+            &serde_json::json!({ "base_commit": base_commit }),
+        )
+    }
+
+    /// Forget a lane by id (a failed `lane new` cleaning up after itself).
+    pub fn drop_lane(&self, lane_id: &str) -> Result<()> {
+        self.tx
+            .execute("DELETE FROM lanes WHERE id = ?1", [lane_id])
+            .map_err(db_err)?;
+        self.log(Some(lane_id), "dropped", &serde_json::json!({}))
+    }
+
+    /// Record where a repo's `_base` is and what it's at.
+    pub fn set_base(
+        &self,
+        repo: &Path,
+        path: &Path,
+        commit: &str,
+        install_key: Option<&str>,
+    ) -> Result<()> {
+        let at = now();
+        let root = repo.to_string_lossy();
+        self.tx
+            .execute(
+                "INSERT INTO repos (root, created_at) VALUES (?1, ?2) ON CONFLICT (root) DO NOTHING",
+                params![root, at],
+            )
+            .map_err(db_err)?;
+        self.tx
+            .execute(
+                "INSERT INTO bases (repo_id, path, base_commit, install_key, updated_at)
+                 SELECT id, ?2, ?3, ?4, ?5 FROM repos WHERE root = ?1
+                 ON CONFLICT (repo_id) DO UPDATE SET
+                   path = excluded.path, base_commit = excluded.base_commit,
+                   install_key = excluded.install_key, updated_at = excluded.updated_at",
+                params![root, path.to_string_lossy(), commit, install_key, at],
+            )
+            .map_err(db_err)?;
+        self.log(
+            None,
+            "base",
+            &serde_json::json!({ "repo": root, "commit": commit }),
+        )
     }
 
     /// Forget a lane and free its ports. Returns what was removed.
@@ -496,10 +713,10 @@ impl Tx<'_> {
         let lane = self
             .tx
             .query_row(
-                "SELECT l.id, r.root, l.name, l.path, l.base_commit, l.port_start, l.port_count,
-                        l.agent, l.outcome, l.created_at
-                 FROM lanes l JOIN repos r ON r.id = l.repo_id
-                 WHERE r.root = ?1 AND l.name = ?2",
+                &format!(
+                    "SELECT {LANE_COLUMNS} FROM lanes l JOIN repos r ON r.id = l.repo_id
+                     WHERE r.root = ?1 AND l.name = ?2"
+                ),
                 params![root, name],
                 row_to_lane,
             )
@@ -593,6 +810,7 @@ mod tests {
             base_commit: Some("abc123"),
             ports,
             agent: Some("claude"),
+            status: Status::Ready,
         }
     }
 
@@ -845,6 +1063,139 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_v1_store_is_migrated_and_keeps_its_lanes() {
+        let db = temp_db("migrate");
+        std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+        let conn = Connection::open(&db).unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        conn.execute(
+            "INSERT INTO repos (root, created_at) VALUES ('/work/acme', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO lanes (id, repo_id, name, path, base_commit, port_start, port_count, agent, outcome, created_at, updated_at)
+             VALUES ('ln_old', 1, 'old', '/l', NULL, 4100, 10, NULL, NULL, 1, 1)",
+            [],
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+        drop(conn);
+        let store = Store::open_at(&db).unwrap();
+        let lanes = store.lanes(None).unwrap();
+        assert_eq!(lanes.len(), 1);
+        assert_eq!(lanes[0].status, Status::Ready, "old lanes count as ready");
+        assert!(store.base(Path::new("/work/acme")).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_creating_lane_holds_its_name_until_finished_or_dropped() {
+        let mut store = Store::open_at(&temp_db("creating")).unwrap();
+        let repo = Path::new("/work/acme");
+        let mut new = new_lane(
+            repo,
+            "x",
+            Path::new("/l"),
+            PortBlock {
+                start: 4100,
+                count: 10,
+            },
+        );
+        new.status = Status::Creating;
+        let lane = store.write(None, |tx| tx.insert_lane(new.clone())).unwrap();
+        assert_eq!(
+            store.lane(repo, "x").unwrap().unwrap().status,
+            Status::Creating
+        );
+        let e = store
+            .write(None, |tx| tx.insert_lane(new.clone()))
+            .unwrap_err();
+        assert!(e.to_string().contains("being created right now"), "{e}");
+        store
+            .write(None, |tx| tx.finish_lane(&lane.id, "def456"))
+            .unwrap();
+        let ready = store.lane(repo, "x").unwrap().unwrap();
+        assert_eq!(
+            (ready.status, ready.base_commit.as_deref()),
+            (Status::Ready, Some("def456"))
+        );
+        assert_eq!(store.lane_at(Path::new("/l")).unwrap().unwrap().id, lane.id);
+        store.write(None, |tx| tx.drop_lane(&lane.id)).unwrap();
+        assert!(store.lane(repo, "x").unwrap().is_none());
+    }
+
+    #[test]
+    fn a_lane_left_creating_by_a_crash_frees_its_name_later() {
+        let db = temp_db("stale");
+        let mut store = Store::open_at(&db).unwrap();
+        let repo = Path::new("/work/acme");
+        let mut new = new_lane(
+            repo,
+            "x",
+            Path::new("/l"),
+            PortBlock {
+                start: 4100,
+                count: 10,
+            },
+        );
+        new.status = Status::Creating;
+        store.write(None, |tx| tx.insert_lane(new.clone())).unwrap();
+        // Pretend the crash was an hour ago.
+        store
+            .conn
+            .execute("UPDATE lanes SET updated_at = updated_at - 3600", [])
+            .unwrap();
+        let again = store.write(None, |tx| tx.insert_lane(new.clone())).unwrap();
+        assert_eq!(store.lanes(None).unwrap().len(), 1);
+        assert_eq!(store.lanes(None).unwrap()[0].id, again.id);
+    }
+
+    #[test]
+    fn the_base_is_recorded_and_updated() {
+        let mut store = Store::open_at(&temp_db("base")).unwrap();
+        let repo = Path::new("/work/acme");
+        store
+            .write(None, |tx| {
+                tx.set_base(repo, Path::new("/work/acme.lanes/_base"), "c1", Some("k1"))
+            })
+            .unwrap();
+        let b = store.base(repo).unwrap().unwrap();
+        assert_eq!(
+            (b.commit.as_str(), b.install_key.as_deref()),
+            ("c1", Some("k1"))
+        );
+        store
+            .write(None, |tx| {
+                tx.set_base(repo, Path::new("/work/acme.lanes/_base"), "c2", None)
+            })
+            .unwrap();
+        let b = store.base(repo).unwrap().unwrap();
+        assert_eq!((b.commit.as_str(), b.install_key), ("c2", None));
+    }
+
+    #[test]
+    fn a_request_result_can_be_read_before_doing_any_work() {
+        let mut store = Store::open_at(&temp_db("peek")).unwrap();
+        let req = Request {
+            id: "r",
+            command: "new x",
+        };
+        assert_eq!(store.request_result::<String>(req).unwrap(), None);
+        store.write(Some(req), |_| Ok("done".to_string())).unwrap();
+        assert_eq!(
+            store.request_result::<String>(req).unwrap().as_deref(),
+            Some("done")
+        );
+        let e = store
+            .request_result::<String>(Request {
+                id: "r",
+                command: "rm x",
+            })
+            .unwrap_err();
+        assert_eq!(e.kind, ErrorKind::Conflict);
     }
 
     #[test]

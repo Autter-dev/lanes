@@ -8,6 +8,18 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-17
 
+- `14:21` **Added**: the lane engine: `lane new`, `lane rm` and `lane adopt` work.
+  - **`lane new <name>`:** makes a lane from a clean `_base` copy of the base branch (`main`), with dependencies installed once from `[setup] install` in `lane.toml`.
+    - Files are cloned where the disk can, and copied otherwise, with a note saying so.
+    - The lane is a real Git worktree on a detached HEAD: `git status` and `git diff` work there at once, and no branch is created.
+    - Each lane gets its own block of ports.
+    - `_base` follows `main`, and reinstalls only when a lockfile or the install commands change.
+    - Python virtualenv paths are pointed at the lane.
+    - `--print-path` prints just the folder, for agent hooks.
+  - **`lane rm <name>`:** removes the folder and worktree record and frees the ports. `--keep-files` keeps the folder.
+  - **`lane adopt [<path>]`:** turns a worktree you already have into a lane.
+  - **Retries and failures:** all three take `--json` and `--request-id`. A failed `lane new` removes everything it made, so a retry starts clean.
+  - **`lane list`:** shows each lane's state, and works from inside a lane too.
 - `14:05` **Added**: clone backends, the part of `lane new` that copies files.
   - **How it copies:** every file is a copy-on-write clone where the disk supports it (APFS, Btrfs, XFS, and ReFS on a Windows Dev Drive), and a plain parallel copy everywhere else (NTFS, ext4, …), behind one `CloneBackend` trait.
   - **Probe and report:** a probe tests each folder for real, and the report counts cloned, copied and empty files separately, so Lanes never claims a clone it didn't get.
