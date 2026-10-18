@@ -6,6 +6,10 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ## Unreleased
 
+### 2026-10-18
+
+- `14:58` **Changed**: the website offers 0.0.7. The guide shows the guided `lane init` with its Y/n questions, the terminal app and what lanes saved, `lane doctor --fix`, and what the install count sends with `lane telemetry`.
+
 ## 0.0.7 (2026-10-18)
 
 **Setup that does the work for you, and your lanes live in the terminal app.** `lane init` and `lane doctor --fix` now set things up themselves and ask Y/n where the choice is yours, and `lane` shows every lane live, with what lanes saved you. Still a preview.
