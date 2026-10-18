@@ -226,7 +226,7 @@ Prefer a Claude Code plugin? It carries the same hooks and skill:
 
 | Command | What it does |
 | --- | --- |
-| `lane` | Opens the terminal app, with a short welcome the first time |
+| `lane` | Opens the terminal app, with a short welcome the first time: your lanes live, with what they saved. `?` shows the keys, `:` the commands |
 | `lane setup` | Checks your machine, chooses your settings and puts your agents in lanes (`--yes`, `--agents on\|off` and `--json` for scripts) |
 | `lane init` | Sets up a repo, asking Y/n before each step: `lane.toml` for your team, your agents in lanes, the Git hook, a note in `AGENTS.md`, and dependencies installed ahead of time (`--yes` takes every default) |
 | `lane new <name>` | Creates a lane |

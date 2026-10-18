@@ -9,6 +9,7 @@ pub mod engine;
 pub mod env;
 pub mod error;
 pub mod git;
+pub mod insight;
 pub mod lane_env;
 pub mod log;
 pub mod machine;

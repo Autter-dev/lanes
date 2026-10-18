@@ -1,6 +1,6 @@
-//! What a fix card can do on this machine, each only when the user presses its key: put a command
-//! on the clipboard, or open a page in the system's settings app. Neither runs the command or
-//! touches the network.
+//! What a key can do on this machine, each only when the user presses it: put text on the
+//! clipboard, open a page in the system's settings app, or open a lane's app in the browser.
+//! None runs a command the user didn't ask for or touches the network.
 
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -34,6 +34,21 @@ pub fn open(uri: &str) -> bool {
     };
     Command::new(program)
         .arg(uri)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .is_ok()
+}
+
+/// Open a lane's app, like `http://fix-auth.localhost:4100`, in the default browser. True if the
+/// browser was asked to.
+pub fn open_url(url: &str) -> bool {
+    if cfg!(windows) || cfg!(target_os = "macos") {
+        return open(url);
+    }
+    Command::new("xdg-open")
+        .arg(url)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

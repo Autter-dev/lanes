@@ -15,12 +15,13 @@
 use crate::error::{Error, ErrorKind, Result};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The schema version in `PRAGMA user_version`. Bump only with a migration below.
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// How long request ids are remembered.
 const REQUEST_TTL_SECS: i64 = 7 * 24 * 60 * 60;
@@ -165,6 +166,20 @@ pub struct Base {
     pub updated_at: i64,
 }
 
+/// What a lane cost to make, and what it saved.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LaneStats {
+    /// `clone` (copy-on-write: shares disk until files change) or `copy`.
+    pub method: String,
+    pub files: u64,
+    /// The size of the lane's tree when it was made: what a separate checkout with its own
+    /// install would take.
+    pub bytes: u64,
+    pub made_ms: u64,
+    /// The dependency install this lane didn't have to run, when one was timed.
+    pub install_ms: Option<u64>,
+}
+
 /// What a new lane needs; the store adds its id and time.
 #[derive(Debug, Clone)]
 pub struct NewLane<'a> {
@@ -271,6 +286,22 @@ CREATE TABLE bases (
 );
 ";
 
+// What each lane cost to make, and what it saved: how big its tree is, whether it was cloned or
+// copied, how long it took, and the install it didn't have to run. `bases.install_ms` is how long
+// the last install in `_base` took, which every lane after it skips.
+const MIGRATE_3: &str = "
+CREATE TABLE lane_stats (
+  lane_id TEXT PRIMARY KEY,
+  method TEXT NOT NULL,
+  files INTEGER NOT NULL,
+  bytes INTEGER NOT NULL,
+  made_ms INTEGER NOT NULL,
+  install_ms INTEGER,
+  at INTEGER NOT NULL
+);
+ALTER TABLE bases ADD COLUMN install_ms INTEGER;
+";
+
 const LANE_COLUMNS: &str =
     "l.id, r.root, l.name, l.path, l.base_commit, l.port_start, l.port_count,
      l.agent, l.outcome, l.created_at, l.status";
@@ -350,6 +381,9 @@ impl Store {
         if version < 2 {
             tx.execute_batch(MIGRATE_2).map_err(db_err)?;
         }
+        if version < 3 {
+            tx.execute_batch(MIGRATE_3).map_err(db_err)?;
+        }
         tx.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(db_err)?;
         tx.commit().map_err(db_err)
@@ -415,6 +449,50 @@ impl Store {
                 },
             )
             .optional()
+            .map_err(db_err)
+    }
+
+    /// What each lane cost and saved, by lane id, for one repo's lanes or every lane.
+    pub fn lane_stats(&self, repo: Option<&Path>) -> Result<HashMap<String, LaneStats>> {
+        let sql = "SELECT s.lane_id, s.method, s.files, s.bytes, s.made_ms, s.install_ms
+                   FROM lane_stats s JOIN lanes l ON l.id = s.lane_id JOIN repos r ON r.id = l.repo_id
+                   WHERE ?1 IS NULL OR r.root = ?1";
+        let mut stmt = self.conn.prepare(sql).map_err(db_err)?;
+        let rows = stmt
+            .query_map([repo.map(|p| p.to_string_lossy().into_owned())], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    LaneStats {
+                        method: r.get(1)?,
+                        files: r.get::<_, i64>(2)? as u64,
+                        bytes: r.get::<_, i64>(3)? as u64,
+                        made_ms: r.get::<_, i64>(4)? as u64,
+                        install_ms: r.get::<_, Option<i64>>(5)?.map(|v| v as u64),
+                    },
+                ))
+            })
+            .map_err(db_err)?;
+        rows.collect::<rusqlite::Result<HashMap<_, _>>>()
+            .map_err(db_err)
+    }
+
+    /// How long the last dependency install in a repo's `_base` took, if Lanes timed one.
+    pub fn base_install_ms(&self, repo: &Path) -> Result<Option<u64>> {
+        self.conn
+            .query_row(
+                "SELECT b.install_ms FROM bases b JOIN repos r ON r.id = b.repo_id WHERE r.root = ?1",
+                [repo.to_string_lossy()],
+                |r| r.get::<_, Option<i64>>(0),
+            )
+            .optional()
+            .map(|v| v.flatten().map(|v| v as u64))
+            .map_err(db_err)
+    }
+
+    /// A number that changes whenever any process writes the store, to notice changes cheaply.
+    pub fn version(&self) -> Result<i64> {
+        self.conn
+            .pragma_query_value(None, "data_version", |r| r.get(0))
             .map_err(db_err)
     }
 
@@ -683,6 +761,53 @@ impl Tx<'_> {
         )
     }
 
+    /// Record what a lane cost to make and what it saved.
+    pub fn set_lane_stats(&self, lane_id: &str, stats: &LaneStats) -> Result<()> {
+        self.tx
+            .execute(
+                "INSERT INTO lane_stats (lane_id, method, files, bytes, made_ms, install_ms, at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT (lane_id) DO UPDATE SET method = excluded.method, files = excluded.files,
+                   bytes = excluded.bytes, made_ms = excluded.made_ms, install_ms = excluded.install_ms,
+                   at = excluded.at",
+                params![
+                    lane_id,
+                    stats.method,
+                    stats.files as i64,
+                    stats.bytes as i64,
+                    stats.made_ms as i64,
+                    stats.install_ms.map(|v| v as i64),
+                    now()
+                ],
+            )
+            .map_err(db_err)?;
+        Ok(())
+    }
+
+    /// How long the last install in a repo's `_base` took, read inside this write.
+    pub fn base_install_ms(&self, repo: &Path) -> Option<u64> {
+        self.tx
+            .query_row(
+                "SELECT b.install_ms FROM bases b JOIN repos r ON r.id = b.repo_id WHERE r.root = ?1",
+                [repo.to_string_lossy()],
+                |r| r.get::<_, Option<i64>>(0),
+            )
+            .ok()
+            .flatten()
+            .map(|v| v as u64)
+    }
+
+    /// Record how long the dependency install in a repo's `_base` took.
+    pub fn set_base_install_ms(&self, repo: &Path, ms: u64) -> Result<()> {
+        self.tx
+            .execute(
+                "UPDATE bases SET install_ms = ?2 WHERE repo_id = (SELECT id FROM repos WHERE root = ?1)",
+                params![repo.to_string_lossy(), ms as i64],
+            )
+            .map_err(db_err)?;
+        Ok(())
+    }
+
     /// Forget a lane by id (a failed `lane new` cleaning up after itself).
     pub fn drop_lane(&self, lane_id: &str) -> Result<()> {
         self.tx
@@ -748,6 +873,9 @@ impl Tx<'_> {
             })?;
         self.tx
             .execute("DELETE FROM lanes WHERE id = ?1", [&lane.id])
+            .map_err(db_err)?;
+        self.tx
+            .execute("DELETE FROM lane_stats WHERE lane_id = ?1", [&lane.id])
             .map_err(db_err)?;
         self.log(Some(&lane.id), "rm", &serde_json::json!({ "name": name }))?;
         Ok(lane)

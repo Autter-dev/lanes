@@ -1,9 +1,12 @@
 //! Every screen rendered with ratatui's test backend, plus the key flow end to end.
 
+use crate::feed::{Row, Snapshot, Source};
 use crate::home::{self, Home};
 use crate::onboarding::{Input, Onboarding, Outcome};
 use crate::theme::Theme;
+use lane_core::insight::{Details, TestRun};
 use lane_core::machine::{Check, Status};
+use lane_core::state::LaneStats;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -251,37 +254,23 @@ fn ready_screen_tailors_next_steps() {
 
 #[test]
 fn home_renders_and_switches_the_install_count() {
-    let mut app = Home::new(home::Input {
-        version: "0.0.1",
-        telemetry: true,
-        telemetry_forced_off: None,
-        theme: Theme::new(true, false),
-        repo: None,
-        lanes: Vec::new(),
-        agents_unset: Vec::new(),
-    });
-    let mut terminal = Terminal::new(TestBackend::new(90, 26)).unwrap();
-    terminal.draw(|f| app.render(f)).unwrap();
-    let text = buffer_text(&terminal);
+    let mut input = home_input(None, Vec::new());
+    input.telemetry = true;
+    let mut app = Home::new(input);
+    let text = home_text(&app, 90, 26);
     assert!(text.contains("No lanes yet."));
-    assert!(text.contains("lane setup"));
+    assert!(text.contains("lane doctor"));
     assert_eq!(app.on_key(key(KeyCode::Char('t'))), None);
+    assert!(home_text(&app, 90, 26).contains("Install count off"));
     assert_eq!(
         app.on_key(key(KeyCode::Char('q'))),
-        Some(home::Outcome::Quit { telemetry: false })
+        Some(home::Action::Exit(home::Outcome::Quit { telemetry: false }))
     );
+    let mut input = home_input(None, Vec::new());
+    input.telemetry = true;
     assert_eq!(
-        Home::new(home::Input {
-            version: "0.0.1",
-            telemetry: true,
-            telemetry_forced_off: None,
-            theme: Theme::new(true, false),
-            repo: None,
-            lanes: Vec::new(),
-            agents_unset: Vec::new(),
-        })
-        .on_key(key(KeyCode::Char('s'))),
-        Some(home::Outcome::Setup { telemetry: true })
+        Home::new(input).on_key(key(KeyCode::Char('s'))),
+        Some(home::Action::Exit(home::Outcome::Setup { telemetry: true }))
     );
 }
 
@@ -461,19 +450,41 @@ fn enter_still_moves_on_from_the_machine_step() {
     assert!(screen_text(&app, 100, 30).contains("How a lane works"));
 }
 
-fn home_with(repo: Option<home::HomeRepo>, lanes: Vec<lane_core::state::Lane>) -> String {
-    let app = Home::new(home::Input {
-        version: "0.0.3",
+fn home_input(repo: Option<home::HomeRepo>, rows: Vec<Row>) -> home::Input {
+    let savings = lane_core::insight::savings(
+        &rows
+            .iter()
+            .map(|r| (&r.lane, r.stats.as_ref(), Some(&r.details)))
+            .collect::<Vec<_>>(),
+    );
+    home::Input {
+        version: "0.0.7",
         telemetry: false,
         telemetry_forced_off: None,
         theme: Theme::new(true, false),
         repo,
-        lanes,
+        snapshot: Snapshot {
+            rows,
+            savings,
+            cores: 8,
+            source: Source::StateFile,
+        },
         agents_unset: Vec::new(),
-    });
-    let mut terminal = Terminal::new(TestBackend::new(90, 26)).unwrap();
+    }
+}
+
+fn home_text(app: &Home, width: u16, height: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     terminal.draw(|f| app.render(f)).unwrap();
     buffer_text(&terminal)
+}
+
+fn app_repo(set_up: bool) -> Option<home::HomeRepo> {
+    Some(home::HomeRepo {
+        name: "app".into(),
+        set_up,
+        root: PathBuf::from("/work/app"),
+    })
 }
 
 fn a_lane(name: &str, port: u16) -> lane_core::state::Lane {
@@ -494,45 +505,286 @@ fn a_lane(name: &str, port: u16) -> lane_core::state::Lane {
     }
 }
 
-#[test]
-fn home_lists_the_lanes_with_their_urls() {
-    let repo = || {
-        Some(home::HomeRepo {
-            name: "app".into(),
-            set_up: true,
-        })
+fn a_row(name: &str, port: u16) -> Row {
+    Row {
+        lane: a_lane(name, port),
+        details: Details::default(),
+        stats: None,
+        gone: false,
+    }
+}
+
+fn stats(method: &str, bytes: u64, install_ms: Option<u64>) -> LaneStats {
+    LaneStats {
+        method: method.into(),
+        files: 1200,
+        bytes,
+        made_ms: 900,
+        install_ms,
+    }
+}
+
+/// Three lanes: Claude Code's, running with passing tests on a disk that clones; Codex's, with
+/// failing tests; and one copied on a disk that can't clone.
+fn busy_rows() -> Vec<Row> {
+    let mut claude = a_row("fix-auth", 4100);
+    claude.lane.agent = Some("claude".into());
+    claude.details = Details {
+        changed: 3,
+        changed_bytes: 2_000_000,
+        running: true,
+        tests: Some(TestRun {
+            command: "npm test".into(),
+            passed: true,
+            at: "2026-10-18T09:00:00Z".into(),
+        }),
     };
-    let text = home_with(
-        repo(),
-        vec![a_lane("fix-auth", 4100), a_lane("dark-mode", 4110)],
-    );
-    assert!(text.contains("Lanes in app"));
-    assert!(text.contains("http://fix-auth.localhost:4100"));
-    assert!(text.contains("http://dark-mode.localhost:4110"));
+    claude.stats = Some(stats("clone", 900_000_000, Some(48_000)));
+    let mut codex = a_row("dark-mode", 4110);
+    codex.lane.agent = Some("codex".into());
+    codex.details = Details {
+        changed: 1,
+        changed_bytes: 10_000,
+        running: false,
+        tests: Some(TestRun {
+            command: "cargo test".into(),
+            passed: false,
+            at: "2026-10-18T09:05:00Z".into(),
+        }),
+    };
+    codex.stats = Some(stats("clone", 900_000_000, Some(48_000)));
+    let mut copied = a_row("old-disk", 4120);
+    copied.stats = Some(stats("copy", 300_000_000, None));
+    vec![claude, codex, copied]
+}
+
+#[test]
+fn home_lists_every_lane_with_its_agent_status_url_changes_tests_and_disk() {
+    let app = Home::new(home_input(app_repo(true), busy_rows()));
+    let text = home_text(&app, 120, 32);
+    assert!(text.contains("Lanes in app"), "{text}");
+    for header in [
+        "LANE",
+        "AGENT",
+        "STATUS",
+        "URL",
+        "CHANGED",
+        "TESTS",
+        "EXTRA DISK",
+    ] {
+        assert!(text.contains(header), "{header} missing:\n{text}");
+    }
+    let fix = text.lines().find(|l| l.contains("fix-auth")).unwrap();
+    for cell in [
+        "Claude Code",
+        "running",
+        "fix-auth.localhost:4100",
+        "3 files",
+        "✓ passed",
+        "2.0 MB",
+    ] {
+        assert!(fix.contains(cell), "{cell} missing: {fix}");
+    }
+    let dark = text.lines().find(|l| l.contains("dark-mode")).unwrap();
+    for cell in ["Codex", "ready", "1 file", "✗ failed", "10 KB"] {
+        assert!(dark.contains(cell), "{cell} missing: {dark}");
+    }
+    let old = text.lines().find(|l| l.contains("old-disk")).unwrap();
+    assert!(old.contains("300 MB (copy)"), "{old}");
     assert!(!text.contains("No lanes yet."));
 
-    // More lanes than fit: the rest are counted, and the settings still show.
-    let many = (0..12)
-        .map(|i| a_lane(&format!("lane-{i}"), 4100 + i * 10))
+    // A narrow terminal drops the agent and tests columns, and keeps the rest.
+    let narrow = home_text(&app, 90, 32);
+    assert!(
+        !narrow.contains("AGENT") && !narrow.contains("TESTS"),
+        "{narrow}"
+    );
+    assert!(narrow.contains("fix-auth.localhost:4100"), "{narrow}");
+}
+
+#[test]
+fn home_shows_what_lanes_saved() {
+    let app = Home::new(home_input(app_repo(true), busy_rows()));
+    let text = home_text(&app, 120, 32);
+    assert!(
+        text.contains("Saved by lanes   1.8 GB of disk  ·  2 min of installs"),
+        "{text}"
+    );
+    // As worktrees: 900 MB + 900 MB + 300 MB. As lanes: 2 MB + 10 KB changed, and the copy.
+    // Both bars are on one scale, so the lanes' bar is about a seventh of the worktrees'.
+    let bar = |label: &str| {
+        let line = text.lines().find(|l| l.contains(label)).unwrap();
+        (line.matches('█').count(), line.to_string())
+    };
+    let (worktrees, line) = bar("As worktrees");
+    assert!(line.contains("2.1 GB"), "{line}");
+    let (lanes, line) = bar("As lanes");
+    assert!(line.contains("302 MB"), "{line}");
+    assert!(worktrees > 5 * lanes && lanes > 0, "{worktrees} vs {lanes}");
+    assert!(
+        text.contains("2 of 3 lanes didn't install again: 2 min saved"),
+        "{text}"
+    );
+    assert!(
+        text.contains("3 lanes with 30 ports of their own"),
+        "{text}"
+    );
+    assert!(text.contains("1 lane is copied in full"), "{text}");
+
+    // Lanes made before Lanes measured them: nothing made up.
+    let app = Home::new(home_input(app_repo(true), vec![a_row("fix-auth", 4100)]));
+    let text = home_text(&app, 120, 32);
+    assert!(text.contains("Make a lane with this version"), "{text}");
+    assert!(!text.contains("As worktrees"), "{text}");
+}
+
+#[test]
+fn the_status_bar_says_what_is_true() {
+    let app = Home::new(home_input(app_repo(true), busy_rows()));
+    let text = home_text(&app, 140, 32);
+    let bar = text
+        .lines()
+        .find(|l| l.contains("not signed in"))
+        .unwrap_or_else(|| panic!("{text}"));
+    for part in [
+        "daemon not running yet: live from Lanes' state",
+        "8 cores",
+        "1 app running",
+        "1.8 GB saved",
+    ] {
+        assert!(bar.contains(part), "{part} missing: {bar}");
+    }
+    // Narrower, it says the same in fewer words.
+    let text = home_text(&app, 90, 32);
+    let bar = text.lines().find(|l| l.contains("not signed in")).unwrap();
+    assert!(bar.contains("1.8 GB saved"), "{bar}");
+}
+
+#[test]
+fn question_mark_shows_the_keys_and_any_key_hides_them() {
+    let mut app = Home::new(home_input(app_repo(true), busy_rows()));
+    assert_eq!(app.on_key(key(KeyCode::Char('?'))), None);
+    let text = home_text(&app, 120, 32);
+    assert!(text.contains("Keys"), "{text}");
+    assert!(text.contains("select a lane"), "{text}");
+    assert!(
+        text.contains("remove the selected lane (asks first)"),
+        "{text}"
+    );
+    assert_eq!(app.on_key(key(KeyCode::Char('x'))), None);
+    assert!(!home_text(&app, 120, 32).contains("select a lane"));
+}
+
+#[test]
+fn the_palette_filters_commands_and_runs_one() {
+    let mut app = Home::new(home_input(app_repo(true), busy_rows()));
+    // Ctrl-K opens it, and doesn't move the selection the way k does.
+    app.on_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
+    let text = home_text(&app, 120, 32);
+    assert!(text.contains("Commands"), "{text}");
+    assert!(text.contains("Quit"), "{text}");
+    for c in "remove".chars() {
+        app.on_key(key(KeyCode::Char(c)));
+    }
+    let text = home_text(&app, 120, 32);
+    assert!(text.contains("Remove the selected lane"), "{text}");
+    assert!(!text.contains("Quit"), "{text}");
+    // Enter runs it: removing asks first, and only y removes.
+    assert_eq!(app.on_key(key(KeyCode::Enter)), None);
+    assert!(home_text(&app, 120, 32).contains("Remove fix-auth and its folder"));
+    assert_eq!(app.on_key(key(KeyCode::Char('n'))), None);
+    assert!(!home_text(&app, 120, 32).contains("Remove fix-auth and its folder"));
+
+    // `:` opens it too; Esc closes it.
+    app.on_key(key(KeyCode::Char(':')));
+    for c in "zzz".chars() {
+        app.on_key(key(KeyCode::Char(c)));
+    }
+    assert!(home_text(&app, 120, 32).contains("Nothing matches."));
+    app.on_key(key(KeyCode::Esc));
+    assert!(!home_text(&app, 120, 32).contains("Nothing matches."));
+}
+
+#[test]
+fn removing_a_lane_asks_then_waits_for_it() {
+    let mut app = Home::new(home_input(app_repo(true), busy_rows()));
+    app.on_key(key(KeyCode::Char('j')));
+    assert_eq!(app.on_key(key(KeyCode::Char('d'))), None);
+    assert!(home_text(&app, 120, 32).contains("Remove dark-mode and its folder"));
+    assert_eq!(
+        app.on_key(key(KeyCode::Char('y'))),
+        Some(home::Action::Remove("dark-mode".into()))
+    );
+    assert!(app.busy());
+    assert!(home_text(&app, 120, 32).contains("Removing dark-mode…"));
+    // q waits while it's at it, and so does making another; Ctrl-C still leaves.
+    assert_eq!(app.on_key(key(KeyCode::Char('q'))), None);
+    assert!(home_text(&app, 120, 32).contains("Lanes is still at it"));
+    assert_eq!(app.on_key(key(KeyCode::Char('n'))), None);
+    assert!(home_text(&app, 120, 32).contains("Wait for the lane being made or removed"));
+    assert_eq!(
+        app.on_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+        Some(home::Action::Exit(home::Outcome::Quit { telemetry: false }))
+    );
+    app.done("Removed dark-mode and its folder.");
+    assert!(!app.busy());
+    assert!(home_text(&app, 120, 32).contains("Removed dark-mode and its folder."));
+}
+
+#[test]
+fn n_names_a_new_lane() {
+    let mut app = Home::new(home_input(app_repo(true), busy_rows()));
+    app.on_key(key(KeyCode::Char('n')));
+    assert!(home_text(&app, 120, 32).contains("New lane"));
+    for c in "Fix Login!".chars() {
+        app.on_key(key(KeyCode::Char(c)));
+    }
+    assert!(home_text(&app, 120, 32).contains("lane new fix-login"));
+    assert_eq!(
+        app.on_key(key(KeyCode::Enter)),
+        Some(home::Action::New("fix-login".into()))
+    );
+    assert!(home_text(&app, 120, 32).contains("Making fix-login…"));
+
+    // An empty name isn't sent; outside a repo there's nowhere to make one.
+    let mut app = Home::new(home_input(app_repo(true), Vec::new()));
+    app.on_key(key(KeyCode::Char('n')));
+    assert_eq!(app.on_key(key(KeyCode::Enter)), None);
+    assert!(home_text(&app, 120, 32).contains("Use lowercase letters"));
+    let mut app = Home::new(home_input(None, Vec::new()));
+    app.on_key(key(KeyCode::Char('n')));
+    assert!(home_text(&app, 120, 32).contains("Open Lanes in a repo"));
+}
+
+#[test]
+fn the_selection_moves_and_follows_new_snapshots() {
+    let many: Vec<Row> = (0..12)
+        .map(|i| a_row(&format!("lane-{i}"), 4100 + i * 10))
         .collect();
-    let text = home_with(repo(), many);
-    assert!(text.contains("more: lane list"));
-    assert!(text.contains("Install count"));
+    let mut app = Home::new(home_input(app_repo(true), many.clone()));
+    for _ in 0..11 {
+        app.on_key(key(KeyCode::Down));
+    }
+    // The table scrolls to keep the selected lane on screen.
+    let text = home_text(&app, 100, 24);
+    assert!(text.contains("▸ lane-11"), "{text}");
+    assert!(!text.contains("lane-0 "), "{text}");
+
+    // The same snapshot again changes nothing; a new one redraws, and the selection stays on a
+    // lane that exists.
+    let same = home_input(app_repo(true), many.clone()).snapshot;
+    assert!(!app.update(same));
+    let fewer = home_input(app_repo(true), many[..3].to_vec()).snapshot;
+    assert!(app.update(fewer));
+    assert!(home_text(&app, 100, 24).contains("▸ lane-2"));
 }
 
 #[test]
 fn home_says_what_to_do_next() {
-    let set_up = |set_up| {
-        Some(home::HomeRepo {
-            name: "app".into(),
-            set_up,
-        })
-    };
-    assert!(home_with(set_up(false), Vec::new()).contains("This repo isn't set up yet: lane init"));
-    assert!(
-        home_with(set_up(true), Vec::new()).contains("Make your first lane: lane new fix-auth")
-    );
-    assert!(home_with(None, Vec::new()).contains("cd your-project"));
+    let empty = |repo| home_text(&Home::new(home_input(repo, Vec::new())), 90, 26);
+    assert!(empty(app_repo(false)).contains("This repo isn't set up yet: lane init"));
+    assert!(empty(app_repo(true)).contains("Make your first lane: lane new fix-auth"));
+    assert!(empty(None).contains("cd your-project"));
 }
 
 #[test]
@@ -556,16 +808,14 @@ fn the_last_screen_puts_agents_in_lanes_and_a_switches_it() {
 
 #[test]
 fn home_says_when_an_agent_isnt_in_lanes_yet() {
-    let app = Home::new(home::Input {
-        version: "0.0.5",
-        telemetry: false,
-        telemetry_forced_off: None,
-        theme: Theme::new(true, false),
-        repo: None,
-        lanes: Vec::new(),
-        agents_unset: vec!["Codex"],
-    });
-    let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
-    terminal.draw(|f| app.render(f)).unwrap();
-    assert!(buffer_text(&terminal).contains("Codex: not in lanes yet. Run lane setup"));
+    let mut input = home_input(None, Vec::new());
+    input.agents_unset = vec!["Codex"];
+    assert!(
+        home_text(&Home::new(input), 100, 30).contains("Codex: not in lanes yet. Run lane setup")
+    );
+    let mut input = home_input(app_repo(true), busy_rows());
+    input.agents_unset = vec!["Codex"];
+    assert!(
+        home_text(&Home::new(input), 120, 32).contains("Codex: not in lanes yet. Run lane setup")
+    );
 }

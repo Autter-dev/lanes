@@ -8,6 +8,11 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-18
 
+- `12:09` **Added**: the terminal app's home screen shows your lanes live, and what they saved.
+  - **Every lane** with its agent (Claude Code, Codex, Cursor), status (running when its app answers on its port), URL, changed files, last test run through `lane exec`, and the extra disk it takes. Narrow terminals drop the agent and tests columns.
+  - **Saved by lanes:** disk as two bars on one scale, a worktree plus its own install for each lane against what the lanes really take, plus the installs lanes skipped and the time that saved. Lanes measures each new lane as it makes it, so lanes made before this show nothing rather than a guess.
+  - **A status bar:** sign-in, the daemon, cores, apps running and disk saved. The daemon doesn't run yet, so the bar says so, and the screen watches Lanes' state instead, redrawing only when something changed.
+  - **Keys:** `?` shows them all; `:` or Ctrl-K opens a command palette you can filter; `n` makes a lane and `d` removes one (asking first), in the background; `o` opens the lane's app, `c` copies its folder and `l` shows the log.
 - `07:36` **Added**: setup does everything it can by itself and asks Y/n where the choice is yours, then says what's left.
   - **`lane init`** in a terminal walks through each step and asks before it: write `lane.toml` for your team; put this machine's agents (Claude Code, Codex, Cursor) in lanes; add or update the Git hook; add the note to `AGENTS.md`; set up Claude Code for this repo only, if not for the machine; and install dependencies now in a clean copy, so the first lane is ready in seconds. Steps already in place aren't asked about. It ends with what's left: trusting the hooks in Codex once, the `git add`, the first `claude -w`, and getting instant lanes where this disk copies them. `--yes` takes every default without asking.
   - **`lane doctor --fix`** fixes what Lanes can fix by itself, asking first: agents not in lanes yet, this repo's Git hook, and lanes whose folders have gone. What only you can do (install Git, move a repo to a Dev Drive, change PATH) keeps its steps. `--fix --yes` makes every fix without asking.

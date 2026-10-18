@@ -1309,14 +1309,15 @@ fn run_onboarding(env: &Env, config: &mut Config) -> Result<bool, ExitCode> {
 
 fn run_home(env: &Env, mut config: Config) -> ExitCode {
     loop {
-        let (repo, lanes) = home_lanes();
+        let repo = home_repo();
+        let snapshot = lane_tui::feed::read(repo.as_ref().map(|r| r.root.as_path()));
         let input = home::Input {
             version: VERSION,
             telemetry: config.telemetry,
             telemetry_forced_off: env.telemetry_forced_off(),
             theme: theme(env),
             repo,
-            lanes,
+            snapshot,
             agents_unset: if config.agents {
                 agents::user::found()
                     .into_iter()
@@ -1353,24 +1354,18 @@ fn run_home(env: &Env, mut config: Config) -> ExitCode {
     }
 }
 
-/// What the home screen lists: the repo `lane` was opened in and its lanes, or every lane on
-/// this machine outside a repo. Nothing to show when the state can't be read.
-fn home_lanes() -> (Option<home::HomeRepo>, Vec<Lane>) {
-    let repo = Repo::open(&here()).ok();
-    let lanes = Store::open_existing()
-        .ok()
-        .flatten()
-        .and_then(|s| s.lanes(repo.as_ref().map(|r| r.root.as_path())).ok())
-        .unwrap_or_default();
-    let repo = repo.map(|r| home::HomeRepo {
+/// The repo `lane` was opened in, if any: the home screen lists its lanes, or every lane on this
+/// machine outside a repo.
+fn home_repo() -> Option<home::HomeRepo> {
+    Repo::open(&here()).ok().map(|r| home::HomeRepo {
         name: r
             .root
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default(),
         set_up: r.has_lane_toml(),
-    });
-    (repo, lanes)
+        root: r.root,
+    })
 }
 
 struct SetupFlags {

@@ -225,9 +225,25 @@ pub fn new_lane(
         })
     })?;
 
+    let started = std::time::Instant::now();
     match build_lane(store, repo, &reserved) {
         Ok((base, clone, fixed_paths, env_file)) => store.write(request, |tx| {
             tx.finish_lane(&reserved.id, &base.commit)?;
+            // This lane skipped the install `_base` ran, unless it ran one just now for it.
+            let install_ms = match base.installed {
+                true => None,
+                false => store_base_install_ms(tx, &repo.root),
+            };
+            tx.set_lane_stats(
+                &reserved.id,
+                &crate::state::LaneStats {
+                    method: if clone.copied == 0 { "clone" } else { "copy" }.into(),
+                    files: clone.files as u64,
+                    bytes: clone.bytes,
+                    made_ms: started.elapsed().as_millis() as u64,
+                    install_ms,
+                },
+            )?;
             let mut lane = reserved.clone();
             lane.status = Status::Ready;
             lane.base_commit = Some(base.commit.clone());
@@ -248,6 +264,10 @@ pub fn new_lane(
 }
 
 type Built = (BaseInfo, CloneSummary, usize, Option<PathBuf>);
+
+fn store_base_install_ms(tx: &crate::state::Tx<'_>, root: &Path) -> Option<u64> {
+    tx.base_install_ms(root)
+}
 
 /// Agent settings that live only on this machine (Claude Code's hooks among them), copied from
 /// the repo into the lane so an agent started in the lane has them too.
@@ -323,14 +343,23 @@ pub fn ensure_base(store: &mut Store, repo: &Repo) -> Result<BaseInfo> {
     let key = install_key(&path, &commit, commands)?;
     let stale = record.as_ref().and_then(|b| b.install_key.as_deref()) != Some(key.as_str());
     let mut installed = false;
+    let mut install_ms = None;
     if created || stale {
         // Forget the old key first, so an install that fails runs again next time.
         store.write(None, |tx| tx.set_base(&repo.root, &path, &commit, None))?;
+        let started = std::time::Instant::now();
         install(&path, commands)?;
         installed = !commands.is_empty();
+        if installed {
+            install_ms = Some(started.elapsed().as_millis() as u64);
+        }
     }
     store.write(None, |tx| {
-        tx.set_base(&repo.root, &path, &commit, Some(&key))
+        tx.set_base(&repo.root, &path, &commit, Some(&key))?;
+        match install_ms {
+            Some(ms) => tx.set_base_install_ms(&repo.root, ms),
+            None => Ok(()),
+        }
     })?;
     Ok(BaseInfo {
         path,
@@ -554,22 +583,36 @@ pub fn make_ready(store: &mut Store, repo: &Repo, lane: &Lane) -> Result<Ready> 
         return Ok(ready);
     }
     let method = clone::probe(&repo.lanes_dir);
+    let started = std::time::Instant::now();
+    let (mut files, mut bytes, mut copied) = (0u64, 0u64, 0usize);
     for rel in dep_dirs(&base.path) {
         let to = path.join(&rel);
         if to.exists() {
             continue;
         }
-        clone::clone_tree(
+        let report = clone::clone_tree(
             &base.path.join(&rel),
             &to,
             clone::backend(method).as_ref(),
             &clone::Options::default(),
         )?;
+        files += report.files as u64;
+        bytes += report.bytes;
+        copied += report.copied;
         ready.folders.push(rel);
     }
     if !ready.folders.is_empty() {
         ready.deps = Deps::Cloned;
         ready.fixed_paths = fix_paths(&base.path, path)?;
+        // What this lane saved: the install it didn't run, and the dependencies it shares.
+        let stats = crate::state::LaneStats {
+            method: if copied == 0 { "clone" } else { "copy" }.into(),
+            files,
+            bytes,
+            made_ms: started.elapsed().as_millis() as u64,
+            install_ms: store.base_install_ms(&repo.root)?,
+        };
+        store.write(None, |tx| tx.set_lane_stats(&lane.id, &stats))?;
     }
     Ok(ready)
 }
