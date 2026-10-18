@@ -6,6 +6,28 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ## Unreleased
 
+## 0.0.8 (2026-10-18)
+
+**Five agents, Lanes' own tools for them, and a daemon that keeps it all in step.** Gemini CLI and GitHub Copilot now put their work in lanes on their own, `lane mcp` gives agents tools to read the repo and make lanes, and `laned` makes every change to lanes and keeps the terminal app live. Still a preview.
+
+```sh
+lane setup                          # puts Gemini CLI and GitHub Copilot in lanes too
+claude mcp add lanes -- lane mcp    # Lanes' tools for Claude Code; any MCP client works
+lane daemon status                  # whether laned is running, and the changes it has made
+```
+
+In this version:
+- **Gemini CLI and GitHub Copilot** (the Copilot CLI and VS Code's agent mode) put their work in lanes on their own, set up once per machine like Claude Code, Codex and Cursor. The worktrees they make become ready-to-run lanes, and copying the repo is turned down with a pointer to `lane new`. Their settings files keep their comments, and `lane setup --yes --agents off` gives each one back byte for byte.
+- **`lane mcp`**: an MCP server over stdio with `repo.read`, `repo.outline`, `repo.grep`, `lane.new` and `lane.list`, so agents read code and make lanes through tools. Lanes adds it to no agent's settings; `claude mcp add lanes -- lane mcp` adds it to Claude Code.
+- **`laned`, the daemon**, is the one writer. While it runs, every change to lanes, from your commands, agents' hooks or the terminal app, is made there, one at a time per repo, with your environment, and install output comes back as it happens. It keeps the terminal app live, sending only what changed. Your own commands start it; agents' sessions, hooks and CI only use it if it's running. It keeps nothing of its own, so stopping it loses nothing, and it leaves by itself after half an hour with nobody connected. `lane daemon` shows, starts and stops it.
+
+Known issues:
+- On Windows, removing Lanes without first running `lane setup --yes --agents off` leaves the Copilot CLI with a hook it can't run, and the Copilot CLI then turns down every tool. Run that command before you uninstall, or delete `~/.copilot/hooks/lanes.json`.
+- Gemini CLI and GitHub Copilot are checked against their documented hook formats, not yet in live sessions.
+
+Not yet:
+- No checkpoints or undo, no promote to a pull request, and no database per lane.
+
 ### 2026-10-18
 
 - `17:20` **Changed**: `laned` is the one writer. While it runs, `lane new`, `lane rm` and `lane adopt`, agents' hooks, `lane doctor --fix` and the terminal app send it their changes, and it makes them one at a time per repo (`0b0a6d4`).
