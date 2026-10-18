@@ -1926,14 +1926,21 @@ fn a_hanging_endpoint_never_slows_a_command() {
         "onboarded = \"0.0.1\"\ntelemetry = true\n",
     )
     .unwrap();
-    let started = std::time::Instant::now();
-    let out = lane_counting(&dir, &server.url, &[], &["--version"]);
-    let took = started.elapsed();
-    assert!(out.status.success());
-    // curl gives up after 1 s; `lane` doesn't wait for it, and nor does whoever reads its output.
+    let timed = |env: &[(&str, &str)]| {
+        let started = std::time::Instant::now();
+        let out = lane_counting(&dir, &server.url, env, &["--version"]);
+        assert!(out.status.success());
+        started.elapsed()
+    };
+    // Unmeasured first: a first launch of a new binary can be slow on its own (Windows scans it).
+    timed(&[("LANE_TELEMETRY", "0")]);
+    let without = timed(&[("LANE_TELEMETRY", "0")]);
+    let with = timed(&[]);
+    // curl gives up after 1 s. `lane` doesn't wait for it, and nor does whoever reads its output,
+    // so sending costs well under that over the same command sending nothing.
     assert!(
-        took < std::time::Duration::from_millis(900),
-        "took {took:?}"
+        with < without + std::time::Duration::from_millis(700),
+        "took {with:?}, against {without:?} without the count"
     );
     assert_eq!(
         server.wait_for(1, std::time::Duration::from_secs(10)).len(),
