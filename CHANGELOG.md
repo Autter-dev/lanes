@@ -8,6 +8,7 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-18
 
+- `14:34` **Added**: the install count's backend is live at `https://lanes-count.autter.dev`, on the D1 database `lanes-install-count`. Checked end to end: a count sent by `lane` arrived with exactly its five fields, and `DELETE` removed it.
 - `14:23` **Changed**: the install count's backend keeps counts in Cloudflare D1, not Postgres, so it runs entirely on Cloudflare with no database to host elsewhere. `npm run deploy` applies `migrations/` and deploys; its tests run the SQL on a local D1.
 - `13:59` **Added**: the install count's backend, in `services/install-count`: a Cloudflare Worker that keeps counts in D1 (`b1f8c8e`).
   - `POST /v1/installs` accepts the five fields `lane` sends and nothing else. `DELETE /v1/installs/<id>` deletes everything kept about one install.
