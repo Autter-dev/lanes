@@ -4,7 +4,7 @@ import type { Ping } from "../src/ping";
 
 const good = { id: "0123456789abcdef0123456789abcdef", version: "0.0.7", os: "linux", arch: "aarch64", channel: "homebrew" };
 
-/** A stand-in for Cloudflare and Postgres that keeps what it was asked to do. */
+/** A stand-in for Cloudflare and D1 that keeps what it was asked to do. */
 function fake(allowed = true) {
   const recorded: Ping[] = [];
   const forgotten: string[] = [];

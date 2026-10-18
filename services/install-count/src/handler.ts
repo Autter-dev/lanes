@@ -1,4 +1,4 @@
-// The HTTP side, apart from Cloudflare and Postgres, so every route is tested without either.
+// The HTTP side, apart from Cloudflare and D1, so every route is tested without either.
 //
 //   POST   /v1/installs        count an install (the body is the five fields; 202 Accepted)
 //   DELETE /v1/installs/<id>   delete everything kept about one install (202 Accepted)

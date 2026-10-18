@@ -8,11 +8,11 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-18
 
-- `13:59` **Added**: the install count's backend, in `services/install-count`: a Cloudflare Worker that keeps counts in Postgres (`b1f8c8e`).
+- `14:23` **Changed**: the install count's backend keeps counts in Cloudflare D1, not Postgres, so it runs entirely on Cloudflare with no database to host elsewhere. `npm run deploy` applies `migrations/` and deploys; its tests run the SQL on a local D1.
+- `13:59` **Added**: the install count's backend, in `services/install-count`: a Cloudflare Worker that keeps counts in D1 (`b1f8c8e`).
   - `POST /v1/installs` accepts the five fields `lane` sends and nothing else. `DELETE /v1/installs/<id>` deletes everything kept about one install.
   - It never keeps IP addresses, user agents or request logs. Cloudflare's rate limiter allows 20 requests a minute per address.
-  - It runs on any Postgres, directly or through Hyperdrive, and creates its tables on the first count. `queries.sql` has the usual questions, and the README says how to host it at `lanes-count.autter.dev`, where release builds of `lane` now send the count.
-  - CI tests its SQL against a real Postgres on every push.
+  - `queries.sql` has the usual questions, and the README says how to host it at `lanes-count.autter.dev`, where release builds of `lane` now send the count.
 - `13:19` **Added**: the anonymous install count, and `lane telemetry` to see and switch it (`04e5ef2`).
   - Once Lanes is set up (the welcome or `lane setup`), and once after each upgrade, it sends exactly what the welcome lists: a random install id, the Lanes version, the OS and CPU type, and how Lanes was installed (Homebrew, npm, Scoop, winget, cargo or the install scripts). Nothing is sent before the setting is chosen.
   - Never from CI, and never with `lane telemetry off`, `LANE_TELEMETRY=0` or `DO_NOT_TRACK=1`. It's sent in the background with a 1-second limit, and no command, or anything reading its output, waits for it.

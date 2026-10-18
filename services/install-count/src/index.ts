@@ -1,31 +1,14 @@
-// The Cloudflare Worker: the handler wired to Postgres (directly, or through Hyperdrive) and to
-// Cloudflare's rate limiter. See README.md to host it.
+// The Cloudflare Worker: the handler wired to D1 and to Cloudflare's rate limiter. See README.md
+// to host it.
 
-import { Client } from "pg";
 import { handle } from "./handler";
-import { forget, record, type Db } from "./store";
+import { forget, record } from "./store";
 
 export interface Env {
-  /** A Postgres connection string: `npx wrangler secret put DATABASE_URL`. */
-  DATABASE_URL?: string;
-  /** Optional: Hyperdrive in front of the same database, for faster connections. */
-  HYPERDRIVE?: { connectionString: string };
-  /** Optional: Cloudflare's rate limiter. Keyed by the caller's address, which is never stored. */
+  /** The D1 database holding the counts (`d1_databases` in wrangler.jsonc). */
+  DB: D1Database;
+  /** Cloudflare's rate limiter. Keyed by the caller's address, which is never stored. */
   LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
-}
-
-async function withDb(env: Env, work: (db: Db) => Promise<void>): Promise<void> {
-  const connectionString = env.HYPERDRIVE?.connectionString ?? env.DATABASE_URL;
-  if (!connectionString) {
-    throw new Error("no database: run `npx wrangler secret put DATABASE_URL`, or bind HYPERDRIVE");
-  }
-  const client = new Client({ connectionString });
-  await client.connect();
-  try {
-    await work(client);
-  } finally {
-    await client.end();
-  }
 }
 
 export default {
@@ -44,8 +27,8 @@ export default {
           ),
         );
       },
-      record: (ping) => withDb(env, (db) => record(db, ping)),
-      forget: (id) => withDb(env, (db) => forget(db, id)),
+      record: (ping) => record(env.DB, ping),
+      forget: (id) => forget(env.DB, id),
     });
   },
 };

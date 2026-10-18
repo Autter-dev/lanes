@@ -6,7 +6,7 @@ Lanes is a Rust workspace:
 - `crates/laned`: the background daemon, one per user
 - `crates/lane-core`: code shared by both
 
-Next to it, `services/install-count` is the install count's backend: a Cloudflare Worker that keeps counts in Postgres. It's TypeScript; `npm test` and `npm run check` there. Its README says how to host it.
+Next to it, `services/install-count` is the install count's backend: a Cloudflare Worker that keeps counts in D1. It's TypeScript; `npm test` and `npm run check` there. Its README says how to host it.
 
 ## Commands
 

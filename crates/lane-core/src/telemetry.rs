@@ -8,7 +8,7 @@
 //! with a 1-second limit, so no command waits for it; if it fails, it's dropped, not retried.
 //!
 //! The server is `services/install-count` in this repo: a Cloudflare Worker that keeps counts in
-//! Postgres and accepts nothing beyond these five fields.
+//! D1 and accepts nothing beyond these five fields.
 
 use crate::VERSION;
 use crate::config::{Config, config_dir};
@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 /// Where release builds send the count: the Worker in `services/install-count`, which keeps it
-/// in Postgres. `LANE_TELEMETRY_URL` points it elsewhere (tests, staging).
+/// in D1. `LANE_TELEMETRY_URL` points it elsewhere (tests, staging).
 pub const ENDPOINT: Option<&str> = Some("https://lanes-count.autter.dev/v1/installs");
 
 /// The whole message. Its fields are the list the welcome shows, and a test keeps it that way.
