@@ -8,7 +8,7 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-18
 
-- `13:59` **Added**: the install count's backend, in `services/install-count`: a Cloudflare Worker that keeps counts in Postgres.
+- `13:59` **Added**: the install count's backend, in `services/install-count`: a Cloudflare Worker that keeps counts in Postgres (`b1f8c8e`).
   - `POST /v1/installs` accepts the five fields `lane` sends and nothing else. `DELETE /v1/installs/<id>` deletes everything kept about one install.
   - It never keeps IP addresses, user agents or request logs. Cloudflare's rate limiter allows 20 requests a minute per address.
   - It runs on any Postgres, directly or through Hyperdrive, and creates its tables on the first count. `queries.sql` has the usual questions, and the README says how to host it at `lanes-count.autter.dev`, where release builds of `lane` now send the count.
