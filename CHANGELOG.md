@@ -6,6 +6,25 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ## Unreleased
 
+## 0.0.9 (2026-10-18)
+
+**GitHub Copilot on Windows, fixed.** Copilot's hooks on Windows do nothing when `lane` isn't there, so removing Lanes no longer leaves the Copilot CLI turning down every tool, and VS Code on Windows now turns down copies of the repo like everywhere else. Still a preview.
+
+```sh
+lane setup --yes    # on Windows, writes Copilot's hooks again after you upgrade
+```
+
+In this version:
+- **Copilot's hooks on Windows** run `lane` by its full path and do nothing if it has gone, the same in cmd.exe, Windows PowerShell and PowerShell 7. An editor started before Lanes was installed still finds it.
+- **VS Code on Windows** turns down copies of the repo. In 0.0.8 PowerShell turned the hook's exit 2 into 1, which VS Code takes as a warning, so copies went ahead.
+- **Upgrading on Windows**: hooks written by 0.0.8 count as out of date. `lane setup --yes`, the welcome in `lane` and `lane doctor --fix` write them again, and `lane doctor` says when they need it. macOS and Linux keep the hooks they have.
+
+Known issues:
+- Gemini CLI and GitHub Copilot are checked against their documented hook formats, not yet in live sessions.
+
+Not yet:
+- No checkpoints or undo, no promote to a pull request, and no database per lane.
+
 ### 2026-10-18
 
 - `18:35` **Fixed**: on Windows, GitHub Copilot's hooks do nothing when `lane` can't be found, so the Copilot CLI no longer turns down every tool after Lanes is removed (the known issue in 0.0.8).
