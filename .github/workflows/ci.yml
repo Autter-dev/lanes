@@ -21,6 +21,12 @@ jobs:
           components: rustfmt, clippy
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets -- -D warnings
+      # The Copilot hook tests run in cmd.exe, Windows PowerShell and this PowerShell 7.
+      - name: PowerShell versions
+        if: runner.os == 'Windows'
+        run: |
+          pwsh -NoLogo -NoProfile -Command '"pwsh " + $PSVersionTable.PSVersion'
+          powershell -NoLogo -NoProfile -Command '"powershell " + $PSVersionTable.PSVersion'
       - run: cargo test --all
 
   clones:

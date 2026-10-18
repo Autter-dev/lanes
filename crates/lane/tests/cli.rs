@@ -40,6 +40,14 @@ fn lane_in(dir: &PathBuf, cwd: &std::path::Path, args: &[&str]) -> Output {
 /// starts a daemon that outlives them; a test that wants one starts it.
 const NO_COUNT: &str = "http://127.0.0.1:9/";
 
+/// Held by a test that times a command, and by one that starts dozens of shells at once, so
+/// the shells don't slow the timed command down.
+static TIMING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn timing() -> std::sync::MutexGuard<'static, ()> {
+    TIMING.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// Run `lane` the way a Claude Code hook does: JSON on stdin, with extra environment.
 fn lane_hook(
     dir: &PathBuf,
@@ -1737,6 +1745,7 @@ fn run_copilot_hook(dir: &PathBuf, shell: &str, command: &str, stdin: &[u8]) -> 
 #[test]
 fn copilots_windows_hooks_do_nothing_without_lane_in_cmd_and_powershell() {
     use lane_core::agents::copilot::hooks_file;
+    let _shells = timing();
     let dir = config_dir("copilot-windows-shells");
     let repo = repo_with_commit("copilot-windows-shells");
     std::fs::write(repo.join("lane.toml"), "version = 1\n").unwrap();
@@ -1782,6 +1791,11 @@ fn copilots_windows_hooks_do_nothing_without_lane_in_cmd_and_powershell() {
     let pwsh = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
         .map(|d| d.join("pwsh.exe"))
         .find(|p| p.is_file());
+    // GitHub's Windows runners have PowerShell 7, so CI never skips it without saying so.
+    assert!(
+        pwsh.is_some() || std::env::var_os("GITHUB_ACTIONS").is_none(),
+        "pwsh.exe isn't on PATH, so PowerShell 7 wasn't tested"
+    );
     shells.extend(pwsh.map(|p| p.display().to_string()));
 
     for shell in &shells {
@@ -2461,6 +2475,7 @@ fn opt_outs_ci_and_the_off_switch_send_nothing() {
 
 #[test]
 fn a_hanging_endpoint_never_slows_a_command() {
+    let _timed = timing();
     let server = count_server(false);
     let dir = config_dir("count-hang");
     std::fs::create_dir_all(&dir).unwrap();
