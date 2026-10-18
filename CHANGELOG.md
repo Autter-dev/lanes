@@ -6,6 +6,10 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ## Unreleased
 
+### 2026-10-18
+
+- `07:22` **Changed**: the website offers 0.0.6, and the guide has a step for when something's off: `lane doctor` and `lane logs`.
+
 ## 0.0.6 (2026-10-18)
 
 **See what Lanes did, and what could stop it.** Two new commands, `lane doctor` and `lane logs`. A small update to 0.0.5, and still a preview.

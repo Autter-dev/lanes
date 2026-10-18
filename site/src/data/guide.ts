@@ -1,7 +1,7 @@
 // The guide page (/guide/): from install to agents in lanes, written once per system. Every block
 // can be limited to some systems with `only`; the page shows the visitor's system and hides the
 // rest, and without JavaScript every system shows, each labelled. Text takes `code` and
-// [links](url). Every command here is real and does what it says in Lanes 0.0.5.
+// [links](url). Every command here is real and does what it says in Lanes 0.0.6.
 import { install, release, type Os } from './site';
 
 export type Block =
@@ -200,6 +200,18 @@ export const steps: Step[] = [
       { kind: 'cmd', cmd: 'lane adopt ../my-worktree --ready', only: unix, label: 'Have a worktree already? Make it a lane' },
       { kind: 'cmd', cmd: 'lane adopt ..\\my-worktree --ready', only: win, label: 'Have a worktree already? Make it a lane' },
       { kind: 'note', text: '`--ready` gives it its dependencies and `.env` too, like a lane from `lane new`.' },
+    ],
+  },
+  {
+    id: 'doctor',
+    inRepo: true,
+    title: "When something's off.",
+    text: "`lane doctor` checks what could stop lanes working, and says how to fix each thing. `lane logs` shows what Lanes did, newest last: lanes made and removed, agents' worktrees that became lanes, and dependency installs.",
+    blocks: [
+      { kind: 'cmd', cmd: 'lane doctor' },
+      { kind: 'note', text: "It checks Git, whether your disk clones files, that `lane` is on PATH for agents' hooks, which agents put their work in lanes, this repo's Git hook, and lanes whose folders have gone. It changes nothing, and exits 1 only when something must be fixed." },
+      { kind: 'cmd', cmd: 'lane logs' },
+      { kind: 'note', text: "Inside an agent's hook, Lanes writes problems and install output here instead of into the agent's view, so this is where to look when an agent's lane didn't turn out as expected. `lane logs fix-auth` shows one lane." },
     ],
   },
   {

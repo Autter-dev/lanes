@@ -23,7 +23,7 @@ const releases = 'https://github.com/Autter-dev/lanes/releases';
 
 // The version people get. When a release ships, set its version here and live to true.
 export const release = {
-  version: '0.0.5',
+  version: '0.0.6',
   live: true,
   page: `${releases}/latest`,
   file: (name: string) => `${releases}/download/v${release.version}/${name}`,
