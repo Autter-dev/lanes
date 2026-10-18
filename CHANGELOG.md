@@ -8,7 +8,7 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-18
 
-- `17:02` **Added**: `laned`, the daemon, keeps the terminal app live, and `lane daemon` shows, starts and stops it.
+- `17:02` **Added**: `laned`, the daemon, keeps the terminal app live, and `lane daemon` shows, starts and stops it (`e1b9b5a`).
   - One runs per user. The terminal app starts it; agents' hooks, scripts and CI never do, and `LANE_DAEMON=0` stops the app from starting it too. It stops by itself after half an hour with nobody connected.
   - It reads each repo's lanes once, however many terminal apps watch, and sends them only what changed. The app's status bar says "daemon running". If the daemon goes away, the app carries on by reading Lanes' state itself.
   - It keeps nothing of its own, so killing it loses nothing. A daemon from another Lanes version is replaced when the app or `lane daemon start` connects.
