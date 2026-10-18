@@ -12,6 +12,8 @@ allow = [
   "ISC",
   "Zlib",
   "Unicode-3.0",
+  # Public-domain-like, with no conditions at all (interprocess's recvmsg and doctest-file).
+  "0BSD",
 ]
 confidence-threshold = 0.9
 # Our own crates are AGPL-3.0-only.

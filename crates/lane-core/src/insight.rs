@@ -5,13 +5,13 @@
 
 use crate::log::Entry;
 use crate::state::{Lane, LaneStats};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
 use std::path::Path;
 use std::time::Duration;
 
 /// What a lane looks like right now.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Details {
     /// Files changed, added or deleted since the lane was made (`git status`, untracked included).
     pub changed: usize,
@@ -23,7 +23,7 @@ pub struct Details {
     pub tests: Option<TestRun>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestRun {
     pub command: String,
     pub passed: bool,
@@ -109,7 +109,7 @@ pub fn last_tests(lane: &str, log: &[Entry]) -> Option<TestRun> {
 }
 
 /// What lanes saved, compared with a worktree plus its own install for each.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Savings {
     pub lanes: usize,
     /// Lanes with a record of what they cost (made with 0.0.7 or later).

@@ -1978,3 +1978,61 @@ fn telemetry_switches_by_value_and_says_what_it_sends() {
     assert_eq!(bad.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&bad.stderr).contains("lane telemetry off"));
 }
+
+// ---------- The daemon ----------
+
+#[test]
+fn lane_daemon_starts_reports_and_stops_laned() {
+    let dir = config_dir("daemon");
+    let laned = PathBuf::from(env!("CARGO_BIN_EXE_lane"))
+        .with_file_name(format!("laned{}", std::env::consts::EXE_SUFFIX));
+    if !laned.is_file() {
+        eprintln!(
+            "skipped: laned isn't built next to lane (run `cargo build` or `cargo test --all`)"
+        );
+        return;
+    }
+    // Stop it however the test ends.
+    struct Stop(PathBuf);
+    impl Drop for Stop {
+        fn drop(&mut self) {
+            let _ = lane(&self.0, &["daemon", "stop"]);
+        }
+    }
+    let _stop = Stop(dir.clone());
+
+    let before = json(&lane(&dir, &["daemon", "status", "--json"]));
+    assert_eq!(before["running"], false);
+    let text = String::from_utf8_lossy(&lane(&dir, &["daemon"]).stdout).into_owned();
+    assert!(text.contains("laned isn't running"), "{text}");
+    assert!(text.contains("lane daemon start"), "{text}");
+
+    let started = json(&lane(&dir, &["daemon", "start", "--json"]));
+    assert_eq!(started["running"], true);
+    assert_eq!(started["version"], env!("CARGO_PKG_VERSION"));
+    let again = json(&lane(&dir, &["daemon", "start", "--json"]));
+    assert_eq!(again["pid"], started["pid"], "a second start leaves it be");
+
+    let doctor = json(&lane(&dir, &["doctor", "--json"]));
+    let check = doctor["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == "daemon")
+        .unwrap()
+        .clone();
+    assert_eq!(check["status"], "ok", "{check}");
+
+    let stopped = json(&lane(&dir, &["daemon", "stop", "--json"]));
+    assert_eq!(
+        (stopped["running"].clone(), stopped["stopped"].clone()),
+        (false.into(), true.into())
+    );
+    let twice = lane(&dir, &["daemon", "stop"]);
+    assert!(twice.status.success());
+    assert!(String::from_utf8_lossy(&twice.stdout).contains("wasn't running"));
+
+    let bad = lane(&dir, &["daemon", "restart"]);
+    assert_eq!(bad.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&bad.stderr).contains("lane daemon start"));
+}

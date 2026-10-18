@@ -58,13 +58,14 @@ pub fn run_onboarding(input: onboarding::Input) -> io::Result<onboarding::Outcom
 }
 
 /// Run the home screen until the user quits or asks for setup again. The lanes stay live: a
-/// watcher sends a snapshot whenever something changes, and the screen redraws only then (or on
-/// a key or a resize). Making and removing a lane run in the background, with their output in
-/// Lanes' log rather than on the screen.
-pub fn run_home(input: home::Input) -> io::Result<home::Outcome> {
+/// snapshot arrives whenever something changes (from `laned` when `daemon` allows starting it,
+/// otherwise from a watcher here), and the screen redraws only then (or on a key or a resize).
+/// Making and removing a lane run in the background, with their output in Lanes' log rather
+/// than on the screen.
+pub fn run_home(input: home::Input, daemon: bool) -> io::Result<home::Outcome> {
     let root = input.repo.as_ref().map(|r| r.root.clone());
     let mut app = home::Home::new(input);
-    let watch = feed::watch(root.clone(), Duration::from_secs(2));
+    let watch = feed::watch(root.clone(), Duration::from_secs(2), daemon);
     let (done_tx, done_rx) = mpsc::channel::<String>();
     let was_quiet = lane_core::log::quiet();
     lane_core::log::set_quiet(true);

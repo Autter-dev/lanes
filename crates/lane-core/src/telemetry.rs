@@ -255,8 +255,9 @@ fn send(url: &str, body: &str) -> bool {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(CREATE_NO_WINDOW);
-        keep_std_handles_to_ourselves();
     }
+    // Otherwise, on Windows, curl would hold `lane`'s output open for up to a second.
+    crate::process::keep_std_handles_to_ourselves();
     let Ok(mut child) = cmd.spawn() else {
         return false;
     };
@@ -265,29 +266,6 @@ fn send(url: &str, body: &str) -> bool {
     }
     // Dropping `child` doesn't stop it: curl finishes (or gives up after 1 s) on its own.
     true
-}
-
-/// Windows hands every inheritable handle to a new process, so curl would hold on to the pipes
-/// `lane`'s output goes to, and whoever reads them (an agent's hook runner, a script) would wait
-/// for curl. Our own standard handles stop being inheritable; nothing runs after the send.
-#[cfg(windows)]
-fn keep_std_handles_to_ourselves() {
-    use windows_sys::Win32::Foundation::{
-        HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, SetHandleInformation,
-    };
-    use windows_sys::Win32::System::Console::{
-        GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
-    };
-    for which in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
-        // SAFETY: GetStdHandle has no preconditions; SetHandleInformation only changes a flag
-        // on a handle this process owns, and is skipped for missing or invalid handles.
-        unsafe {
-            let handle = GetStdHandle(which);
-            if !handle.is_null() && handle != INVALID_HANDLE_VALUE {
-                SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
-            }
-        }
-    }
 }
 
 #[cfg(test)]

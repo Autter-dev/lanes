@@ -14,6 +14,7 @@ mod hook;
 
 use lane_core::agents;
 use lane_core::config::Config;
+use lane_core::daemon;
 use lane_core::engine::{self, Made, Repo};
 use lane_core::env::Env;
 use lane_core::error::ErrorKind;
@@ -48,6 +49,7 @@ Commands:
   doctor     Check what could stop lanes working, and say how to fix it
   logs       Show what Lanes did: lanes made and removed, agents' hooks, installs
   telemetry  Show or switch the anonymous install count (on, off, status)
+  daemon     Show, start or stop laned, which keeps the terminal app live
 
 Start in a repo:
   lane init                            find your stack and write lane.toml
@@ -236,6 +238,26 @@ Options:
   -h, --help      Show this help
 ";
 
+const DAEMON_HELP: &str = "\
+lane daemon: laned, the Lanes daemon
+
+Usage: lane daemon [status|start|stop] [--json]
+
+laned runs in the background, one per user, and keeps the terminal app live: it reads each
+repo's lanes once and sends every open app what changed. The terminal app starts it, and it
+stops by itself after half an hour with nobody connected. Nothing needs it: every command works
+without it, and stopping it loses nothing. Agents' hooks, scripts and CI never start it, and
+LANE_DAEMON=0 keeps the terminal app from starting it too.
+
+  status   whether it's running, since when, and who's connected (the default)
+  start    start it, unless it's running; a laned from another Lanes version is replaced
+  stop     stop it, if it's running
+
+Options:
+  --json       Print {\"running\": ..., \"version\": ..., \"pid\": ..., \"uptime_secs\": ...}
+  -h, --help   Show this help
+";
+
 const TELEMETRY_HELP: &str = "\
 lane telemetry: the anonymous install count
 
@@ -296,6 +318,7 @@ fn main() -> ExitCode {
         Some("doctor") => doctor(&args[1..]),
         Some("logs") => run("logs", &args[1..], logs),
         Some("telemetry") => run("telemetry", &args[1..], telemetry),
+        Some("daemon") => run("daemon", &args[1..], daemon_command),
         Some(other) => report(
             None,
             &Error::usage(format!("unknown command `{other}`"))
@@ -1257,6 +1280,125 @@ fn logs(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// `lane daemon [status|start|stop]`. Starting and stopping are safe to retry: each says what's
+/// true afterwards, whatever it was before.
+fn daemon_command(args: &[String]) -> Result<()> {
+    let (common, rest) = args::split(args)?;
+    let mut action: Option<&str> = None;
+    for arg in &rest {
+        match arg.as_str() {
+            "-h" | "--help" => {
+                print!("{DAEMON_HELP}");
+                return Ok(());
+            }
+            a @ ("status" | "start" | "stop") if action.is_none() => action = Some(a),
+            s if s.starts_with('-') => return Err(unknown_option("daemon", s)),
+            s => {
+                return Err(Error::usage(format!("unexpected `{s}`"))
+                    .hint("Use `lane daemon status`, `lane daemon start` or `lane daemon stop`."));
+            }
+        }
+    }
+    let at = daemon::Endpoint::current()?;
+    let failed = |what: &str, e: std::io::Error| {
+        Error::new(ErrorKind::Failure, format!("couldn't {what} laned ({e})"))
+            .hint("Run `lane logs` to see what laned said, or run `laned` in a terminal to watch it start.")
+    };
+    let mut stopped = None;
+    let client = match action.unwrap_or("status") {
+        "start" => {
+            let laned = daemon::laned_path().ok_or_else(|| {
+                Error::new(ErrorKind::Failure, "laned isn't installed next to lane").hint(
+                    "Install Lanes again (lanes.autter.dev/download); every way installs both programs.",
+                )
+            })?;
+            let client = daemon::connect_or_start(&at, &laned).map_err(|e| failed("start", e))?;
+            if client.started {
+                lane_core::log::info("daemon", format!("started laned (pid {})", client.pid))
+                    .write();
+            }
+            Some(client)
+        }
+        "stop" => {
+            let was = daemon::stop(&at).map_err(|e| failed("stop", e))?;
+            if was {
+                lane_core::log::info("daemon", "stopped laned").write();
+            }
+            stopped = Some(was);
+            None
+        }
+        _ => daemon::Client::connect(&at).ok(),
+    };
+    let status = match client {
+        Some(mut c) => Some(c.status().map_err(|e| failed("ask", e))?),
+        None => None,
+    };
+    let uptime = status.as_ref().map(|s| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64 - s.started)
+            .unwrap_or_default()
+            .max(0)
+    });
+
+    if common.json {
+        let mut out = serde_json::json!({
+            "running": status.is_some(),
+            "endpoint": at.describe(),
+        });
+        if let (Some(s), Some(up)) = (&status, uptime) {
+            out["version"] = s.version.clone().into();
+            out["pid"] = s.pid.into();
+            out["uptime_secs"] = up.into();
+            // Not counting this command's own connection.
+            out["clients"] = s.clients.saturating_sub(1).into();
+            out["watching"] = s.watching.into();
+        }
+        if let Some(was) = stopped {
+            out["stopped"] = was.into();
+        }
+        print_json(&out);
+        return Ok(());
+    }
+
+    match (&status, stopped) {
+        (Some(s), _) => {
+            let up = uptime.unwrap_or_default();
+            let others = s.clients.saturating_sub(1);
+            println!(
+                "laned {} is running (pid {}), up {}, with {} other client{}.",
+                s.version,
+                s.pid,
+                lane_core::insight::duration(up as u64 * 1000),
+                others,
+                if others == 1 { "" } else { "s" }
+            );
+            if s.version != VERSION {
+                println!(
+                    "It's from another Lanes version ({VERSION} here): `lane daemon start` replaces it."
+                );
+            }
+            println!("It listens at {}.", at.describe());
+        }
+        (None, Some(true)) => {
+            println!("Stopped laned. Nothing was lost: everything it knew is in Lanes' state.")
+        }
+        (None, Some(false)) => println!("laned wasn't running."),
+        (None, None) => {
+            println!("laned isn't running. Nothing needs it: every command works without it.");
+            println!();
+            print!(
+                "{}",
+                next::render(&[next::Step {
+                    run: "lane daemon start".into(),
+                    why: "start it now; the terminal app starts it too".into(),
+                }])
+            );
+        }
+    }
+    Ok(())
+}
+
 /// `lane telemetry [status|on|off]`: what the install count sends from this machine, and the
 /// switch. Switching is safe to retry: it sets the value, it doesn't toggle.
 fn telemetry(args: &[String]) -> Result<()> {
@@ -1469,7 +1611,7 @@ fn run_home(env: &Env, mut config: Config) -> ExitCode {
                 Vec::new()
             },
         };
-        let (outcome, telemetry) = match lane_tui::run_home(input) {
+        let (outcome, telemetry) = match lane_tui::run_home(input, daemon::may_start(env)) {
             Ok(home::Outcome::Quit { telemetry }) => (None, telemetry),
             Ok(home::Outcome::Setup { telemetry }) => (Some(()), telemetry),
             Err(e) => {

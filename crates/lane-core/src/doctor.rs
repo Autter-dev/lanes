@@ -226,19 +226,40 @@ fn count(n: usize) -> String {
     }
 }
 
-/// `laned` ships with `lane`. Nothing needs it running yet: every command works without it.
+/// `laned` ships with `lane`. Nothing needs it running: the terminal app starts it, and every
+/// command works without it. Asking a running one changes nothing.
 fn daemon() -> Check {
-    let name = format!("laned{}", std::env::consts::EXE_SUFFIX);
-    let beside = std::env::current_exe()
+    let running = crate::daemon::Endpoint::current()
         .ok()
-        .and_then(|p| p.parent().map(|d| d.join(&name)))
-        .is_some_and(|p| p.is_file());
-    if beside || agents::on_path("laned") {
+        .and_then(|at| crate::daemon::Client::connect(&at).ok());
+    if let Some(client) = running {
+        return if client.version == crate::VERSION {
+            Check::new(
+                "daemon",
+                "Daemon",
+                Status::Ok,
+                format!("laned {} is running (pid {})", client.version, client.pid),
+            )
+        } else {
+            Check::new(
+                "daemon",
+                "Daemon",
+                Status::Warn,
+                format!(
+                    "laned {} is running, from another Lanes version ({} here)",
+                    client.version,
+                    crate::VERSION
+                ),
+            )
+            .hint("Run `lane daemon start` to replace it with this version's.")
+        };
+    }
+    if crate::daemon::laned_path().is_some() {
         Check::new(
             "daemon",
             "Daemon",
             Status::Info,
-            "laned is installed; no command needs it running yet",
+            "laned is installed and not running; the terminal app starts it",
         )
     } else {
         Check::new(

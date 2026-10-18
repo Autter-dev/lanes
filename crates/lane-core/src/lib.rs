@@ -3,6 +3,7 @@
 pub mod agents;
 pub mod clone;
 pub mod config;
+pub mod daemon;
 pub mod detect;
 pub mod doctor;
 pub mod engine;
@@ -14,8 +15,10 @@ pub mod lane_env;
 pub mod log;
 pub mod machine;
 pub mod next;
+pub mod process;
 pub mod project;
 pub mod repo;
+pub mod snapshot;
 pub mod state;
 pub mod telemetry;
 

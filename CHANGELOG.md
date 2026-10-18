@@ -8,6 +8,13 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-18
 
+- `17:02` **Added**: `laned`, the daemon, keeps the terminal app live, and `lane daemon` shows, starts and stops it.
+  - One runs per user. The terminal app starts it; agents' hooks, scripts and CI never do, and `LANE_DAEMON=0` stops the app from starting it too. It stops by itself after half an hour with nobody connected.
+  - It reads each repo's lanes once, however many terminal apps watch, and sends them only what changed. The app's status bar says "daemon running". If the daemon goes away, the app carries on by reading Lanes' state itself.
+  - It keeps nothing of its own, so killing it loses nothing. A daemon from another Lanes version is replaced when the app or `lane daemon start` connects.
+  - It listens on a local socket (a named pipe on Windows). On macOS and Linux it only talks to the same user's processes. A second copy leaves at once, and `lane doctor` reports whether it's running.
+  - Making and removing lanes don't go through it yet: they work as before, safely, with or without it.
+- `17:02` **Fixed**: the README listed `lane telemetry` under commands coming next; it shipped in 0.0.7.
 - `14:58` **Changed**: the website offers 0.0.7. The guide shows the guided `lane init` with its Y/n questions, the terminal app and what lanes saved, `lane doctor --fix`, and what the install count sends with `lane telemetry`. (`4e7be85`)
 
 ## 0.0.7 (2026-10-18)
