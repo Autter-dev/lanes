@@ -8,7 +8,7 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-18
 
-- `12:09` **Added**: the terminal app's home screen shows your lanes live, and what they saved.
+- `12:09` **Added**: the terminal app's home screen shows your lanes live, and what they saved (`677d880`).
   - **Every lane** with its agent (Claude Code, Codex, Cursor), status (running when its app answers on its port), URL, changed files, last test run through `lane exec`, and the extra disk it takes. Narrow terminals drop the agent and tests columns.
   - **Saved by lanes:** disk as two bars on one scale, a worktree plus its own install for each lane against what the lanes really take, plus the installs lanes skipped and the time that saved. Lanes measures each new lane as it makes it, so lanes made before this show nothing rather than a guess.
   - **A status bar:** sign-in, the daemon, cores, apps running and disk saved. The daemon doesn't run yet, so the bar says so, and the screen watches Lanes' state instead, redrawing only when something changed.
