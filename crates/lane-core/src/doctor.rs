@@ -3,6 +3,7 @@
 //! aren't set up, this repo's Git hook, lanes whose folders have gone, the state store, the
 //! daemon, and errors in the log. Each check says what to do next; nothing is changed.
 
+use crate::agents::copilot::{self, Hooks};
 use crate::agents::{self, GitHook, user};
 use crate::config::Config;
 use crate::engine::{Repo, norm};
@@ -92,6 +93,43 @@ fn agent_hooks() -> Check {
             Status::Ok,
             format!("{} put their work in lanes", names(&ready)),
         );
+    }
+    // Copilot's hooks from Lanes 0.0.8, or ones whose `lane` has gone, get their own words.
+    let copilot = not
+        .iter()
+        .any(|a| **a == user::COPILOT)
+        .then(|| user::copilot_dir().ok().map(|d| copilot::hooks_state(&d)))
+        .flatten();
+    let issue = match &copilot {
+        Some(Hooks::Old) => Some(
+            "GitHub Copilot has the hooks from Lanes 0.0.8, which on Windows make the Copilot CLI turn down every tool once `lane` can't be found".to_string(),
+        ),
+        Some(Hooks::Gone(lane)) => Some(format!(
+            "GitHub Copilot's hooks run {}, which isn't there any more, so they do nothing",
+            norm(lane).display()
+        )),
+        _ => None,
+    };
+    if let Some(issue) = issue {
+        let rest: Vec<&user::Agent> = not
+            .iter()
+            .copied()
+            .filter(|a| *a != &user::COPILOT)
+            .collect();
+        return match rest.is_empty() {
+            true => Check::new("agent-hooks", "Agents in lanes", Status::Warn, issue)
+                .hint("Run `lane setup --yes` to update Copilot's hooks, once for this machine."),
+            false => Check::new(
+                "agent-hooks",
+                "Agents in lanes",
+                Status::Warn,
+                format!("{issue}; {} not set up", names(&rest)),
+            )
+            .hint(format!(
+                "Run `lane setup --yes` to update Copilot's hooks and put {} in lanes, once for this machine.",
+                names(&rest)
+            )),
+        };
     }
     let summary = match ready.is_empty() {
         true => format!("{} not set up", names(&not)),

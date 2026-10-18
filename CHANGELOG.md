@@ -8,6 +8,10 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-18
 
+- `18:35` **Fixed**: on Windows, GitHub Copilot's hooks do nothing when `lane` can't be found, so the Copilot CLI no longer turns down every tool after Lanes is removed (the known issue in 0.0.8).
+  - They run `lane` by the absolute path `lane setup` found, so an editor whose PATH is from before the install still finds it, and they work the same whether Copilot runs them in PowerShell or cmd.exe. A path that one of those shells would read differently falls back to `lane.exe` on PATH.
+  - VS Code on Windows now turns down copies of the repo too: PowerShell had turned the hook's exit 2 into 1, which VS Code takes as a warning.
+  - `lane setup`, the welcome and `lane doctor --fix` notice hooks from 0.0.8 and write them again. `lane doctor` says when Copilot's hooks are from 0.0.8, or run a `lane` that isn't there any more, and that `lane setup --yes` updates them. `lane setup --yes --agents off` still takes the file away, and macOS and Linux keep the hooks they had. (`8ae07c3`)
 - `17:58` **Changed**: the website offers 0.0.8. The guide shows Gemini CLI and GitHub Copilot making lanes, `lane mcp` for agents' tools, and `laned` behind the terminal app. (`b029a36`)
 
 ## 0.0.8 (2026-10-18)
