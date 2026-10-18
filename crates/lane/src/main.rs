@@ -11,6 +11,7 @@
 mod args;
 mod guided;
 mod hook;
+mod mcp;
 
 use lane_core::agents;
 use lane_core::config::Config;
@@ -48,6 +49,7 @@ Commands:
   doctor     Check what could stop lanes working, and say how to fix it
   logs       Show what Lanes did: lanes made and removed, agents' hooks, installs
   telemetry  Show or switch the anonymous install count (on, off, status)
+  mcp        Let agents read this repo and make lanes, through MCP tools
 
 Start in a repo:
   lane init                            find your stack and write lane.toml
@@ -296,6 +298,7 @@ fn main() -> ExitCode {
         Some("doctor") => doctor(&args[1..]),
         Some("logs") => run("logs", &args[1..], logs),
         Some("telemetry") => run("telemetry", &args[1..], telemetry),
+        Some("mcp") => run("mcp", &args[1..], mcp::mcp),
         Some(other) => report(
             None,
             &Error::usage(format!("unknown command `{other}`"))
