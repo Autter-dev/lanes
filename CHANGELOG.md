@@ -8,7 +8,7 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-18
 
-- `13:19` **Added**: the anonymous install count, and `lane telemetry` to see and switch it.
+- `13:19` **Added**: the anonymous install count, and `lane telemetry` to see and switch it (`04e5ef2`).
   - Once Lanes is set up (the welcome or `lane setup`), and once after each upgrade, it sends exactly what the welcome lists: a random install id, the Lanes version, the OS and CPU type, and how Lanes was installed (Homebrew, npm, Scoop, winget, cargo or the install scripts). Nothing is sent before the setting is chosen.
   - Never from CI, and never with `lane telemetry off`, `LANE_TELEMETRY=0` or `DO_NOT_TRACK=1`. It's sent in the background with a 1-second limit, and no command, or anything reading its output, waits for it.
   - `lane telemetry` shows exactly what this machine sends; `lane telemetry on` and `off` switch it, and `--json` prints it for scripts.
