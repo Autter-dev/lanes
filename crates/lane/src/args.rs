@@ -48,7 +48,8 @@ fn split_with(args: &[String], env_request_id: Option<String>) -> Result<(Common
     Ok((common, rest))
 }
 
-fn check_request_id(id: &str) -> Result<()> {
+/// Request ids are kept short and plain, as they're stored and printed.
+pub fn check_request_id(id: &str) -> Result<()> {
     let ok = !id.is_empty()
         && id.len() <= 128
         && id

@@ -237,6 +237,7 @@ Prefer a Claude Code plugin? It carries the same hooks and skill:
 | `lane rm <name>` | Removes a lane and frees its ports |
 | `lane doctor` | Checks what could stop lanes working (Git, clones, `lane` on PATH, agents' hooks, the Git hook, lanes whose folders have gone) and says how to fix each. `--fix` fixes what Lanes can, asking Y/n first |
 | `lane logs [<lane>]` | Shows what Lanes did: lanes made and removed, agents' hooks, dependency installs. Kept in a file, never in an agent's output |
+| `lane mcp` | An MCP server over stdio, so agents read the repo and make lanes through tools: `repo.read`, `repo.outline`, `repo.grep`, `lane.new` and `lane.list`. Add it to Claude Code with `claude mcp add lanes -- lane mcp` |
 | `lane hook <agent> <event>` | What agents' hooks run, for Claude Code, Codex, Cursor and Git (set up by `lane setup` and `lane init`) |
 | `lane telemetry` | Shows exactly what the anonymous install count sends from your machine; `lane telemetry off` turns it off (so do `LANE_TELEMETRY=0` and `DO_NOT_TRACK=1`) |
 | `lane daemon` | Shows whether `laned` is running; `start` and `stop` it. While it runs it makes every change to lanes, one at a time per repo, and keeps the terminal app live. Nothing needs it: stopping it loses nothing |

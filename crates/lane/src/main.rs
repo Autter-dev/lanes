@@ -11,6 +11,7 @@
 mod args;
 mod guided;
 mod hook;
+mod mcp;
 
 use lane_core::agents;
 use lane_core::config::Config;
@@ -51,6 +52,7 @@ Commands:
   logs       Show what Lanes did: lanes made and removed, agents' hooks, installs
   telemetry  Show or switch the anonymous install count (on, off, status)
   daemon     Show, start or stop laned, which keeps the terminal app live
+  mcp        Let agents read this repo and make lanes, through MCP tools
 
 Start in a repo:
   lane init                            find your stack and write lane.toml
@@ -324,6 +326,7 @@ fn main() -> ExitCode {
         Some("logs") => run("logs", &args[1..], logs),
         Some("telemetry") => run("telemetry", &args[1..], telemetry),
         Some("daemon") => run("daemon", &args[1..], daemon_command),
+        Some("mcp") => run("mcp", &args[1..], mcp::mcp),
         Some(other) => report(
             None,
             &Error::usage(format!("unknown command `{other}`"))
