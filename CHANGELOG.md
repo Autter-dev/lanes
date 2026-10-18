@@ -6,6 +6,10 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ## Unreleased
 
+### 2026-10-18
+
+- `17:58` **Changed**: the website offers 0.0.8. The guide shows Gemini CLI and GitHub Copilot making lanes, `lane mcp` for agents' tools, and `laned` behind the terminal app.
+
 ## 0.0.8 (2026-10-18)
 
 **Five agents, Lanes' own tools for them, and a daemon that keeps it all in step.** Gemini CLI and GitHub Copilot now put their work in lanes on their own, `lane mcp` gives agents tools to read the repo and make lanes, and `laned` makes every change to lanes and keeps the terminal app live. Still a preview.

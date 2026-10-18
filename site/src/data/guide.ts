@@ -147,6 +147,8 @@ export const steps: Step[] = [
       { kind: 'note', text: 'Worktrees are an experimental Gemini CLI feature: switch them on with `"experimental": { "worktrees": true }` in its settings. When the session starts, the worktree becomes a lane named `gemini-<name>`, ready to run, and Gemini is told which lane it\'s in. Gemini CLI reads the note in `AGENTS.md` too.' },
       { kind: 'note', text: 'GitHub Copilot, in the Copilot CLI or VS Code\'s agent mode: a session that starts in a worktree Copilot made becomes a lane named `copilot-<folder>` the same way. Both read Lanes\' hooks from `~/.copilot/hooks`, and a copy of the repo is turned down with the reason shown to the model.' },
       { kind: 'note', text: 'Any other tool: a worktree it makes with Git becomes a lane, dependencies and all, through the Git hook `lane init` adds (step 6).' },
+      { kind: 'cmd', cmd: 'claude mcp add lanes -- lane mcp', label: 'Optional: give agents Lanes\' tools' },
+      { kind: 'note', text: '`lane mcp` is an MCP server: agents read files, outlines and search results, and make and list lanes, through tools instead of shell commands. Any MCP client can run it. Lanes adds it to no agent\'s settings by itself.' },
     ],
   },
   {
@@ -165,6 +167,7 @@ export const steps: Step[] = [
       { kind: 'note', text: 'To put the port in an argument, write `\'$PORT\'` in single quotes and Lanes fills it in: `lane exec fix-auth -- pnpm dev --port \'$PORT\'`.' },
       { kind: 'cmd', cmd: 'lane', label: 'Or watch them all, live' },
       { kind: 'note', text: 'The terminal app lists every lane with its agent, status, URL, changed files, last test run and extra disk, and updates as things change. Under the list, "Saved by lanes" compares the disk your lanes take with a worktree plus an install for each, and counts the installs they skipped. `?` shows the keys, and `:` or Ctrl-K opens the commands: `n` makes a lane, `d` removes one, `o` opens its app.' },
+      { kind: 'note', text: "It starts `laned`, Lanes' background daemon, which keeps the app live and makes every change to lanes, one at a time per repo. Nothing needs it, and stopping it loses nothing: `lane daemon status` shows it, and `lane daemon stop` stops it." },
     ],
   },
   {
