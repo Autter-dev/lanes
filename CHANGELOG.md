@@ -8,7 +8,7 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-18
 
-- `17:58` **Changed**: the website offers 0.0.8. The guide shows Gemini CLI and GitHub Copilot making lanes, `lane mcp` for agents' tools, and `laned` behind the terminal app.
+- `17:58` **Changed**: the website offers 0.0.8. The guide shows Gemini CLI and GitHub Copilot making lanes, `lane mcp` for agents' tools, and `laned` behind the terminal app. (`b029a36`)
 
 ## 0.0.8 (2026-10-18)
 
