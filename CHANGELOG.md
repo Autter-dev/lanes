@@ -6,6 +6,28 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ## Unreleased
 
+## 0.0.7 (2026-10-18)
+
+**Setup that does the work for you, and your lanes live in the terminal app.** `lane init` and `lane doctor --fix` now set things up themselves and ask Y/n where the choice is yours, and `lane` shows every lane live, with what lanes saved you. Still a preview.
+
+```sh
+lane init            # set up this repo, asking Y/n before each step, then say what's left
+lane doctor --fix    # fix what Lanes can fix by itself, asking first
+lane                 # every lane, live, and what lanes saved you
+lane telemetry       # exactly what the anonymous install count sends from your machine
+```
+
+In this version:
+- `lane init` in a terminal walks through each step and asks before it: `lane.toml` for your team, putting this machine's agents in lanes, the Git hook, the `AGENTS.md` note, Claude Code for this repo, and installing dependencies ahead of time so the first lane is ready in seconds. It ends with what's left for you to do. `--yes` takes every default, and agents, scripts and CI are never asked anything.
+- `lane doctor --fix` fixes agents not in lanes yet, this repo's Git hook and lanes whose folders have gone, asking first. The install scripts offer to set Lanes up when they finish.
+- The terminal app lists every lane with its agent, status (running when its app answers), URL, changed files, last test run and extra disk, and updates as things change. "Saved by lanes" compares the disk lanes take with a worktree plus an install for each, and counts the installs they skipped. `?` shows the keys, `:` or Ctrl-K opens a command palette, `n` makes a lane and `d` removes one.
+- The anonymous install count is sent from this version on: once Lanes is set up and once after each upgrade, a random install id, the version, your OS and CPU type, and how you installed it. Nothing else, never from CI, and off with `lane telemetry off` or `DO_NOT_TRACK=1`. It goes to a small open-source service in this repo (`services/install-count`) that keeps no IP addresses.
+
+Not yet:
+- No background daemon: the terminal app reads Lanes' state every two seconds instead, and its status bar says so.
+- Lanes made before 0.0.7 show no savings, because Lanes measures each lane as it makes it.
+- No checkpoints or undo, no promote to a pull request, and no database per lane.
+
 ### 2026-10-18
 
 - `14:34` **Added**: the install count's backend is live at `https://lanes-count.autter.dev`, on the D1 database `lanes-install-count`. Checked end to end: a count sent by `lane` arrived with exactly its five fields, and `DELETE` removed it.
