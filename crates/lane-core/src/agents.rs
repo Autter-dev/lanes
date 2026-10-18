@@ -713,12 +713,60 @@ fn setup_husky(repo: &Repo, husky: &str) -> Result<Change> {
     })
 }
 
+/// Where the Git hook that turns other tools' worktrees into lanes stands, for `lane doctor`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GitHook {
+    /// In place and current, in this file.
+    Ready(PathBuf),
+    /// Lanes' hook from an older version; `lane init` replaces it.
+    Old(PathBuf),
+    /// Not set up. `lane init` adds it, or says what to add under lefthook or `core.hooksPath`.
+    Missing,
+}
+
+/// Look for Lanes' post-checkout hook wherever this repo's hooks live, writing nothing.
+pub fn git_hook(repo: &Repo) -> Result<GitHook> {
+    for name in LEFTHOOK_CONFIGS {
+        for name in [name.to_string(), name.replace("lefthook", "lefthook-local")] {
+            let path = repo.root.join(&name);
+            if read_or_empty(&path)?.contains(HOOK_LINE_MARKER) {
+                return Ok(GitHook::Ready(path));
+            }
+        }
+    }
+    if let Some(custom) = hooks_path(repo)? {
+        let folder = match Path::new(&custom).has_root() {
+            true => PathBuf::from(&custom),
+            false => repo.root.join(&custom),
+        };
+        // Husky 9 runs `.husky/post-checkout` from `.husky/_`.
+        let husky = folder.parent().map(|p| p.join("post-checkout"));
+        for path in std::iter::once(folder.join("post-checkout")).chain(husky) {
+            if read_or_empty(&path)?.contains(HOOK_LINE_MARKER) {
+                return Ok(GitHook::Ready(path));
+            }
+        }
+        return Ok(GitHook::Missing);
+    }
+    let path = crate::git::git_path(&repo.root, "hooks/post-checkout")?;
+    let text = read_or_empty(&path)?;
+    Ok(
+        if text == POST_CHECKOUT || text.contains(HOOK_LINE_MARKER) {
+            GitHook::Ready(path)
+        } else if text.contains(HOOK_MARKER) {
+            GitHook::Old(path)
+        } else {
+            GitHook::Missing
+        },
+    )
+}
+
 /// Whether Claude Code is in use here: the repo has Claude Code files, or `claude` is on PATH.
 pub fn uses_claude(repo: &Repo) -> bool {
     repo.root.join(".claude").is_dir() || repo.root.join("CLAUDE.md").is_file() || on_path("claude")
 }
 
-fn on_path(program: &str) -> bool {
+pub(crate) fn on_path(program: &str) -> bool {
     let exts: &[&str] = if cfg!(windows) {
         &[".exe", ".cmd", ".ps1", ""]
     } else {

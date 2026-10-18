@@ -98,7 +98,7 @@ impl Fix {
 }
 
 impl Check {
-    fn new(
+    pub(crate) fn new(
         id: &'static str,
         label: &'static str,
         status: Status,
@@ -113,7 +113,7 @@ impl Check {
             fix: None,
         }
     }
-    fn hint(mut self, hint: impl Into<String>) -> Check {
+    pub(crate) fn hint(mut self, hint: impl Into<String>) -> Check {
         self.hint = Some(hint.into());
         self
     }

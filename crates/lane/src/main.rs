@@ -43,6 +43,8 @@ Commands:
   env      Print a lane's variables (PORT, LANE_URL, ...)
   rm       Remove a lane
   adopt    Turn a worktree you already have into a lane
+  doctor   Check what could stop lanes working, and say how to fix it
+  logs     Show what Lanes did: lanes made and removed, agents' hooks, installs
 
 Start in a repo:
   lane init                            find your stack and write lane.toml
@@ -185,6 +187,38 @@ Options:
   -h, --help    Show this help
 ";
 
+const DOCTOR_HELP: &str = "\
+lane doctor: check what could stop lanes working, and say how to fix it
+
+Usage: lane doctor [--json]
+
+Everything `lane setup` checks about this machine (Git, whether this disk clones files, disk
+space), and then: that `lane` is on PATH so agents' hooks can run it, which agents put their work
+in lanes, this repo's Git hook, lanes whose folders have gone, the daemon, and errors in the log.
+Each problem says what to do next. Nothing is changed. Exits 1 when something must be fixed.
+
+Options:
+  --json       Print {\"healthy\": ..., \"checks\": [...]}
+  -h, --help   Show this help
+";
+
+const LOGS_HELP: &str = "\
+lane logs: what Lanes did, newest last
+
+Usage: lane logs [<lane>] [-n N] [--path] [--json]
+
+Lanes keeps a log of what changed lanes, what agents' hooks did and how dependency installs
+went. It's never written into an agent's output, so look here when a hook or an install went
+wrong. Times are UTC.
+
+Options:
+  <lane>          Only entries about this lane
+  -n, --lines N   The last N entries (default 30)
+  --path          Print the log file's path and nothing else
+  --json          Print {\"path\": ..., \"entries\": [...]}
+  -h, --help      Show this help
+";
+
 const SETUP_HELP: &str = "\
 lane setup: check this machine and choose your settings
 
@@ -227,6 +261,8 @@ fn main() -> ExitCode {
         Some("env") => run("env", &args[1..], env_vars),
         Some("init") => run("init", &args[1..], init),
         Some("hook") => hook::hook(&args[1..]),
+        Some("doctor") => doctor(&args[1..]),
+        Some("logs") => run("logs", &args[1..], logs),
         Some(other) => report(
             None,
             &Error::usage(format!("unknown command `{other}`"))
@@ -246,6 +282,10 @@ fn run(name: &str, args: &[String], command: fn(&[String]) -> Result<()>) -> Exi
 
 /// Print an error: one JSON object on stdout with `--json`, otherwise a line on stderr.
 fn report(command: Option<&str>, e: &Error, json: bool) -> ExitCode {
+    // Usage mistakes aren't worth keeping; everything else is.
+    if e.kind != ErrorKind::Usage {
+        lane_core::log::error(command.unwrap_or("lane"), e.to_string()).write();
+    }
     if json {
         println!(
             "{}",
@@ -358,6 +398,18 @@ fn ports(l: &Lane) -> String {
 
 /// A note on stderr when a lane was copied rather than cloned: it works, but slower.
 fn copied_note(made: &Made) {
+    if made.clone.copied > 0 && lane_core::log::quiet() {
+        lane_core::log::warn(
+            "new",
+            format!(
+                "{} files were copied, not cloned: this disk can't clone files",
+                made.clone.copied
+            ),
+        )
+        .lane(&made.lane.name)
+        .write();
+        return;
+    }
     if made.clone.copied > 0 {
         let fs = match made.clone.filesystem.as_deref() {
             Some("ntfs") => "NTFS",
@@ -413,6 +465,23 @@ fn new(args: &[String]) -> Result<()> {
         common.request_id.as_deref(),
     )?;
     let total = started.elapsed().as_secs_f64();
+    lane_core::log::info(
+        "new",
+        format!(
+            "made the lane: {} files {} at {}",
+            made.clone.files,
+            if made.clone.copied == 0 {
+                "cloned"
+            } else {
+                "copied"
+            },
+            made.lane.path.display()
+        ),
+    )
+    .lane(&made.lane.name)
+    .repo(&repo.root)
+    .ms((total * 1000.0) as u64)
+    .write();
     let steps = next::in_lane(&repo, &made.lane);
     if common.json {
         let mut value = serde_json::to_value(&made).expect("lanes serialize");
@@ -492,6 +561,19 @@ fn rm(args: &[String]) -> Result<()> {
         keep_files,
         common.request_id.as_deref(),
     )?;
+    lane_core::log::info(
+        "rm",
+        match keep_files {
+            true => format!(
+                "forgot the lane; its folder stays at {}",
+                lane.path.display()
+            ),
+            false => "removed the lane and its folder".to_string(),
+        },
+    )
+    .lane(&lane.name)
+    .repo(&repo.root)
+    .write();
     let steps = next::after_rm(&repo, store.lanes(Some(&repo.root))?.len());
     if common.json {
         print_json(&serde_json::json!({ "removed": lane, "next": steps }));
@@ -553,6 +635,10 @@ fn adopt(args: &[String]) -> Result<()> {
     } else {
         None
     };
+    lane_core::log::info("adopt", format!("{} is a lane", lane.path.display()))
+        .lane(&lane.name)
+        .repo(&repo.root)
+        .write();
     let steps = next::in_lane(&repo, &lane);
     if common.json {
         print_json(&serde_json::json!({ "lane": lane, "ready": made_ready, "next": steps }));
@@ -665,6 +751,13 @@ fn exec_in(ours: &[String], command: &[String]) -> Result<u8> {
         .hint("Check that it's installed and on PATH.")
     })?;
     let code = exit_code(status);
+    lane_core::log::info(
+        "exec",
+        format!("`{}` exited with {code}", command.join(" ")),
+    )
+    .lane(&lane.name)
+    .ms(started.elapsed().as_millis() as u64)
+    .write();
     if common.json {
         print_json(&serde_json::json!({
             "lane": lane.name,
@@ -769,6 +862,26 @@ fn init(args: &[String]) -> Result<()> {
     } else {
         setup_agents(&repo)?
     };
+    if !print_only {
+        let changed: Vec<String> = setup
+            .iter()
+            .filter(|(_, c)| c.changed)
+            .map(|(w, _)| w.to_string())
+            .collect();
+        lane_core::log::info(
+            "init",
+            format!(
+                "{} lane.toml{}",
+                if write { "wrote" } else { "kept" },
+                match changed.is_empty() {
+                    true => String::new(),
+                    false => format!("; set up {}", changed.join(", ")),
+                }
+            ),
+        )
+        .repo(&repo.root)
+        .write();
+    }
     let claude = setup.iter().any(|(what, _)| *what == "claude");
     let mut to_add: Vec<String> = Vec::new();
     if write {
@@ -885,6 +998,126 @@ fn setup_agents(repo: &Repo) -> Result<Vec<(&'static str, agents::Change)>> {
     Ok(done)
 }
 
+/// `lane doctor`: every check, and exit 1 when something must be fixed.
+fn doctor(args: &[String]) -> ExitCode {
+    let json = args::wants_json(args);
+    for arg in args {
+        match arg.as_str() {
+            "--json" => {}
+            "-h" | "--help" => {
+                print!("{DOCTOR_HELP}");
+                return ExitCode::from(exit::OK);
+            }
+            s => return report(Some("doctor"), &unknown_option("doctor", s), json),
+        }
+    }
+    let checks = lane_core::doctor::run(&here());
+    let healthy = lane_core::doctor::healthy(&checks);
+    if json {
+        print_json(&serde_json::json!({ "healthy": healthy, "checks": checks }));
+    } else {
+        print_checks(&checks);
+        println!();
+        let fix = checks
+            .iter()
+            .filter(|c| c.status == machine::Status::Fail)
+            .count();
+        let warn = checks
+            .iter()
+            .filter(|c| c.status == machine::Status::Warn)
+            .count();
+        match (fix, warn) {
+            (0, 0) => println!("All good."),
+            (0, n) => println!(
+                "Nothing must be fixed. {n} thing{} worth a look (!).",
+                if n == 1 { "" } else { "s" }
+            ),
+            (n, _) => println!(
+                "{n} thing{} to fix (✗) before lanes work. Each says how.",
+                if n == 1 { "" } else { "s" }
+            ),
+        }
+    }
+    ExitCode::from(if healthy { exit::OK } else { exit::FAILURE })
+}
+
+/// `lane logs`: the log's last entries, oldest first.
+fn logs(args: &[String]) -> Result<()> {
+    let (common, rest) = args::split(args)?;
+    let (mut lane, mut lines, mut path_only) = (None, 30usize, false);
+    let mut it = rest.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "-h" | "--help" => {
+                print!("{LOGS_HELP}");
+                return Ok(());
+            }
+            "-n" | "--lines" => {
+                let v = value(&mut it, "--lines", "50")?;
+                lines = v.parse().map_err(|_| {
+                    Error::usage(format!("`{v}` isn't a number of lines"))
+                        .hint("Pass a whole number, like `--lines 50`.")
+                })?;
+            }
+            "--path" => path_only = true,
+            s if s.starts_with('-') => return Err(unknown_option("logs", s)),
+            s if lane.is_none() => lane = Some(s.to_string()),
+            s => {
+                return Err(Error::usage(format!("unexpected `{s}`"))
+                    .hint("`lane logs` takes one lane name, like `lane logs fix-auth`."));
+            }
+        }
+    }
+    let path = lane_core::log::path()?;
+    if path_only {
+        if common.json {
+            print_json(&serde_json::json!({ "path": path }));
+        } else {
+            println!("{}", path.display());
+        }
+        return Ok(());
+    }
+    let entries = lane_core::log::read(lines, lane.as_deref())?;
+    if common.json {
+        print_json(&serde_json::json!({ "path": path, "entries": entries }));
+        return Ok(());
+    }
+    if entries.is_empty() {
+        match &lane {
+            Some(l) => println!("Nothing logged about {l} yet."),
+            None => println!(
+                "Nothing logged yet. Lanes writes here when lanes change, agents' hooks run, or an install goes wrong."
+            ),
+        }
+        return Ok(());
+    }
+    let ev_w = entries
+        .iter()
+        .map(|e| e.event.len())
+        .max()
+        .unwrap_or(0)
+        .min(28);
+    for e in &entries {
+        let mark = match e.level {
+            lane_core::log::Level::Info => " ",
+            lane_core::log::Level::Warn => "!",
+            lane_core::log::Level::Error => "✗",
+        };
+        let at = e.at.replace('T', " ").trim_end_matches('Z').to_string();
+        let lane = e
+            .lane
+            .as_deref()
+            .map(|l| format!("{l}: "))
+            .unwrap_or_default();
+        let ms =
+            e.ms.map(|m| format!(" ({:.1} s)", m as f64 / 1000.0))
+                .unwrap_or_default();
+        println!("{mark} {at}  {:<ev_w$}  {lane}{}{ms}", e.event, e.message);
+    }
+    println!("\nFrom {} (UTC).", path.display());
+    Ok(())
+}
+
 fn fail(msg: impl std::fmt::Display) -> ExitCode {
     eprintln!("lane: {msg}");
     ExitCode::from(exit::FAILURE)
@@ -943,7 +1176,10 @@ fn run_onboarding(env: &Env, config: &mut Config) -> Result<bool, ExitCode> {
             config.agents = agents;
             config.save().map_err(fail)?;
             match agents::user::setup(agents) {
-                Ok(done) => print_agent_setup(&done, agents),
+                Ok(done) => {
+                    log_agent_setup(&done, agents);
+                    print_agent_setup(&done, agents)
+                }
                 Err(e) => eprintln!("lane: {e}"),
             }
             Ok(true)
@@ -1154,6 +1390,7 @@ fn setup(args: &[String], env: &Env) -> ExitCode {
             .unwrap_or_default();
         println!("Saved: install count {tele}. Settings are in {path}.");
         if let Some(done) = &agent_setup {
+            log_agent_setup(done, config.agents);
             print_agent_setup(done, config.agents);
         }
     } else {
@@ -1187,6 +1424,27 @@ fn agents_json(done: Option<&[(agents::user::Agent, Vec<agents::Change>)]>) -> s
     )
 }
 
+/// A log line per agent that putting agents in lanes changed.
+fn log_agent_setup(done: &[(agents::user::Agent, Vec<agents::Change>)], on: bool) {
+    for (agent, changes) in done.iter().filter(|(_, c)| c.iter().any(|c| c.changed)) {
+        let files: Vec<String> = changes
+            .iter()
+            .filter(|c| c.changed)
+            .map(|c| c.path.display().to_string())
+            .collect();
+        lane_core::log::info(
+            "setup",
+            format!(
+                "{} {}: {}",
+                agent.name,
+                if on { "set up" } else { "taken out" },
+                files.join(", ")
+            ),
+        )
+        .write();
+    }
+}
+
 /// What putting agents in lanes did, one line per agent.
 fn print_agent_setup(done: &[(agents::user::Agent, Vec<agents::Change>)], on: bool) {
     if done.is_empty() {
@@ -1215,13 +1473,13 @@ fn print_agent_setup(done: &[(agents::user::Agent, Vec<agents::Change>)], on: bo
 
 fn print_checks(checks: &[Check]) {
     for c in checks {
-        println!("{} {:<15}{}", c.status.symbol(), c.label, c.summary);
+        println!("{} {:<16}{}", c.status.symbol(), c.label, c.summary);
         if let Some(hint) = c
             .hint
             .as_deref()
             .filter(|_| c.status != machine::Status::Ok)
         {
-            println!("  {:<15}{hint}", "");
+            println!("  {:<16}{hint}", "");
         }
         if let Some(fix) = c.fix.as_ref().filter(|_| c.status != machine::Status::Ok) {
             print_fix(fix);
@@ -1231,7 +1489,7 @@ fn print_checks(checks: &[Check]) {
 
 /// A fix as numbered steps under its check, with the command where it belongs. Nothing is run.
 fn print_fix(fix: &machine::Fix) {
-    let pad = " ".repeat(17);
+    let pad = " ".repeat(18);
     println!("{pad}How to fix: {}", fix.title);
     let command = || {
         if let Some(cmd) = &fix.command {

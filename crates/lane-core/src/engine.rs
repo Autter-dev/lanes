@@ -352,26 +352,50 @@ fn install_key(base: &Path, commit: &str, commands: &[String]) -> Result<String>
 /// output stays clean.
 fn install(base: &Path, commands: &[String]) -> Result<()> {
     for cmd in commands {
+        let started = std::time::Instant::now();
+        // Inside an agent's hook the agent reads stderr, so the install talks to the log instead.
+        let (out, err) = match crate::log::quiet().then(crate::log::file).flatten() {
+            Some(f) => match f.try_clone() {
+                Ok(g) => (Stdio::from(f), Stdio::from(g)),
+                Err(_) => (Stdio::null(), Stdio::null()),
+            },
+            None => (Stdio::from(io::stderr()), Stdio::from(io::stderr())),
+        };
         let status = shell(cmd)
             .current_dir(base)
             .stdin(Stdio::null())
-            .stdout(Stdio::from(io::stderr()))
-            .stderr(Stdio::from(io::stderr()))
+            .stdout(out)
+            .stderr(err)
             .status()
             .map_err(|e| {
+                crate::log::error(
+                    "install",
+                    format!("couldn't run `{cmd}` in {}: {e}", base.display()),
+                )
+                .write();
                 Error::new(ErrorKind::Failure, format!("couldn't run `{cmd}`: {e}"))
                     .hint("Check the command in `[setup] install` in lane.toml.")
             })?;
+        let ms = started.elapsed().as_millis() as u64;
         if !status.success() {
             let code = status
                 .code()
                 .map_or("a signal".to_string(), |c| format!("exit code {c}"));
+            crate::log::error(
+                "install",
+                format!("`{cmd}` failed in {} ({code})", base.display()),
+            )
+            .ms(ms)
+            .write();
             return Err(Error::new(
                 ErrorKind::Failure,
                 format!("`{cmd}` failed in {} ({code})", base.display()),
             )
-            .hint("Fix the command in `[setup] install` in lane.toml, or run it there by hand to see why."));
+            .hint("Fix the command in `[setup] install` in lane.toml (`lane init` writes one), or run it there by hand to see why. `lane logs` has what happened."));
         }
+        crate::log::info("install", format!("`{cmd}` in {}", base.display()))
+            .ms(ms)
+            .write();
     }
     Ok(())
 }

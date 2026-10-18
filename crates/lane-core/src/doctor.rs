@@ -1,0 +1,281 @@
+//! `lane doctor`: everything `lane setup` checks about this machine, and then what can quietly
+//! stop lanes working: `lane` missing from PATH (agents' hooks call it by name), agents that
+//! aren't set up, this repo's Git hook, lanes whose folders have gone, the state store, the
+//! daemon, and errors in the log. Each check says what to do next; nothing is changed.
+
+use crate::agents::{self, GitHook, user};
+use crate::config::Config;
+use crate::engine::{Repo, norm};
+use crate::log;
+use crate::machine::{self, Check, Status};
+use crate::state::Store;
+use std::path::Path;
+
+/// Every check, in the order to read them.
+pub fn run(dir: &Path) -> Vec<Check> {
+    let mut checks = machine::run_all(dir);
+    checks.push(lane_on_path());
+    checks.push(agent_hooks());
+    let repo = Repo::open(dir).ok();
+    if let Some(repo) = &repo {
+        checks.push(git_hook(repo));
+    }
+    checks.push(state(repo.as_ref()));
+    checks.push(daemon());
+    checks.push(recent_errors());
+    checks
+}
+
+/// Whether anything here needs fixing before Lanes can work.
+pub fn healthy(checks: &[Check]) -> bool {
+    checks.iter().all(|c| c.status != Status::Fail)
+}
+
+/// Agents' hooks run `lane` by name, so it has to be on PATH, not only where you ran it from.
+fn lane_on_path() -> Check {
+    if agents::on_path("lane") {
+        return Check::new(
+            "lane-path",
+            "On PATH",
+            Status::Ok,
+            "agents' hooks can run `lane`",
+        );
+    }
+    let here = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf));
+    let hint = match here {
+        Some(dir) => format!(
+            "Add {} to PATH (then open a new terminal), so agents' hooks can run `lane`.",
+            dir.display()
+        ),
+        None => "Add the folder `lane` is in to PATH, so agents' hooks can run it.".to_string(),
+    };
+    Check::new(
+        "lane-path",
+        "On PATH",
+        Status::Fail,
+        "`lane` isn't on PATH, so agents' hooks can't run it",
+    )
+    .hint(hint)
+}
+
+/// The agents found here, and whether each one puts its work in lanes.
+fn agent_hooks() -> Check {
+    let on = Config::load().map(|c| c.agents).unwrap_or(true);
+    let found = user::found();
+    if !on {
+        return Check::new(
+            "agent-hooks",
+            "Agents in lanes",
+            Status::Info,
+            "switched off on this machine",
+        )
+        .hint("`lane setup --yes --agents on` puts your agents back in lanes.");
+    }
+    if found.is_empty() {
+        return Check::new(
+            "agent-hooks",
+            "Agents in lanes",
+            Status::Info,
+            "no Claude Code, Codex or Cursor found",
+        )
+        .hint("Run `lane setup` after you install one, and its worktrees become lanes.");
+    }
+    let (ready, not): (Vec<_>, Vec<_>) = found.iter().partition(|a| user::is_set_up(**a));
+    let names = |xs: &[&user::Agent]| xs.iter().map(|a| a.name).collect::<Vec<_>>().join(", ");
+    if not.is_empty() {
+        // Every agent found here is set up.
+        return Check::new(
+            "agent-hooks",
+            "Agents in lanes",
+            Status::Ok,
+            format!("{} put their work in lanes", names(&ready)),
+        );
+    }
+    let summary = match ready.is_empty() {
+        true => format!("{} not set up", names(&not)),
+        false => format!("{} not set up ({} is)", names(&not), names(&ready)),
+    };
+    Check::new("agent-hooks", "Agents in lanes", Status::Warn, summary)
+        .hint("Run `lane setup` to put them in lanes, once for this machine.")
+}
+
+/// This repo's post-checkout hook: other tools' worktrees become lanes through it.
+fn git_hook(repo: &Repo) -> Check {
+    match agents::git_hook(repo) {
+        Ok(GitHook::Ready(path)) => Check::new(
+            "git-hook",
+            "Git hook",
+            Status::Ok,
+            format!("other tools' worktrees become lanes ({})", norm(&path).display()),
+        ),
+        Ok(GitHook::Old(path)) => Check::new(
+            "git-hook",
+            "Git hook",
+            Status::Warn,
+            format!("an older copy of Lanes' hook ({})", norm(&path).display()),
+        )
+        .hint("Run `lane init` in this repo to update it, so new worktrees get their dependencies too."),
+        Ok(GitHook::Missing) => Check::new(
+            "git-hook",
+            "Git hook",
+            Status::Info,
+            "not set up: worktrees tools make with Git won't become lanes",
+        )
+        .hint("Run `lane init` in this repo. Claude Code, Codex and Cursor don't need it."),
+        Err(e) => Check::new("git-hook", "Git hook", Status::Warn, e.to_string())
+            .hint(e.hint.unwrap_or_default()),
+    }
+}
+
+/// The state store, and this repo's lanes: any whose folder has gone (a tool cleaned up its own
+/// worktrees, or someone deleted one), or that were left half-made.
+fn state(repo: Option<&Repo>) -> Check {
+    let store = match Store::open_existing() {
+        Ok(Some(s)) => s,
+        Ok(None) => {
+            return Check::new("lanes", "Lanes", Status::Info, "no lanes made yet");
+        }
+        Err(e) => {
+            return Check::new("lanes", "Lanes", Status::Fail, e.to_string()).hint(
+                e.hint
+                    .unwrap_or_else(|| "Run `lane list` to see the error.".into()),
+            );
+        }
+    };
+    let lanes = match store.lanes(repo.map(|r| r.root.as_path())) {
+        Ok(l) => l,
+        Err(e) => {
+            return Check::new("lanes", "Lanes", Status::Fail, e.to_string())
+                .hint(e.hint.unwrap_or_default());
+        }
+    };
+    let where_ = if repo.is_some() {
+        "in this repo"
+    } else {
+        "on this machine"
+    };
+    let gone: Vec<&str> = lanes
+        .iter()
+        .filter(|l| !l.path.exists())
+        .map(|l| l.name.as_str())
+        .collect();
+    let stale: Vec<&str> = lanes
+        .iter()
+        .filter(|l| l.is_stale())
+        .map(|l| l.name.as_str())
+        .collect();
+    if !gone.is_empty() {
+        return Check::new(
+            "lanes",
+            "Lanes",
+            Status::Warn,
+            format!(
+                "{} with no folder any more: {}",
+                count(gone.len()),
+                gone.join(", ")
+            ),
+        )
+        .hint(format!(
+            "Remove them to free their ports: `lane rm {}`{}.",
+            gone[0],
+            if gone.len() > 1 {
+                ", and the same for each"
+            } else {
+                ""
+            }
+        ));
+    }
+    if !stale.is_empty() {
+        return Check::new(
+            "lanes",
+            "Lanes",
+            Status::Warn,
+            format!(
+                "{} left half-made: {}",
+                count(stale.len()),
+                stale.join(", ")
+            ),
+        )
+        .hint(format!(
+            "Make it again with `lane new {}`, or remove it with `lane rm`.",
+            stale[0]
+        ));
+    }
+    match lanes.len() {
+        0 => Check::new(
+            "lanes",
+            "Lanes",
+            Status::Info,
+            format!("no lanes {where_} yet"),
+        ),
+        n => Check::new(
+            "lanes",
+            "Lanes",
+            Status::Ok,
+            format!("{} {where_}, each with its folder", count(n)),
+        ),
+    }
+}
+
+fn count(n: usize) -> String {
+    match n {
+        1 => "1 lane".into(),
+        n => format!("{n} lanes"),
+    }
+}
+
+/// `laned` ships with `lane`. Nothing needs it running yet: every command works without it.
+fn daemon() -> Check {
+    let name = format!("laned{}", std::env::consts::EXE_SUFFIX);
+    let beside = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join(&name)))
+        .is_some_and(|p| p.is_file());
+    if beside || agents::on_path("laned") {
+        Check::new(
+            "daemon",
+            "Daemon",
+            Status::Info,
+            "laned is installed; no command needs it running yet",
+        )
+    } else {
+        Check::new(
+            "daemon",
+            "Daemon",
+            Status::Warn,
+            "laned isn't installed next to lane",
+        )
+        .hint("Install Lanes again (lanes.autter.dev/download); every way installs both programs.")
+    }
+}
+
+/// Errors Lanes logged lately: a failed install, a hook that couldn't finish.
+fn recent_errors() -> Check {
+    let path = log::path()
+        .map(|p| norm(&p).display().to_string())
+        .unwrap_or_default();
+    let errors = log::read(200, None)
+        .map(|es| {
+            es.into_iter()
+                .filter(|e| e.level == log::Level::Error)
+                .count()
+        })
+        .unwrap_or(0);
+    match errors {
+        0 => Check::new(
+            "log",
+            "Log",
+            Status::Ok,
+            format!("no errors lately ({path})"),
+        ),
+        n => Check::new(
+            "log",
+            "Log",
+            Status::Warn,
+            format!("{n} error{} lately", if n == 1 { "" } else { "s" }),
+        )
+        .hint("See what happened with `lane logs`."),
+    }
+}

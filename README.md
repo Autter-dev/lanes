@@ -233,6 +233,8 @@ Prefer a Claude Code plugin? It carries the same hooks and skill:
 | `lane env <name>` | Prints a lane's variables for sh, PowerShell, cmd or a `.env` file |
 | `lane adopt <path>` | Turns a worktree you already have into a lane (`--ready` gives it its dependencies and `.env` too) |
 | `lane rm <name>` | Removes a lane and frees its ports |
+| `lane doctor` | Checks what could stop lanes working (Git, clones, `lane` on PATH, agents' hooks, the Git hook, lanes whose folders have gone) and says how to fix each |
+| `lane logs [<lane>]` | Shows what Lanes did: lanes made and removed, agents' hooks, dependency installs. Kept in a file, never in an agent's output |
 | `lane hook <agent> <event>` | What agents' hooks run, for Claude Code, Codex, Cursor and Git (set up by `lane setup` and `lane init`) |
 
 Coming next:

@@ -136,7 +136,12 @@ fn bad_options_say_what_to_do() {
 
 /// A fresh Git repo in a temporary folder.
 fn git_repo(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("lane-cli-repo-{}-{name}", std::process::id()));
+    // On CI's Btrfs, XFS and ReFS disks, repos and their lanes live on that disk.
+    let base = std::env::var_os("LANE_TEST_CLONE_DIR")
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    let dir = base.join(format!("lane-cli-repo-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let ok = Command::new("git")
@@ -1275,4 +1280,191 @@ fn a_codex_session_in_its_own_worktree_gets_a_lane() {
             .all(|l| l["agent"] == "codex")
     );
     let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn logs_keep_what_changed_lanes() {
+    let dir = config_dir("logs");
+    let repo = repo_with_commit("logs");
+
+    let out = lane_in(&dir, &repo, &["logs"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("Nothing logged yet"));
+
+    assert_eq!(
+        lane_in(&dir, &repo, &["new", "fix-auth", "--json"])
+            .status
+            .code(),
+        Some(0)
+    );
+    assert_eq!(
+        lane_in(&dir, &repo, &["new", "other", "--json"])
+            .status
+            .code(),
+        Some(0)
+    );
+    assert_eq!(
+        lane_in(&dir, &repo, &["rm", "fix-auth", "--json"])
+            .status
+            .code(),
+        Some(0)
+    );
+    // A failure is logged too (not a usage mistake).
+    assert_eq!(
+        lane_in(&dir, &repo, &["rm", "no-such-lane"]).status.code(),
+        Some(1)
+    );
+
+    let v = json(&lane_in(&dir, &repo, &["logs", "--json"]));
+    let events: Vec<(&str, &str)> = v["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| (e["event"].as_str().unwrap(), e["level"].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        events,
+        [
+            ("new", "info"),
+            ("new", "info"),
+            ("rm", "info"),
+            ("rm", "error")
+        ],
+        "{v}"
+    );
+    assert!(v["path"].as_str().unwrap().ends_with("lane.log"));
+    assert!(
+        dir.join("state").join("lane.log").is_file(),
+        "the log sits with the state"
+    );
+
+    // One lane only, and the last N.
+    let v = json(&lane_in(&dir, &repo, &["logs", "fix-auth", "--json"]));
+    assert_eq!(v["entries"].as_array().unwrap().len(), 2);
+    let v = json(&lane_in(&dir, &repo, &["logs", "-n", "1", "--json"]));
+    assert_eq!(v["entries"][0]["level"], "error");
+
+    // The plain listing marks the error, and says where the file is.
+    let text = String::from_utf8_lossy(&lane_in(&dir, &repo, &["logs"]).stdout).to_string();
+    assert!(text.contains("✗"), "{text}");
+    assert!(
+        text.contains("fix-auth: removed the lane and its folder"),
+        "{text}"
+    );
+    assert!(text.contains("(UTC)"), "{text}");
+    assert_eq!(
+        lane_in(&dir, &repo, &["logs", "-n", "many"]).status.code(),
+        Some(2)
+    );
+}
+
+#[test]
+fn doctor_checks_what_could_stop_lanes_working() {
+    let dir = config_dir("doctor");
+    let repo = repo_with_commit("doctor");
+    assert_eq!(
+        lane_in(&dir, &repo, &["new", "fix-auth", "--json"])
+            .status
+            .code(),
+        Some(0)
+    );
+    assert_eq!(
+        lane_in(&dir, &repo, &["new", "gone", "--json"])
+            .status
+            .code(),
+        Some(0)
+    );
+    // A tool cleans up its own worktree folder behind Lanes' back.
+    let gone = repo
+        .with_file_name(format!(
+            "{}.lanes",
+            repo.file_name().unwrap().to_string_lossy()
+        ))
+        .join("gone");
+    std::fs::remove_dir_all(&gone).unwrap();
+
+    let doctor = |path: &std::ffi::OsStr| {
+        Command::new(env!("CARGO_BIN_EXE_lane"))
+            .args(["doctor", "--json"])
+            .current_dir(&repo)
+            .env("PATH", path)
+            .env("LANE_CONFIG_DIR", &dir)
+            .env("LANE_STATE_DIR", dir.join("state"))
+            .env("LANE_AGENTS_HOME", dir.join("home"))
+            .env_remove("CLAUDE_CONFIG_DIR")
+            .output()
+            .unwrap()
+    };
+    let out = doctor(&path_with_lane());
+    let v = json(&out);
+    let check = |id: &str| {
+        v["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["id"] == id)
+            .unwrap_or_else(|| panic!("no {id} check in {v}"))
+            .clone()
+    };
+    for id in [
+        "git",
+        "copies",
+        "lane-path",
+        "agent-hooks",
+        "git-hook",
+        "lanes",
+        "daemon",
+        "log",
+    ] {
+        check(id);
+    }
+    assert_eq!(check("lane-path")["status"], "ok");
+    let lanes = check("lanes");
+    assert_eq!(lanes["status"], "warn");
+    assert!(
+        lanes["summary"].as_str().unwrap().contains("gone"),
+        "{lanes}"
+    );
+    assert!(
+        lanes["hint"].as_str().unwrap().contains("lane rm gone"),
+        "{lanes}"
+    );
+    assert_eq!(
+        check("git-hook")["status"],
+        "info",
+        "no lane init in this repo"
+    );
+
+    // Following the hint clears it.
+    assert_eq!(lane_in(&dir, &repo, &["rm", "gone"]).status.code(), Some(0));
+    let v = json(&doctor(&path_with_lane()));
+    let lanes = v["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == "lanes")
+        .unwrap()
+        .clone();
+    assert_eq!(lanes["status"], "ok", "{lanes}");
+
+    // Without `lane` on PATH, agents' hooks can't run it: that must be fixed, so exit 1.
+    let bare = std::env::join_paths(
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).filter(|p| {
+            !p.join(format!("lane{}", std::env::consts::EXE_SUFFIX))
+                .is_file()
+        }),
+    )
+    .unwrap();
+    let out = doctor(&bare);
+    let v = json(&out);
+    let path_check = v["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == "lane-path")
+        .unwrap()
+        .clone();
+    assert_eq!(path_check["status"], "fail", "{path_check}");
+    assert_eq!(v["healthy"], false);
+    assert_eq!(out.status.code(), Some(1));
 }

@@ -93,6 +93,16 @@ fn a_new_lane_is_a_ready_worktree_with_dependencies_and_no_branch() {
         "{:?}",
         made.clone
     );
+    // On a disk that clones (macOS, and the Btrfs, XFS and ReFS disks in CI), nothing is copied.
+    if cfg!(target_os = "macos") || std::env::var_os("LANE_TEST_CLONE_DIR").is_some() {
+        assert_eq!(
+            made.clone.method,
+            crate::clone::Method::Clone,
+            "{:?}",
+            made.clone
+        );
+        assert_eq!(made.clone.copied, 0, "{:?}", made.clone);
+    }
     // A real worktree: clean status, detached at the base commit, and no new branch.
     assert_eq!(git_in(&lane.path, &["status", "--porcelain"]), "");
     assert_eq!(git_in(&lane.path, &["rev-parse", "HEAD"]), made.base.commit);

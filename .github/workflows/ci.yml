@@ -67,8 +67,10 @@ jobs:
           diskpart /s "$env:RUNNER_TEMP\refs.txt"
           New-Item -ItemType Directory R:\lanes | Out-Null
           "LANE_TEST_CLONE_DIR=R:\lanes" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-      - name: Clone tests on ${{ matrix.fs }}
-        run: "cargo test -p lane-core clone:: -- --nocapture"
+      # Every test, with repos and lanes on this disk: the engine, the hooks and the CLI, not
+      # only the clone backend. On these disks a lane must be cloned, never copied.
+      - name: Every test on ${{ matrix.fs }}
+        run: cargo test --all
 
   licenses:
     name: Licenses

@@ -53,6 +53,8 @@ Options:
 ";
 
 pub fn hook(args: &[String]) -> ExitCode {
+    // An agent reads whatever a hook prints, so problems and installs go to the log instead.
+    lane_core::log::set_quiet(true);
     let json = crate::args::wants_json(args);
     let rest: Vec<&str> = args
         .iter()
@@ -107,7 +109,7 @@ fn done(result: Result<()>, json: bool) -> ExitCode {
 
 fn quiet(result: Result<()>) -> ExitCode {
     if let Err(e) = result {
-        eprintln!("lane hook: {e}");
+        lane_core::log::error("hook", e.to_string()).write();
     }
     ExitCode::from(exit::OK)
 }
@@ -159,6 +161,13 @@ fn worktree_create(json: bool) -> Result<()> {
             made.lane
         }
     };
+    lane_core::log::info(
+        "hook claude worktree-create",
+        format!("Claude Code works in {}", lane.path.display()),
+    )
+    .lane(&lane.name)
+    .repo(&repo.root)
+    .write();
     if json {
         print_json(&json!({ "lane": lane }));
     } else {
@@ -310,7 +319,16 @@ fn denied(command: &str, powershell: bool, cwd: &Path) -> Result<Option<&'static
     if !is_lanes_repo(&repo, Store::open_existing()?.as_ref())? {
         return Ok(None);
     }
-    Ok(agents::deny_reason(&found, cwd, &repo.root))
+    let reason = agents::deny_reason(&found, cwd, &repo.root);
+    if reason.is_some() {
+        lane_core::log::warn(
+            "hook deny",
+            format!("turned down a copy of the repo: {command}"),
+        )
+        .repo(&repo.root)
+        .write();
+    }
+    Ok(reason)
 }
 
 /// The folder a Cursor hook is about: the shell command's `cwd`, else the first workspace root.
@@ -381,8 +399,16 @@ fn adopting_session(agent: &str, folder: &Path) -> Result<Option<String>> {
         None if !engine::same_path(&top, &repo.root) => {
             let name = free_name(&store, &repo, &worktree_name(agent, &top))?;
             let lane = engine::adopt(&mut store, &repo, &top, Some(&name), Some(agent), None)?;
-            if let Err(e) = engine::make_ready(&mut store, &repo, &lane) {
-                eprintln!("lane: {} is a lane, but {e}", lane.name);
+            let log = |e: lane_core::log::Entry| e.lane(&lane.name).repo(&repo.root).write();
+            match engine::make_ready(&mut store, &repo, &lane) {
+                Ok(_) => log(lane_core::log::info(
+                    format!("hook {agent} session-start"),
+                    format!("{}'s worktree became a lane: {}", agent, top.display()),
+                )),
+                Err(e) => log(lane_core::log::error(
+                    format!("hook {agent} session-start"),
+                    format!("a lane, but not ready to run: {e}"),
+                )),
             }
             Some(lane)
         }
@@ -481,9 +507,17 @@ fn adopt_here() -> Result<Option<Lane>> {
     let lane = engine::adopt(&mut store, &repo, &top, None, None, None)?;
     // Ready to run, like a lane from `lane new`. A worktree that can't be readied is still a
     // lane, and the checkout never fails over it.
-    if let Err(e) = engine::make_ready(&mut store, &repo, &lane) {
-        eprintln!("lane: {} is a lane, but {e}", lane.name);
-    }
+    let entry = match engine::make_ready(&mut store, &repo, &lane) {
+        Ok(_) => lane_core::log::info(
+            "hook git post-checkout",
+            format!("a new worktree became a lane: {}", top.display()),
+        ),
+        Err(e) => lane_core::log::error(
+            "hook git post-checkout",
+            format!("a lane, but not ready to run: {e}"),
+        ),
+    };
+    entry.lane(&lane.name).repo(&repo.root).write();
     Ok(Some(lane))
 }
 

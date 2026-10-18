@@ -8,6 +8,15 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-17
 
+- `03:00` **Added**: `lane doctor` checks what could stop lanes working, and says how to fix each thing. Exit code 1 when something must be fixed, and `--json` for scripts.
+  - Everything `lane setup` checks (Git, whether this disk clones files, disk space).
+  - That `lane` is on PATH, because agents' hooks run it by name.
+  - Which agents put their work in lanes, and which aren't set up yet.
+  - This repo's Git hook: in place, an older copy to update, or missing (Husky and lefthook included).
+  - Lanes whose folders have gone (a tool cleaned up its own worktrees) or that were left half-made, with the `lane rm` to run.
+  - The daemon, and errors in the log.
+- `03:00` **Added**: `lane logs [<lane>]` shows what Lanes did, newest last: lanes made and removed, agents' hooks (worktrees that became lanes, copies turned down), dependency installs and failures. Lanes keeps one line per event in `lane.log` next to its state, and moves it aside past 2 MB. Inside an agent's hook, problems and an install's own output now go to the log instead of the agent's view. `-n`, `--path` and `--json` too.
+- `03:00` **Changed**: CI runs every test, not only the clone tests, on its Btrfs, XFS and ReFS disks, with the test repos and their lanes on those disks. Lanes there must be cloned, never copied; macOS (APFS) is held to the same rule.
 - `18:51` **Changed**: the website offers 0.0.5, and the [guide](https://lanes.autter.dev/guide/) is rewritten around agents making lanes on their own: set it up once, start your agents as usual (Claude Code, Codex, Cursor), see the lanes and run the app. Making a lane by hand and `lane init` are now optional steps.
 
 ## 0.0.5 (2026-10-17)
