@@ -8,7 +8,7 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-18
 
-- `14:58` **Changed**: the website offers 0.0.7. The guide shows the guided `lane init` with its Y/n questions, the terminal app and what lanes saved, `lane doctor --fix`, and what the install count sends with `lane telemetry`.
+- `14:58` **Changed**: the website offers 0.0.7. The guide shows the guided `lane init` with its Y/n questions, the terminal app and what lanes saved, `lane doctor --fix`, and what the install count sends with `lane telemetry`. (`4e7be85`)
 
 ## 0.0.7 (2026-10-18)
 
