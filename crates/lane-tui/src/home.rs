@@ -727,10 +727,10 @@ impl Home {
                 th.accent_strong(),
             ),
         ];
-        if s.installs_skipped > 0 {
+        if s.ms_saved >= 1000 {
             headline.push(Span::styled("  ·  ", th.muted()));
             headline.push(Span::styled(
-                format!("{} of installs", insight::duration(s.install_ms_saved)),
+                format!("{} of waiting", insight::duration(s.ms_saved)),
                 th.accent_strong(),
             ));
         }
@@ -785,12 +785,16 @@ impl Home {
         lines.push(Line::from(vec![
             Span::styled(format!("  {:<14}", "Installs"), th.text()),
             Span::styled(
-                match s.installs_skipped {
-                    0 => "none skipped yet: each lane so far needed its own".to_string(),
-                    n => format!(
-                        "{n} of {} lanes didn't install again: {} saved",
+                match (s.installs_skipped, s.ms_saved) {
+                    (0, _) => "none skipped yet".to_string(),
+                    (n, 0) => format!(
+                        "{n} of {} lanes didn't install again, but making them took as long",
+                        s.measured
+                    ),
+                    (n, ms) => format!(
+                        "{n} of {} lanes didn't install again: at least {} saved",
                         s.measured,
-                        insight::duration(s.install_ms_saved)
+                        insight::duration(ms)
                     ),
                 },
                 th.text(),
@@ -809,6 +813,28 @@ impl Home {
                 th.text(),
             ),
         ]));
+        // Lanes that have gone still count: what every lane saved since the first.
+        let t = &self.input.snapshot.totals;
+        if t.removed > 0 {
+            let since = t
+                .since
+                .map(|s| lane_core::log::utc(s)[..10].to_string())
+                .unwrap_or_default();
+            let mut parts = vec![format!("{} lanes since {since}", t.lanes)];
+            if t.disk_measured > 0 {
+                parts.push(format!("{} not written", insight::bytes(t.not_written)));
+            }
+            if t.ms_saved >= 1000 {
+                parts.push(format!(
+                    "at least {} of waiting saved",
+                    insight::duration(t.ms_saved)
+                ));
+            }
+            lines.push(Line::from(vec![
+                Span::styled(format!("  {:<14}", "In total"), th.text()),
+                Span::styled(parts.join(", "), th.text()),
+            ]));
+        }
         if s.copies > 0 {
             lines.push(Line::styled(
                 format!(

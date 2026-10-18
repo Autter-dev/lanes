@@ -6,7 +6,7 @@ use crate::onboarding::{Input, Onboarding, Outcome};
 use crate::theme::Theme;
 use lane_core::insight::{Details, TestRun};
 use lane_core::machine::{Check, Status};
-use lane_core::state::LaneStats;
+use lane_core::state::{LaneRecord, LaneStats};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -451,12 +451,16 @@ fn enter_still_moves_on_from_the_machine_step() {
 }
 
 fn home_input(repo: Option<home::HomeRepo>, rows: Vec<Row>) -> home::Input {
-    let savings = lane_core::insight::savings(
-        &rows
-            .iter()
-            .map(|r| (&r.lane, r.stats.as_ref(), Some(&r.details)))
-            .collect::<Vec<_>>(),
-    );
+    home_input_with(repo, rows, &[])
+}
+
+/// The home screen's input, with the records of lanes made before (removed ones included).
+fn home_input_with(
+    repo: Option<home::HomeRepo>,
+    rows: Vec<Row>,
+    records: &[LaneRecord],
+) -> home::Input {
+    let (savings, totals) = lane_core::snapshot::add_up(&rows, records);
     home::Input {
         version: "0.0.7",
         telemetry: false,
@@ -466,6 +470,7 @@ fn home_input(repo: Option<home::HomeRepo>, rows: Vec<Row>) -> home::Input {
         snapshot: Snapshot {
             rows,
             savings,
+            totals,
             cores: 8,
             source: Source::StateFile,
         },
@@ -607,7 +612,7 @@ fn home_shows_what_lanes_saved() {
     let app = Home::new(home_input(app_repo(true), busy_rows()));
     let text = home_text(&app, 120, 32);
     assert!(
-        text.contains("Saved by lanes   1.8 GB of disk  ·  2 min of installs"),
+        text.contains("Saved by lanes   1.8 GB of disk  ·  2 min of waiting"),
         "{text}"
     );
     // As worktrees: 900 MB + 900 MB + 300 MB. As lanes: 2 MB + 10 KB changed, and the copy.
@@ -622,7 +627,7 @@ fn home_shows_what_lanes_saved() {
     assert!(line.contains("302 MB"), "{line}");
     assert!(worktrees > 5 * lanes && lanes > 0, "{worktrees} vs {lanes}");
     assert!(
-        text.contains("2 of 3 lanes didn't install again: 2 min saved"),
+        text.contains("2 of 3 lanes didn't install again: at least 2 min saved"),
         "{text}"
     );
     assert!(
@@ -630,12 +635,47 @@ fn home_shows_what_lanes_saved() {
         "{text}"
     );
     assert!(text.contains("1 lane is copied in full"), "{text}");
+    // With no lanes removed yet, the totals would say the same again: not shown.
+    assert!(!text.contains("In total"), "{text}");
 
     // Lanes made before Lanes measured them: nothing made up.
     let app = Home::new(home_input(app_repo(true), vec![a_row("fix-auth", 4100)]));
     let text = home_text(&app, 120, 32);
     assert!(text.contains("Make a lane with this version"), "{text}");
     assert!(!text.contains("As worktrees"), "{text}");
+}
+
+#[test]
+fn home_keeps_what_removed_lanes_saved() {
+    let rows = busy_rows();
+    let mut records: Vec<LaneRecord> = rows
+        .iter()
+        .map(|r| LaneRecord {
+            lane_id: r.lane.id.clone(),
+            stats: r.stats.clone().unwrap(),
+            at: 1_792_257_600,
+            removed_at: None,
+            extra_bytes: None,
+        })
+        .collect();
+    // Two lanes done and removed: one measured as it went, one whose folder had already gone.
+    for (id, extra) in [("ln_done1", Some(1_000_000)), ("ln_done2", None)] {
+        records.push(LaneRecord {
+            lane_id: id.into(),
+            stats: stats("clone", 900_000_000, Some(48_000)),
+            at: 1_792_300_000,
+            removed_at: Some(1_792_400_000),
+            extra_bytes: extra,
+        });
+    }
+    let app = Home::new(home_input_with(app_repo(true), rows, &records));
+    let text = home_text(&app, 120, 34);
+    // Disk: the three lanes here and the one measured as it went. Time: four clones skipped a
+    // 48 s install and took 0.9 s each to make.
+    assert!(
+        text.contains("In total      5 lanes since 2026-10-17, 2.7 GB not written, at least 3 min of waiting saved"),
+        "{text}"
+    );
 }
 
 #[test]

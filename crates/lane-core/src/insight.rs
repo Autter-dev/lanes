@@ -1,11 +1,17 @@
 //! What the terminal app shows about lanes, measured rather than guessed. Per lane: its changed
 //! files, its last test run, whether its app is running, and the extra disk it takes. Across
 //! lanes: what they saved compared with the usual way, a worktree plus its own dependency
-//! install for each agent.
+//! install for each agent, both now and in total since the first lane.
+//!
+//! Every saving is a lower bound. Disk: a worktree would hold the whole tree, a cloned lane holds
+//! only the files it changed (a copied lane saves nothing). Time: a worktree would wait for the
+//! whole install, a lane for the time it took to make, so the lane saved at least the difference;
+//! the checkout a worktree also needs isn't counted.
 
 use crate::log::Entry;
-use crate::state::{Lane, LaneStats};
+use crate::state::{Lane, LaneRecord, LaneStats};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
 use std::path::Path;
 use std::time::Duration;
@@ -40,6 +46,12 @@ pub fn details(lane: &Lane, log: &[Entry]) -> Details {
         running: running(lane),
         tests: last_tests(&lane.name, log),
     }
+}
+
+/// The size of the files changed in the lane at `path`: on a disk that clones, roughly the extra
+/// space it takes.
+pub fn changed_bytes(path: &Path) -> u64 {
+    changes(path).1
 }
 
 /// Files `git status` reports in the lane, and their size.
@@ -108,8 +120,9 @@ pub fn last_tests(lane: &str, log: &[Entry]) -> Option<TestRun> {
     })
 }
 
-/// What lanes saved, compared with a worktree plus its own install for each.
+/// What the lanes here now save, compared with a worktree plus its own install for each.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Savings {
     pub lanes: usize,
     /// Lanes with a record of what they cost (made with 0.0.7 or later).
@@ -121,9 +134,42 @@ pub struct Savings {
     pub saved: u64,
     /// Lanes that skipped the dependency install, and the time those installs would have taken.
     pub installs_skipped: usize,
-    pub install_ms_saved: u64,
+    pub install_ms_skipped: u64,
+    /// At least this much waiting saved: each skipped install's time less the lane's making time.
+    pub ms_saved: u64,
     /// Lanes copied rather than cloned (no disk saved on this disk).
     pub copies: usize,
+}
+
+/// What lanes saved in total since the first one was made, removed lanes included.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Totals {
+    /// When the first lane with a record was made (Unix seconds).
+    pub since: Option<i64>,
+    /// Lanes made with a record of what they cost (0.0.7 or later), and how many are gone.
+    pub lanes: usize,
+    pub removed: usize,
+    pub cloned: usize,
+    pub copied: usize,
+    /// Lanes whose disk use is known: every lane still here, and the ones measured as they went.
+    pub disk_measured: usize,
+    /// What a worktree plus its own install would have written for those lanes.
+    pub as_worktrees: u64,
+    /// What the lanes wrote: the files a cloned lane changed, all of a copied one.
+    pub as_lanes: u64,
+    pub not_written: u64,
+    pub installs_skipped: usize,
+    pub install_ms_skipped: u64,
+    /// At least this much waiting saved, as in [`Savings::ms_saved`].
+    pub ms_saved: u64,
+}
+
+/// The waiting one lane saved, at least: the install it skipped, less the time it took to make.
+pub fn waiting_saved(stats: &LaneStats) -> u64 {
+    stats
+        .install_ms
+        .map_or(0, |install| install.saturating_sub(stats.made_ms))
 }
 
 /// Add up what the lanes saved.
@@ -146,11 +192,50 @@ pub fn savings(rows: &[(&Lane, Option<&LaneStats>, Option<&Details>)]) -> Saving
         s.as_lanes += extra;
         if let Some(ms) = stats.install_ms {
             s.installs_skipped += 1;
-            s.install_ms_saved += ms;
+            s.install_ms_skipped += ms;
+            s.ms_saved += waiting_saved(stats);
         }
     }
     s.saved = s.as_worktrees.saturating_sub(s.as_lanes);
     s
+}
+
+/// Add up what every lane saved since the first. `live` is what each lane still here takes now
+/// (its changed files' size, by lane id); a lane missing from it has lost its folder, so its disk
+/// isn't counted until `lane rm` records it.
+pub fn totals(records: &[LaneRecord], live: &HashMap<String, u64>) -> Totals {
+    let mut t = Totals {
+        since: records.iter().map(|r| r.at).min(),
+        lanes: records.len(),
+        ..Totals::default()
+    };
+    for r in records {
+        let copied = r.stats.method != "clone";
+        match copied {
+            true => t.copied += 1,
+            false => t.cloned += 1,
+        }
+        if r.removed_at.is_some() {
+            t.removed += 1;
+        }
+        let extra = match (copied, r.removed_at) {
+            (true, _) => Some(r.stats.bytes),
+            (false, Some(_)) => r.extra_bytes,
+            (false, None) => live.get(&r.lane_id).copied(),
+        };
+        if let Some(extra) = extra {
+            t.disk_measured += 1;
+            t.as_worktrees += r.stats.bytes;
+            t.as_lanes += extra.min(r.stats.bytes);
+        }
+        if let Some(ms) = r.stats.install_ms {
+            t.installs_skipped += 1;
+            t.install_ms_skipped += ms;
+            t.ms_saved += waiting_saved(&r.stats);
+        }
+    }
+    t.not_written = t.as_worktrees.saturating_sub(t.as_lanes);
+    t
 }
 
 /// `1.2 GB`, `340 MB`, `12 KB`, `0 B`.
@@ -254,8 +339,61 @@ mod tests {
         assert_eq!(s.as_worktrees, 1_000_000_000);
         assert_eq!(s.as_lanes, 502_000_000);
         assert_eq!(s.saved, 498_000_000);
-        assert_eq!((s.installs_skipped, s.install_ms_saved), (1, 48_000));
+        assert_eq!((s.installs_skipped, s.install_ms_skipped), (1, 48_000));
+        // The lane took 0.9 s to make, so it saved at least 47.1 s of waiting.
+        assert_eq!(s.ms_saved, 47_100);
         assert_eq!(s.copies, 1);
+    }
+
+    fn record(id: &str, stats: &LaneStats, removed: Option<Option<u64>>) -> LaneRecord {
+        LaneRecord {
+            lane_id: id.into(),
+            stats: stats.clone(),
+            at: 1_000 + id.len() as i64,
+            removed_at: removed.map(|_| 2_000),
+            extra_bytes: removed.flatten(),
+        }
+    }
+
+    #[test]
+    fn totals_keep_removed_lanes_and_count_only_what_was_measured() {
+        let clone = LaneStats {
+            method: "clone".into(),
+            files: 10,
+            bytes: 500_000_000,
+            made_ms: 900,
+            install_ms: Some(48_000),
+        };
+        let copy = LaneStats {
+            method: "copy".into(),
+            ..clone.clone()
+        };
+        // A slow copy took longer than the install it skipped: no time saved, never less than none.
+        let slow = LaneStats {
+            made_ms: 60_000,
+            install_ms: Some(48_000),
+            ..copy.clone()
+        };
+        let records = [
+            record("here", &clone, None),
+            record("gone-measured", &clone, Some(Some(3_000_000))),
+            record("gone-unmeasured", &clone, Some(None)),
+            record("folder-lost", &clone, None),
+            record("copied", &slow, Some(None)),
+        ];
+        let live = HashMap::from([("here".to_string(), 1_000_000)]);
+        let t = totals(&records, &live);
+        assert_eq!(t.since, Some(1_004));
+        assert_eq!((t.lanes, t.removed, t.cloned, t.copied), (5, 3, 4, 1));
+        // Disk: the lane here, the one measured as it went, and the copy (all of it, always).
+        assert_eq!(t.disk_measured, 3);
+        assert_eq!(t.as_worktrees, 1_500_000_000);
+        assert_eq!(t.as_lanes, 504_000_000);
+        assert_eq!(t.not_written, 996_000_000);
+        // Time: every lane that skipped an install, at least the install less the making time.
+        assert_eq!((t.installs_skipped, t.install_ms_skipped), (5, 240_000));
+        assert_eq!(t.ms_saved, 4 * 47_100);
+        assert_eq!(totals(&[], &live), Totals::default());
     }
 
     #[test]

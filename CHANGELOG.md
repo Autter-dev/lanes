@@ -8,6 +8,8 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-18
 
+- `19:18` **Added**: `lane savings` shows what lanes saved compared with a worktree plus its own install for each: disk and waiting, for the lanes you have now and in total since the first (`--all` for every repo, `--json`). Removed lanes still count: `lane rm` keeps a lane's record, with the disk it took when it went. `lane new` says what the new lane saved, and the terminal app adds the totals once lanes have been removed.
+- `19:18` **Changed**: time saved is now a lower bound: each skipped install less the time the lane took to make, never below zero, where it used to be the whole install. A lane whose folder has gone no longer counts toward what lanes save now.
 - `17:58` **Changed**: the website offers 0.0.8. The guide shows Gemini CLI and GitHub Copilot making lanes, `lane mcp` for agents' tools, and `laned` behind the terminal app. (`b029a36`)
 
 ## 0.0.8 (2026-10-18)

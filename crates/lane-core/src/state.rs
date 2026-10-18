@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The schema version in `PRAGMA user_version`. Bump only with a migration below.
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 /// How long request ids are remembered.
 const REQUEST_TTL_SECS: i64 = 7 * 24 * 60 * 60;
@@ -180,6 +180,19 @@ pub struct LaneStats {
     pub install_ms: Option<u64>,
 }
 
+/// A lane's [`LaneStats`] with when it was made and, once removed, when and what it took by then.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LaneRecord {
+    pub lane_id: String,
+    pub stats: LaneStats,
+    /// When the lane was made (Unix seconds).
+    pub at: i64,
+    pub removed_at: Option<i64>,
+    /// The disk the lane took when it was removed: the files a clone changed, all of a copy.
+    /// `None` while it's still here, or when its folder had gone before `lane rm`.
+    pub extra_bytes: Option<u64>,
+}
+
 /// What a new lane needs; the store adds its id and time.
 #[derive(Debug, Clone)]
 pub struct NewLane<'a> {
@@ -302,6 +315,16 @@ CREATE TABLE lane_stats (
 ALTER TABLE bases ADD COLUMN install_ms INTEGER;
 ";
 
+// What lanes saved outlives them: `lane rm` keeps a lane's record, marked removed, with the disk
+// the lane took by then (`extra_bytes`: the files a clone changed, all of a copy; NULL when its
+// folder had already gone), so the totals since the first lane still add up.
+const MIGRATE_4: &str = "
+ALTER TABLE lane_stats ADD COLUMN repo_id INTEGER;
+ALTER TABLE lane_stats ADD COLUMN removed_at INTEGER;
+ALTER TABLE lane_stats ADD COLUMN extra_bytes INTEGER;
+UPDATE lane_stats SET repo_id = (SELECT repo_id FROM lanes WHERE lanes.id = lane_stats.lane_id);
+";
+
 const LANE_COLUMNS: &str =
     "l.id, r.root, l.name, l.path, l.base_commit, l.port_start, l.port_count,
      l.agent, l.outcome, l.created_at, l.status";
@@ -383,6 +406,9 @@ impl Store {
         }
         if version < 3 {
             tx.execute_batch(MIGRATE_3).map_err(db_err)?;
+        }
+        if version < 4 {
+            tx.execute_batch(MIGRATE_4).map_err(db_err)?;
         }
         tx.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(db_err)?;
@@ -474,6 +500,35 @@ impl Store {
             .map_err(db_err)?;
         rows.collect::<rusqlite::Result<HashMap<_, _>>>()
             .map_err(db_err)
+    }
+
+    /// Every lane's record of what it cost and saved, removed lanes included, for one repo or
+    /// every repo, oldest first.
+    pub fn lane_records(&self, repo: Option<&Path>) -> Result<Vec<LaneRecord>> {
+        let sql = "SELECT s.lane_id, s.method, s.files, s.bytes, s.made_ms, s.install_ms, s.at,
+                          s.removed_at, s.extra_bytes
+                   FROM lane_stats s LEFT JOIN repos r ON r.id = s.repo_id
+                   WHERE ?1 IS NULL OR r.root = ?1
+                   ORDER BY s.at, s.lane_id";
+        let mut stmt = self.conn.prepare(sql).map_err(db_err)?;
+        let rows = stmt
+            .query_map([repo.map(|p| p.to_string_lossy().into_owned())], |r| {
+                Ok(LaneRecord {
+                    lane_id: r.get(0)?,
+                    stats: LaneStats {
+                        method: r.get(1)?,
+                        files: r.get::<_, i64>(2)? as u64,
+                        bytes: r.get::<_, i64>(3)? as u64,
+                        made_ms: r.get::<_, i64>(4)? as u64,
+                        install_ms: r.get::<_, Option<i64>>(5)?.map(|v| v as u64),
+                    },
+                    at: r.get(6)?,
+                    removed_at: r.get(7)?,
+                    extra_bytes: r.get::<_, Option<i64>>(8)?.map(|v| v as u64),
+                })
+            })
+            .map_err(db_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)
     }
 
     /// How long the last dependency install in a repo's `_base` took, if Lanes timed one.
@@ -765,11 +820,11 @@ impl Tx<'_> {
     pub fn set_lane_stats(&self, lane_id: &str, stats: &LaneStats) -> Result<()> {
         self.tx
             .execute(
-                "INSERT INTO lane_stats (lane_id, method, files, bytes, made_ms, install_ms, at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-                 ON CONFLICT (lane_id) DO UPDATE SET method = excluded.method, files = excluded.files,
-                   bytes = excluded.bytes, made_ms = excluded.made_ms, install_ms = excluded.install_ms,
-                   at = excluded.at",
+                "INSERT INTO lane_stats (lane_id, repo_id, method, files, bytes, made_ms, install_ms, at)
+                 VALUES (?1, (SELECT repo_id FROM lanes WHERE id = ?1), ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT (lane_id) DO UPDATE SET repo_id = excluded.repo_id,
+                   method = excluded.method, files = excluded.files, bytes = excluded.bytes,
+                   made_ms = excluded.made_ms, install_ms = excluded.install_ms, at = excluded.at",
                 params![
                     lane_id,
                     stats.method,
@@ -813,6 +868,9 @@ impl Tx<'_> {
         self.tx
             .execute("DELETE FROM lanes WHERE id = ?1", [lane_id])
             .map_err(db_err)?;
+        self.tx
+            .execute("DELETE FROM lane_stats WHERE lane_id = ?1", [lane_id])
+            .map_err(db_err)?;
         self.log(Some(lane_id), "dropped", &serde_json::json!({}))
     }
 
@@ -849,8 +907,9 @@ impl Tx<'_> {
         )
     }
 
-    /// Forget a lane and free its ports. Returns what was removed.
-    pub fn remove_lane(&self, repo: &Path, name: &str) -> Result<Lane> {
+    /// Forget a lane and free its ports, keeping its record of what it saved. `extra_bytes` is
+    /// the disk it took by then, when its folder was there to measure. Returns what was removed.
+    pub fn remove_lane(&self, repo: &Path, name: &str, extra_bytes: Option<u64>) -> Result<Lane> {
         let root = repo.to_string_lossy();
         let lane = self
             .tx
@@ -875,7 +934,10 @@ impl Tx<'_> {
             .execute("DELETE FROM lanes WHERE id = ?1", [&lane.id])
             .map_err(db_err)?;
         self.tx
-            .execute("DELETE FROM lane_stats WHERE lane_id = ?1", [&lane.id])
+            .execute(
+                "UPDATE lane_stats SET removed_at = ?2, extra_bytes = ?3 WHERE lane_id = ?1",
+                params![lane.id, now(), extra_bytes.map(|v| v as i64)],
+            )
             .map_err(db_err)?;
         self.log(Some(&lane.id), "rm", &serde_json::json!({ "name": name }))?;
         Ok(lane)
@@ -1045,12 +1107,12 @@ mod tests {
         assert!(e.to_string().contains("lane rm fix-auth"), "{e}");
 
         let gone = store
-            .write(None, |tx| tx.remove_lane(repo, "fix-auth"))
+            .write(None, |tx| tx.remove_lane(repo, "fix-auth", None))
             .unwrap();
         assert_eq!(gone.id, a.id);
         assert!(store.lanes(Some(repo)).unwrap().is_empty());
         let e = store
-            .write(None, |tx| tx.remove_lane(repo, "fix-auth"))
+            .write(None, |tx| tx.remove_lane(repo, "fix-auth", None))
             .unwrap_err();
         assert_eq!(e.kind, ErrorKind::NotFound);
     }
@@ -1070,7 +1132,9 @@ mod tests {
             starts.push(lane.ports.start);
         }
         assert_eq!(starts, [4100, 4110, 4120]);
-        store.write(None, |tx| tx.remove_lane(repo, "b")).unwrap();
+        store
+            .write(None, |tx| tx.remove_lane(repo, "b", None))
+            .unwrap();
         let next = store.write(None, |tx| tx.allocate_ports(4100, 10)).unwrap();
         assert_eq!(next.start, 4110, "a freed block is used again");
         // A bigger block skips gaps too small for it.
@@ -1107,7 +1171,7 @@ mod tests {
             command: "rm fix-auth",
         };
         let e = store
-            .write(Some(other), |tx| tx.remove_lane(repo, "fix-auth"))
+            .write(Some(other), |tx| tx.remove_lane(repo, "fix-auth", None))
             .unwrap_err();
         assert_eq!(e.kind, ErrorKind::Conflict);
         assert_eq!(store.lanes(None).unwrap().len(), 1, "nothing changed");
@@ -1319,6 +1383,92 @@ mod tests {
             .unwrap();
         let b = store.base(repo).unwrap().unwrap();
         assert_eq!((b.commit.as_str(), b.install_key), ("c2", None));
+    }
+
+    fn stats(bytes: u64) -> LaneStats {
+        LaneStats {
+            method: "clone".into(),
+            files: 10,
+            bytes,
+            made_ms: 900,
+            install_ms: Some(48_000),
+        }
+    }
+
+    #[test]
+    fn what_a_lane_saved_outlives_it() {
+        let mut store = Store::open_at(&temp_db("records")).unwrap();
+        let (acme, other) = (Path::new("/work/acme"), Path::new("/work/other"));
+        let block = |start| PortBlock { start, count: 10 };
+        let ids = store
+            .write(None, |tx| {
+                let a = tx.insert_lane(new_lane(acme, "a", Path::new("/l/a"), block(4100)))?;
+                let b = tx.insert_lane(new_lane(acme, "b", Path::new("/l/b"), block(4110)))?;
+                let c = tx.insert_lane(new_lane(other, "c", Path::new("/l/c"), block(4120)))?;
+                tx.set_lane_stats(&a.id, &stats(100))?;
+                tx.set_lane_stats(&b.id, &stats(200))?;
+                tx.set_lane_stats(&c.id, &stats(300))?;
+                Ok([a.id, b.id, c.id])
+            })
+            .unwrap();
+        store
+            .write(None, |tx| tx.remove_lane(acme, "a", Some(7)))
+            .unwrap();
+
+        // What lanes take now counts the lanes still here.
+        let live = store.lane_stats(Some(acme)).unwrap();
+        assert_eq!(live.keys().collect::<Vec<_>>(), vec![&ids[1]]);
+        // The totals keep the removed lane, with what it took when it went.
+        let records = store.lane_records(Some(acme)).unwrap();
+        assert_eq!(records.len(), 2);
+        let a = records.iter().find(|r| r.lane_id == ids[0]).unwrap();
+        assert!(a.removed_at.is_some());
+        assert_eq!((a.extra_bytes, a.stats.bytes), (Some(7), 100));
+        let b = records.iter().find(|r| r.lane_id == ids[1]).unwrap();
+        assert_eq!((b.removed_at, b.extra_bytes), (None, None));
+        assert_eq!(store.lane_records(None).unwrap().len(), 3);
+        assert_eq!(store.lane_records(Some(other)).unwrap().len(), 1);
+
+        // A lane that failed to make saved nothing.
+        store.write(None, |tx| tx.drop_lane(&ids[2])).unwrap();
+        assert!(store.lane_records(Some(other)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_v3_store_keeps_what_its_lanes_saved() {
+        let db = temp_db("migrate-v3");
+        std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+        let conn = Connection::open(&db).unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        conn.execute_batch(MIGRATE_2).unwrap();
+        conn.execute_batch(MIGRATE_3).unwrap();
+        conn.execute(
+            "INSERT INTO repos (root, created_at) VALUES ('/work/acme', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO lanes (id, repo_id, name, path, base_commit, port_start, port_count, agent, outcome, created_at, updated_at)
+             VALUES ('ln_old', 1, 'old', '/l', NULL, 4100, 10, NULL, NULL, 1, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO lane_stats (lane_id, method, files, bytes, made_ms, install_ms, at)
+             VALUES ('ln_old', 'clone', 10, 500, 900, 48000, 1)",
+            [],
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 3).unwrap();
+        drop(conn);
+        let mut store = Store::open_at(&db).unwrap();
+        let acme = Path::new("/work/acme");
+        assert_eq!(store.lane_records(Some(acme)).unwrap().len(), 1);
+        store
+            .write(None, |tx| tx.remove_lane(acme, "old", Some(5)))
+            .unwrap();
+        let records = store.lane_records(Some(acme)).unwrap();
+        assert_eq!(records[0].extra_bytes, Some(5), "{records:?}");
     }
 
     #[test]

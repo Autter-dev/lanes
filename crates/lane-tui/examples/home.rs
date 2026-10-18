@@ -108,6 +108,7 @@ fn main() {
             snapshot: Snapshot {
                 rows: rows.clone(),
                 savings: savings.clone(),
+                totals: Default::default(),
                 cores: 10,
                 source: Source::StateFile,
             },
