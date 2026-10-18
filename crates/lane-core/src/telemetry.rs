@@ -6,6 +6,9 @@
 //! is sent while someone looks around. Never in CI, never with an opt-out set (`lane telemetry
 //! off`, `LANE_TELEMETRY=0`, `DO_NOT_TRACK=1`), never from unit tests. `curl` sends it detached,
 //! with a 1-second limit, so no command waits for it; if it fails, it's dropped, not retried.
+//!
+//! The server is `services/install-count` in this repo: a Cloudflare Worker that keeps counts in
+//! Postgres and accepts nothing beyond these five fields.
 
 use crate::VERSION;
 use crate::config::{Config, config_dir};
@@ -19,9 +22,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-/// Where the count goes. None until Autter's install endpoint is live: until then nothing is
-/// sent, whatever the settings say. `LANE_TELEMETRY_URL` points it elsewhere (tests, staging).
-pub const ENDPOINT: Option<&str> = None;
+/// Where release builds send the count: the Worker in `services/install-count`, which keeps it
+/// in Postgres. `LANE_TELEMETRY_URL` points it elsewhere (tests, staging).
+pub const ENDPOINT: Option<&str> = Some("https://lanes-count.autter.dev/v1/installs");
 
 /// The whole message. Its fields are the list the welcome shows, and a test keeps it that way.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -51,7 +54,7 @@ pub enum Skip {
     SettingOff,
     /// The welcome or `lane setup` hasn't run, so the setting hasn't been chosen yet.
     NotChosen,
-    /// This build has nowhere to send it.
+    /// A development build with no `LANE_TELEMETRY_URL`: it never sends.
     NoEndpoint,
     /// This version was already counted on this machine.
     Counted,
@@ -63,7 +66,7 @@ impl Skip {
             Skip::ForcedOff(why) => format!("off: {why}"),
             Skip::SettingOff => "off in your settings".into(),
             Skip::NotChosen => "not sent until you run `lane setup` or the welcome".into(),
-            Skip::NoEndpoint => "this build has nowhere to send it, so nothing is sent".into(),
+            Skip::NoEndpoint => "this is a development build, which never sends it".into(),
             Skip::Counted => format!("already counted for {VERSION}"),
         }
     }
@@ -110,10 +113,17 @@ pub fn ping(id: &str) -> Ping {
 }
 
 /// Where the count would go, if anywhere.
+/// Development builds (and so every test binary) never use [`ENDPOINT`]: someone's own builds
+/// and test runs aren't installs. They send only where `LANE_TELEMETRY_URL` says.
 pub fn endpoint(env: &Env) -> Option<String> {
     env.var("LANE_TELEMETRY_URL")
         .map(str::to_string)
-        .or(ENDPOINT.map(str::to_string))
+        .or_else(|| {
+            (!cfg!(debug_assertions))
+                .then_some(ENDPOINT)
+                .flatten()
+                .map(str::to_string)
+        })
 }
 
 /// Whether to send now, and where. Pure, so every rule is tested without a network.
@@ -360,6 +370,19 @@ mod tests {
             decide(&Env::fake(&[], false), &set_up(), &none, None),
             Err(Skip::NoEndpoint)
         );
+    }
+
+    #[test]
+    fn only_release_builds_use_the_real_address() {
+        let none = Env::fake(&[], false);
+        let release = !cfg!(debug_assertions);
+        assert_eq!(
+            endpoint(&none).is_some(),
+            release,
+            "test runs never reach it"
+        );
+        let told = Env::fake(&[("LANE_TELEMETRY_URL", "http://127.0.0.1:1/")], false);
+        assert_eq!(endpoint(&told).as_deref(), Some("http://127.0.0.1:1/"));
     }
 
     #[test]

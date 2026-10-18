@@ -1,0 +1,24 @@
+// The install count's Worker. README.md says how to host it.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "lanes-install-count",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  // `pg` talks to Postgres over Cloudflare's TCP sockets through Node's APIs.
+  "compatibility_flags": ["nodejs_compat"],
+
+  // `lane` sends to https://lanes-count.autter.dev/v1/installs (lane_core::telemetry::ENDPOINT).
+  // autter.dev is on Cloudflare, so deploying creates this address and its certificate.
+  "routes": [{ "pattern": "lanes-count.autter.dev", "custom_domain": true }],
+  "workers_dev": false,
+  "preview_urls": false,
+
+  // Request logs would hold callers' IP addresses, which this service promises not to keep.
+  "observability": { "enabled": false },
+
+  // At most 20 requests a minute from one address. Counted by Cloudflare, never stored here.
+  "ratelimits": [{ "name": "LIMITER", "namespace_id": "1001", "simple": { "limit": 20, "period": 60 } }]
+
+  // Optional, faster connections: put Hyperdrive in front of the database (README.md), then:
+  // "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "<your Hyperdrive id>" }]
+}
