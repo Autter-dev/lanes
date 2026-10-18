@@ -124,6 +124,7 @@ pub fn setup(on: bool) -> Result<Vec<(Agent, Vec<Change>)>> {
                 &vscode_settings()?,
                 &shared_skills()?,
                 &record()?,
+                copilot::lane_exe().as_deref(),
                 on,
             )?,
             _ => Vec::new(),

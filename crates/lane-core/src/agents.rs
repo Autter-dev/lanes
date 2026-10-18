@@ -789,6 +789,14 @@ pub(crate) fn on_path(program: &str) -> bool {
     })
 }
 
+/// The first `file` on PATH, by its absolute path.
+pub(crate) fn find_on_path(file: &str) -> Option<PathBuf> {
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .filter(|dir| dir.is_absolute())
+        .map(|dir| dir.join(file))
+        .find(|p| p.is_file())
+}
+
 /// A path in the repo from a `/`-separated one, spelled the system's way.
 fn in_repo(root: &Path, rel: &str) -> PathBuf {
     rel.split('/')

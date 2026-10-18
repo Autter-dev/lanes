@@ -1588,6 +1588,247 @@ fn a_copilot_session_in_its_own_worktree_gets_a_lane_in_the_cli_and_in_vs_code()
     let _ = std::fs::remove_dir_all(worktree.parent().unwrap());
 }
 
+/// The Copilot hooks file Lanes 0.0.8 wrote, on every system.
+const COPILOT_0_0_8: &str = r#"{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "lane hook copilot session-start",
+        "powershell": "lane hook copilot session-start",
+        "timeoutSec": 300
+      }
+    ],
+    "preToolUse": [
+      {
+        "type": "command",
+        "bash": "command -v lane >/dev/null 2>&1 || exit 0; lane hook copilot pre-tool-use",
+        "powershell": "lane hook copilot pre-tool-use",
+        "timeoutSec": 10
+      }
+    ]
+  }
+}
+"#;
+
+/// The `agent-hooks` check from `lane doctor --json`.
+fn agent_hooks_check(dir: &PathBuf) -> serde_json::Value {
+    let doctor = json(&lane(dir, &["doctor", "--json"]));
+    doctor["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == "agent-hooks")
+        .unwrap()
+        .clone()
+}
+
+/// Whether `lane setup --json` says Copilot is set up.
+fn copilot_set_up(dir: &PathBuf, args: &[&str]) -> bool {
+    let v = json(&lane(dir, args));
+    v["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["id"] == "copilot")
+        .unwrap()["set_up"]
+        .as_bool()
+        .unwrap()
+}
+
+#[test]
+fn a_machine_set_up_by_0_0_8_gets_copilots_hooks_rewritten_on_windows() {
+    let dir = config_dir("copilot-0-0-8");
+    let home = dir.join("home");
+    std::fs::create_dir_all(home.join(".copilot")).unwrap();
+    assert!(copilot_set_up(&dir, &["setup", "--yes", "--json"]));
+    let hooks = home.join(".copilot/hooks/lanes.json");
+    std::fs::write(&hooks, COPILOT_0_0_8).unwrap();
+
+    let check = agent_hooks_check(&dir);
+    if cfg!(windows) {
+        // Its commands run `lane` by name: without it, the Copilot CLI turns down every tool.
+        assert!(!copilot_set_up(&dir, &["setup", "--json"]));
+        assert_eq!(check["status"], "warn", "{check}");
+        assert!(
+            check["summary"].as_str().unwrap().contains("Lanes 0.0.8"),
+            "{check}"
+        );
+        assert!(
+            check["hint"]
+                .as_str()
+                .unwrap()
+                .contains("`lane setup --yes`"),
+            "{check}"
+        );
+        assert_eq!(std::fs::read_to_string(&hooks).unwrap(), COPILOT_0_0_8);
+
+        assert!(copilot_set_up(&dir, &["setup", "--yes", "--json"]));
+        let text = std::fs::read_to_string(&hooks).unwrap();
+        assert!(text.contains("cmd /d /c "), "{text}");
+        assert_eq!(agent_hooks_check(&dir)["status"], "ok");
+
+        // Hooks whose `lane` has gone do nothing, and doctor says so.
+        let gone = dir.join("gone").join("lane.exe");
+        std::fs::write(
+            &hooks,
+            lane_core::agents::copilot::hooks_file(true, Some(&gone)),
+        )
+        .unwrap();
+        let check = agent_hooks_check(&dir);
+        assert_eq!(check["status"], "warn", "{check}");
+        assert!(
+            check["summary"]
+                .as_str()
+                .unwrap()
+                .contains("isn't there any more"),
+            "{check}"
+        );
+        assert!(copilot_set_up(&dir, &["setup", "--yes", "--json"]));
+        assert_eq!(agent_hooks_check(&dir)["status"], "ok");
+    } else {
+        // macOS and Linux: 0.0.8's file is the current one, so nothing changes.
+        assert_eq!(check["status"], "ok", "{check}");
+        assert!(copilot_set_up(&dir, &["setup", "--yes", "--json"]));
+        assert_eq!(std::fs::read_to_string(&hooks).unwrap(), COPILOT_0_0_8);
+    }
+
+    lane(&dir, &["setup", "--yes", "--agents", "off", "--json"]);
+    assert!(!home.join(".copilot/hooks").exists());
+}
+
+/// Run a hook command the way Copilot does on Windows, with `stdin`, in `shell`: `cmd` the way
+/// VS Code runs it without cmd.exe as ComSpec (Node's `shell: true`), else a PowerShell, the way
+/// VS Code (`powershell.exe`) and the Copilot CLI (`pwsh`) run it.
+#[cfg(windows)]
+fn run_copilot_hook(dir: &PathBuf, shell: &str, command: &str, stdin: &[u8]) -> Output {
+    use std::os::windows::process::CommandExt;
+    let mut cmd = Command::new(shell);
+    match shell {
+        "cmd.exe" => cmd.raw_arg(format!("/d /s /c \"{command}\"")),
+        _ => cmd.args([
+            "-ExecutionPolicy",
+            "Bypass",
+            "-NoProfile",
+            "-NoLogo",
+            "-Command",
+            command,
+        ]),
+    };
+    let mut child = cmd
+        .env("LANE_CONFIG_DIR", dir)
+        .env("LANE_STATE_DIR", dir.join("state"))
+        .env("LANE_AGENTS_HOME", dir.join("home"))
+        .env("LANE_TELEMETRY_URL", NO_COUNT)
+        .env("LANE_DAEMON", "0")
+        .env("POWERSHELL_UPDATECHECK", "Off")
+        .env_remove("LANE_REQUEST_ID")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the shell runs");
+    child.stdin.take().unwrap().write_all(stdin).unwrap();
+    child.wait_with_output().unwrap()
+}
+
+#[cfg(windows)]
+#[test]
+fn copilots_windows_hooks_do_nothing_without_lane_in_cmd_and_powershell() {
+    use lane_core::agents::copilot::hooks_file;
+    let dir = config_dir("copilot-windows-shells");
+    let repo = repo_with_commit("copilot-windows-shells");
+    std::fs::write(repo.join("lane.toml"), "version = 1\n").unwrap();
+    // `lane` where people have it: a space, brackets, an apostrophe.
+    let lane = dir
+        .join("Program Files (x86)")
+        .join("O'Brien Lanes")
+        .join("lane.exe");
+    std::fs::create_dir_all(lane.parent().unwrap()).unwrap();
+    std::fs::copy(env!("CARGO_BIN_EXE_lane"), &lane).unwrap();
+    let gone = dir.join("Uninstalled (x86)").join("lane.exe");
+
+    let commands = |lane: &std::path::Path| {
+        let v: serde_json::Value = serde_json::from_str(&hooks_file(true, Some(lane))).unwrap();
+        ["sessionStart", "preToolUse"].map(|event| {
+            v["hooks"][event][0]["powershell"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
+    };
+    // A copy of the repo, which `lane` turns down, from the Copilot CLI and from VS Code.
+    let copy = [
+        serde_json::json!({
+            "cwd": repo,
+            "toolName": "powershell",
+            "toolArgs": serde_json::json!({ "command": "git worktree add ../x" }).to_string(),
+        }),
+        serde_json::json!({
+            "cwd": repo,
+            "hook_event_name": "PreToolUse",
+            "tool_name": "run_in_terminal",
+            "tool_input": { "command": "git worktree add ../x" },
+        }),
+    ];
+    let session = serde_json::json!({ "cwd": repo, "source": "new" });
+
+    let mut shells = vec!["cmd.exe".to_string()];
+    let system = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+    shells.push(format!(
+        r"{system}\System32\WindowsPowerShell\v1.0\powershell.exe"
+    ));
+    let pwsh = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+        .map(|d| d.join("pwsh.exe"))
+        .find(|p| p.is_file());
+    shells.extend(pwsh.map(|p| p.display().to_string()));
+
+    for shell in &shells {
+        // `lane` has gone: exit 0 and not a word, for both hooks, so Copilot's own rules apply.
+        let [start, tool] = commands(&gone);
+        for (command, input) in [(&start, &session), (&tool, &copy[0]), (&tool, &copy[1])] {
+            let out = run_copilot_hook(&dir, shell, command, input.to_string().as_bytes());
+            assert_eq!(out.status.code(), Some(0), "{shell}: {out:?}");
+            assert!(
+                out.stdout.is_empty() && out.stderr.is_empty(),
+                "{shell}: {out:?}"
+            );
+        }
+
+        // `lane` is there: it gets the input, and its deny, exit 2, reaches Copilot.
+        let [start, tool] = commands(&lane);
+        for input in &copy {
+            let out = run_copilot_hook(&dir, shell, &tool, input.to_string().as_bytes());
+            assert_eq!(out.status.code(), Some(2), "{shell}: {out:?}");
+            assert!(
+                String::from_utf8_lossy(&out.stderr).contains("lane new"),
+                "{shell}: {out:?}"
+            );
+        }
+        assert_eq!(
+            json(&run_copilot_hook(
+                &dir,
+                shell,
+                &tool,
+                copy[0].to_string().as_bytes()
+            ))["permissionDecision"],
+            "deny"
+        );
+        let ok = serde_json::json!({
+            "cwd": repo,
+            "toolName": "powershell",
+            "toolArgs": serde_json::json!({ "command": "npm test" }).to_string(),
+        });
+        let out = run_copilot_hook(&dir, shell, &tool, ok.to_string().as_bytes());
+        assert_eq!(out.status.code(), Some(0), "{shell}: {out:?}");
+        assert!(out.stdout.is_empty(), "{shell}: {out:?}");
+        let out = run_copilot_hook(&dir, shell, &start, session.to_string().as_bytes());
+        assert_eq!(out.status.code(), Some(0), "{shell}: {out:?}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn logs_keep_what_changed_lanes() {
     let dir = config_dir("logs");
