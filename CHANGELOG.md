@@ -8,7 +8,7 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-18
 
-- `17:05` **Added**: `lane mcp`, an MCP server over stdio, so coding agents read the repo and make lanes through tools: `repo.read` (a file or some of its lines, and nothing outside the repo), `repo.outline` (top-level definitions and their line numbers, best effort for Rust, TypeScript, JavaScript, Python and Go), `repo.grep` (`git grep`, so `.gitignore` is respected), `lane.new` and `lane.list`. A tool's errors say what to do next, as the commands do. Add it to Claude Code with `claude mcp add lanes -- lane mcp`; Lanes doesn't change any agent's settings for it. Built on `rmcp`, the official Rust MCP SDK.
+- `17:05` **Added**: `lane mcp`, an MCP server over stdio, so coding agents read the repo and make lanes through tools: `repo.read` (a file or some of its lines, and nothing outside the repo), `repo.outline` (top-level definitions and their line numbers, best effort for Rust, TypeScript, JavaScript, Python and Go), `repo.grep` (`git grep`, so `.gitignore` is respected), `lane.new` and `lane.list`. A tool's errors say what to do next, as the commands do. Add it to Claude Code with `claude mcp add lanes -- lane mcp`; Lanes doesn't change any agent's settings for it. Built on `rmcp`, the official Rust MCP SDK. (`0d3a709`)
 - `14:58` **Changed**: the website offers 0.0.7. The guide shows the guided `lane init` with its Y/n questions, the terminal app and what lanes saved, `lane doctor --fix`, and what the install count sends with `lane telemetry`. (`4e7be85`)
 
 ## 0.0.7 (2026-10-18)
