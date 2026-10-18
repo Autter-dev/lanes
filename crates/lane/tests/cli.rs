@@ -1945,6 +1945,8 @@ fn a_hanging_endpoint_never_slows_a_command() {
 #[test]
 fn telemetry_switches_by_value_and_says_what_it_sends() {
     let dir = config_dir("telemetry-cmd");
+    // As on a person's machine: CI forces the count off, and these runs shouldn't look like CI.
+    let lane = |dir: &PathBuf, args: &[&str]| lane_counting(dir, NO_COUNT, &[], args);
     let on = json(&lane(&dir, &["telemetry", "on", "--json"]));
     assert_eq!(
         (on["on"].clone(), on["saved"].clone()),
