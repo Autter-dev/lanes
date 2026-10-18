@@ -8,7 +8,7 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-18
 
-- `17:20` **Changed**: `laned` is the one writer. While it runs, `lane new`, `lane rm` and `lane adopt`, agents' hooks, `lane doctor --fix` and the terminal app send it their changes, and it makes them one at a time per repo.
+- `17:20` **Changed**: `laned` is the one writer. While it runs, `lane new`, `lane rm` and `lane adopt`, agents' hooks, `lane doctor --fix` and the terminal app send it their changes, and it makes them one at a time per repo (`0b0a6d4`).
   - Install output comes back to your terminal as it happens, and installs run with your environment (PATH, package manager settings), not the daemon's.
   - Results and errors are exactly as before: the same output, `--json`, exit codes and hints.
   - Once it has a change it finishes it, even if the command that asked is stopped, so no lane is left half made. If it stops mid-change, the command says so and how to check where it got to.
