@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Btrfs and XFS runners, and a Windows Dev Drive, come later for clone tests.
+        # Clones on Btrfs, XFS and ReFS (a Windows Dev Drive's filesystem) run in `clones` below.
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
