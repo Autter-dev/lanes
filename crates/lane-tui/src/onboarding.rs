@@ -985,7 +985,7 @@ impl Onboarding {
         lines.push(widgets::privacy_flow(th, self.t(), self.telemetry));
         lines.push(Line::default());
         lines.push(Line::styled(
-            "Change it any time with `lane setup`, or set DO_NOT_TRACK=1.",
+            "Change it any time with `lane telemetry off`, or set DO_NOT_TRACK=1.",
             th.muted(),
         ));
         lines

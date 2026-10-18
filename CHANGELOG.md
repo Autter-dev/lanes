@@ -8,6 +8,11 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-18
 
+- `13:19` **Added**: the anonymous install count, and `lane telemetry` to see and switch it.
+  - Once Lanes is set up (the welcome or `lane setup`), and once after each upgrade, it sends exactly what the welcome lists: a random install id, the Lanes version, the OS and CPU type, and how Lanes was installed (Homebrew, npm, Scoop, winget, cargo or the install scripts). Nothing is sent before the setting is chosen.
+  - Never from CI, and never with `lane telemetry off`, `LANE_TELEMETRY=0` or `DO_NOT_TRACK=1`. It's sent in the background with a 1-second limit, and no command, or anything reading its output, waits for it.
+  - `lane telemetry` shows exactly what this machine sends; `lane telemetry on` and `off` switch it, and `--json` prints it for scripts.
+  - Not live yet: nothing leaves the machine until the address it sends to is set.
 - `12:09` **Added**: the terminal app's home screen shows your lanes live, and what they saved (`677d880`).
   - **Every lane** with its agent (Claude Code, Codex, Cursor), status (running when its app answers on its port), URL, changed files, last test run through `lane exec`, and the extra disk it takes. Narrow terminals drop the agent and tests columns.
   - **Saved by lanes:** disk as two bars on one scale, a worktree plus its own install for each lane against what the lanes really take, plus the installs lanes skipped and the time that saved. Lanes measures each new lane as it makes it, so lanes made before this show nothing rather than a guess.

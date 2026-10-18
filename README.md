@@ -89,7 +89,7 @@ A checkpoint after every agent step. `lane undo` takes back any step; `lane rest
 Builds and tests take turns, so five agents don't freeze your machine. Dev servers start only when you open them.
 
 **Your code stays on your machine**<br>
-Works offline. Signing in is optional, and connecting a repo to the gateway is always your choice. The only thing Lanes sends is an anonymous install count: version, OS and how you installed it. Never code, file paths or repo names. Turn it off with `lane telemetry off` or `DO_NOT_TRACK=1`.
+Works offline. Signing in is optional, and connecting a repo to the gateway is always your choice. The only thing Lanes sends is an anonymous install count, once when it's set up and once after each upgrade: a random install id, the version, your OS and CPU type, and how you installed it. Never code, file paths or repo names. `lane telemetry` shows exactly what your machine sends; turn it off with `lane telemetry off` or `DO_NOT_TRACK=1`.
 
 **Ready for teams**<br>
 `lane login` signs you into [Autter](https://autter.dev) and connects your lanes to the Lanes gateway on Autter. Cloud agents and CI read your repo without cloning, and you get repo Q&A, security checks while agents work, and a safe-to-merge verdict on every PR. See [the Lanes gateway](#05--lanes-gateway).
@@ -250,7 +250,7 @@ Coming next:
 | `lane promote <name>` | Turns a lane into one clean PR |
 | `lane gc` | Removes every finished lane |
 | `lane login` | Signs in to Autter and connects the Lanes gateway (optional) |
-| `lane telemetry off` | Turns off the anonymous install count (today: `lane setup --yes --telemetry off`, or `LANE_TELEMETRY=0`) |
+| `lane telemetry` | Shows exactly what the anonymous install count sends from your machine; `lane telemetry off` turns it off (so do `LANE_TELEMETRY=0` and `DO_NOT_TRACK=1`) |
 
 <br>
 
@@ -268,7 +268,7 @@ No. Lanes works on top of the Git repo and the GitHub you already use.
 <summary>Does my code leave my machine?</summary>
 <br>
 
-Not unless you choose to connect a repo to the Lanes gateway on Autter. Otherwise Lanes runs locally, and the only thing it sends is an anonymous install count (version, OS and how you installed it), which you can turn off.
+Not unless you choose to connect a repo to the Lanes gateway on Autter. Otherwise Lanes runs locally, and the only thing it sends is an anonymous install count (a random install id, the version, your OS and CPU type, and how you installed it), which you can turn off.
 
 </details>
 

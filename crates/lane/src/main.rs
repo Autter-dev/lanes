@@ -21,6 +21,7 @@ use lane_core::error::{Error, Result};
 use lane_core::machine::{self, Check};
 use lane_core::project::Project;
 use lane_core::state::{Lane, Status, Store};
+use lane_core::telemetry;
 use lane_core::{VERSION, exit};
 use lane_core::{detect, lane_env, next};
 use lane_tui::theme::Theme;
@@ -36,16 +37,17 @@ Usage: lane [command] [args]
 Run `lane` on its own in a terminal to open the Lanes app (a short welcome on the first run).
 
 Commands:
-  setup    Check this machine and choose your settings
-  init     Find this repo's stack and write lane.toml
-  new      Create a lane
-  list     List lanes with their ports and folders
-  exec     Run a command inside a lane, with its ports
-  env      Print a lane's variables (PORT, LANE_URL, ...)
-  rm       Remove a lane
-  adopt    Turn a worktree you already have into a lane
-  doctor   Check what could stop lanes working, and say how to fix it
-  logs     Show what Lanes did: lanes made and removed, agents' hooks, installs
+  setup      Check this machine and choose your settings
+  init       Find this repo's stack and write lane.toml
+  new        Create a lane
+  list       List lanes with their ports and folders
+  exec       Run a command inside a lane, with its ports
+  env        Print a lane's variables (PORT, LANE_URL, ...)
+  rm         Remove a lane
+  adopt      Turn a worktree you already have into a lane
+  doctor     Check what could stop lanes working, and say how to fix it
+  logs       Show what Lanes did: lanes made and removed, agents' hooks, installs
+  telemetry  Show or switch the anonymous install count (on, off, status)
 
 Start in a repo:
   lane init                            find your stack and write lane.toml
@@ -234,6 +236,21 @@ Options:
   -h, --help      Show this help
 ";
 
+const TELEMETRY_HELP: &str = "\
+lane telemetry: the anonymous install count
+
+Usage: lane telemetry [status|on|off] [--json]
+
+Once Lanes is set up, and once after each upgrade, it sends a random install id, the Lanes
+version, your OS and CPU type, and how you installed it. Nothing else: never code, file paths,
+repo names or your IP address. `status` (the default) shows exactly what this machine would send.
+DO_NOT_TRACK=1 or LANE_TELEMETRY=0 turn it off whatever the setting says, and CI never sends it.
+
+Options:
+  --json       Print {\"on\": ..., \"setting\": ..., \"forced_off\": ..., \"sends\": {...}}
+  -h, --help   Show this help
+";
+
 const SETUP_HELP: &str = "\
 lane setup: check this machine and choose your settings
 
@@ -257,7 +274,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let env = Env::current();
 
-    match args.first().map(String::as_str) {
+    let code = match args.first().map(String::as_str) {
         None => open_app(&env),
         Some("-h" | "--help" | "help") => {
             print!("{HELP}");
@@ -278,13 +295,20 @@ fn main() -> ExitCode {
         Some("hook") => hook::hook(&args[1..]),
         Some("doctor") => doctor(&args[1..]),
         Some("logs") => run("logs", &args[1..], logs),
+        Some("telemetry") => run("telemetry", &args[1..], telemetry),
         Some(other) => report(
             None,
             &Error::usage(format!("unknown command `{other}`"))
                 .hint("Run `lane --help` to see the commands."),
             args::wants_json(&args),
         ),
+    };
+    // The install count, when the rules allow: after the command, in the background, so the
+    // welcome and `lane setup` have saved the choice first and nothing waits for it.
+    if let Ok(config) = Config::load() {
+        let _ = telemetry::maybe_send(&env, &config);
     }
+    code
 }
 
 /// Run a command and turn its error, if any, into output and an exit code.
@@ -1230,6 +1254,123 @@ fn logs(args: &[String]) -> Result<()> {
         println!("{mark} {at}  {:<ev_w$}  {lane}{}{ms}", e.event, e.message);
     }
     println!("\nFrom {} (UTC).", path.display());
+    Ok(())
+}
+
+/// `lane telemetry [status|on|off]`: what the install count sends from this machine, and the
+/// switch. Switching is safe to retry: it sets the value, it doesn't toggle.
+fn telemetry(args: &[String]) -> Result<()> {
+    let (common, rest) = args::split(args)?;
+    let mut action: Option<&str> = None;
+    for arg in &rest {
+        match arg.as_str() {
+            "-h" | "--help" => {
+                print!("{TELEMETRY_HELP}");
+                return Ok(());
+            }
+            a @ ("status" | "on" | "off") if action.is_none() => action = Some(a),
+            s if s.starts_with('-') => return Err(unknown_option("telemetry", s)),
+            s => {
+                return Err(Error::usage(format!("unexpected `{s}`")).hint(
+                    "Use `lane telemetry on`, `lane telemetry off` or `lane telemetry status`.",
+                ));
+            }
+        }
+    }
+    let env = Env::current();
+    let mut config = Config::load()?;
+    let switch = match action {
+        Some("on") => Some(true),
+        Some("off") => Some(false),
+        _ => None,
+    };
+    if let Some(on) = switch {
+        if config.telemetry != on {
+            config.telemetry = on;
+            config.save()?;
+        }
+        lane_core::log::info(
+            "telemetry",
+            format!("install count {}", if on { "on" } else { "off" }),
+        )
+        .write();
+    }
+    let forced = env.telemetry_forced_off();
+    let on = config.telemetry && forced.is_none();
+    let install = telemetry::Install::load();
+    let ping = telemetry::ping(install.id.as_deref().unwrap_or(""));
+    let endpoint = telemetry::endpoint(&env);
+    let next = telemetry::decide(&env, &config, &install, endpoint.clone());
+
+    if common.json {
+        let mut sends = serde_json::to_value(&ping).expect("serializes");
+        if install.id.is_none() {
+            sends["id"] = serde_json::Value::Null;
+        }
+        print_json(&serde_json::json!({
+            "on": on,
+            "setting": config.telemetry,
+            "forced_off": forced,
+            "sends": sends,
+            "counted": install.counted,
+            "endpoint": endpoint,
+            "saved": switch.is_some(),
+        }));
+        return Ok(());
+    }
+
+    let state = match (on, forced) {
+        (true, _) => "on".to_string(),
+        (false, Some(why)) => format!("off ({why})"),
+        (false, None) => "off".to_string(),
+    };
+    if switch.is_some() {
+        println!("Saved. Install count: {state}.");
+        if switch == Some(true)
+            && let Some(why) = forced
+        {
+            println!("It stays off while {why}.");
+        }
+    } else {
+        println!("Install count: {state}.");
+    }
+    println!();
+    println!(
+        "When it's on, Lanes sends this once it's set up and once after each upgrade, and nothing else:"
+    );
+    let id = install
+        .id
+        .clone()
+        .unwrap_or_else(|| "(made the first time it's sent)".into());
+    for (name, value, why) in [
+        ("id", id.as_str(), "random, not linked to you"),
+        ("version", ping.version, ""),
+        ("os", ping.os, ""),
+        ("arch", ping.arch, "your CPU type"),
+        ("channel", ping.channel, "how you installed Lanes"),
+    ] {
+        println!("  {name:<9} {value:<34} {why}");
+    }
+    println!("It never sends code, file paths, repo names or your IP address.");
+    if on {
+        match next {
+            Ok(_) => println!("This install is counted when this command finishes."),
+            Err(skip) => println!("Right now: {}.", skip.describe()),
+        }
+    }
+    println!();
+    let step = if on {
+        next::Step {
+            run: "lane telemetry off".into(),
+            why: "stop sending it".into(),
+        }
+    } else {
+        next::Step {
+            run: "lane telemetry on".into(),
+            why: "send it again (environment opt-outs still win)".into(),
+        }
+    };
+    print!("{}", next::render(&[step]));
     Ok(())
 }
 

@@ -29,9 +29,14 @@ fn lane_in(dir: &PathBuf, cwd: &std::path::Path, args: &[&str]) -> Output {
         .env_remove("DO_NOT_TRACK")
         .env_remove("LANE_TELEMETRY")
         .env_remove("CI")
+        .env("LANE_TELEMETRY_URL", NO_COUNT)
         .output()
         .expect("lane runs")
 }
+
+/// Where tests' install counts go, unless a test listens for them: a closed local port, so a
+/// test run never reaches the real endpoint.
+const NO_COUNT: &str = "http://127.0.0.1:9/";
 
 /// Run `lane` the way a Claude Code hook does: JSON on stdin, with extra environment.
 fn lane_hook(
@@ -50,6 +55,7 @@ fn lane_hook(
         .env_remove("CLAUDE_CONFIG_DIR")
         .env_remove("LANE_REQUEST_ID")
         .env_remove("CLAUDE_ENV_FILE")
+        .env("LANE_TELEMETRY_URL", NO_COUNT)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -1107,6 +1113,7 @@ fn hook_raw(
         .env("LANE_CONFIG_DIR", dir)
         .env("LANE_STATE_DIR", dir.join("state"))
         .env("LANE_AGENTS_HOME", dir.join("home"))
+        .env("LANE_TELEMETRY_URL", NO_COUNT)
         .env_remove("LANE_REQUEST_ID")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1388,6 +1395,7 @@ fn doctor_checks_what_could_stop_lanes_working() {
             .args(["doctor", "--json"])
             .current_dir(&repo)
             .env("PATH", path)
+            .env("LANE_TELEMETRY_URL", NO_COUNT)
             .env("LANE_CONFIG_DIR", &dir)
             .env("LANE_STATE_DIR", dir.join("state"))
             .env("LANE_AGENTS_HOME", dir.join("home"))
@@ -1478,6 +1486,7 @@ fn lane_typed(dir: &PathBuf, cwd: &std::path::Path, args: &[&str], answers: &str
         .env("LANE_STATE_DIR", dir.join("state"))
         .env("LANE_AGENTS_HOME", dir.join("home"))
         .env("LANE_INTERACTIVE", "1")
+        .env("LANE_TELEMETRY_URL", NO_COUNT)
         .env_remove("CLAUDE_CONFIG_DIR")
         .env_remove("LANE_REQUEST_ID")
         .env_remove("CI")
@@ -1670,4 +1679,293 @@ fn doctor_fix_makes_the_fixes_lanes_can_make() {
     assert_eq!(status("git-hook"), "ok");
     assert_eq!(status("lanes"), "info", "no lanes left in this repo");
     assert!(dir.join("home/.claude/settings.json").is_file());
+}
+
+// ---------- The install count ----------
+
+/// A stand-in for the install count's endpoint on a local port: it keeps the body of every
+/// request. With `answer` false it never replies, like a server that hangs.
+struct CountServer {
+    url: String,
+    bodies: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+fn count_server(answer: bool) -> CountServer {
+    use std::io::Read;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/count", listener.local_addr().unwrap());
+    let bodies = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let kept = bodies.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let kept = kept.clone();
+            std::thread::spawn(move || {
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 4096];
+                while let Ok(n) = stream.read(&mut chunk) {
+                    if n == 0 {
+                        break;
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                    let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") else {
+                        continue;
+                    };
+                    let head = String::from_utf8_lossy(&buf[..end]).to_ascii_lowercase();
+                    let len: usize = head
+                        .lines()
+                        .find_map(|l| l.strip_prefix("content-length:"))
+                        .and_then(|v| v.trim().parse().ok())
+                        .unwrap_or(0);
+                    if buf.len() < end + 4 + len {
+                        continue;
+                    }
+                    let body = String::from_utf8_lossy(&buf[end + 4..end + 4 + len]).into_owned();
+                    kept.lock().unwrap().push(body);
+                    if answer {
+                        let _ = stream
+                            .write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
+                    } else {
+                        std::thread::sleep(std::time::Duration::from_secs(10));
+                    }
+                    break;
+                }
+            });
+        }
+    });
+    CountServer { url, bodies }
+}
+
+impl CountServer {
+    /// What arrived once `n` requests have, or after `within`, whichever is first.
+    fn wait_for(&self, n: usize, within: std::time::Duration) -> Vec<String> {
+        let start = std::time::Instant::now();
+        loop {
+            let got = self.bodies.lock().unwrap().clone();
+            if got.len() >= n || start.elapsed() > within {
+                return got;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+}
+
+/// Run `lane` as on a person's machine (no CI, no opt-outs), counting installs to `url`.
+fn lane_counting(dir: &PathBuf, url: &str, env: &[(&str, &str)], args: &[&str]) -> Output {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_lane"));
+    cmd.args(args)
+        .current_dir(std::env::temp_dir())
+        .env("LANE_CONFIG_DIR", dir)
+        .env("LANE_STATE_DIR", dir.join("state"))
+        .env("LANE_AGENTS_HOME", dir.join("home"))
+        .env("LANE_TELEMETRY_URL", url)
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .env_remove("DO_NOT_TRACK")
+        .env_remove("LANE_TELEMETRY");
+    for ci in ["CI", "GITHUB_ACTIONS", "GITLAB_CI", "BUILDKITE", "TF_BUILD"] {
+        cmd.env_remove(ci);
+    }
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    cmd.output().expect("lane runs")
+}
+
+#[test]
+fn the_install_count_goes_once_after_setup_with_only_the_listed_fields() {
+    let server = count_server(true);
+    let dir = config_dir("count-once");
+
+    // Nothing before the setting is chosen.
+    assert!(
+        lane_counting(&dir, &server.url, &[], &["--version"])
+            .status
+            .success()
+    );
+    assert!(
+        server
+            .wait_for(1, std::time::Duration::from_millis(1500))
+            .is_empty()
+    );
+
+    let out = lane_counting(&dir, &server.url, &[], &["setup", "--yes", "--json"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let got = server.wait_for(1, std::time::Duration::from_secs(10));
+    assert_eq!(got.len(), 1, "{got:?}");
+    let ping: serde_json::Value = serde_json::from_str(&got[0]).unwrap();
+    let mut keys: Vec<&str> = ping
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort();
+    assert_eq!(
+        keys,
+        ["arch", "channel", "id", "os", "version"],
+        "only what the welcome lists"
+    );
+    assert_eq!(ping["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(ping["channel"], "source", "a test binary lives in target/");
+    let id = ping["id"].as_str().unwrap();
+    assert_eq!(id.len(), 32);
+    assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+
+    // Counted once per version: later commands send nothing more.
+    assert!(
+        lane_counting(&dir, &server.url, &[], &["--version"])
+            .status
+            .success()
+    );
+    assert!(
+        lane_counting(&dir, &server.url, &[], &["telemetry"])
+            .status
+            .success()
+    );
+    assert_eq!(
+        server
+            .wait_for(2, std::time::Duration::from_millis(1500))
+            .len(),
+        1
+    );
+
+    // `lane telemetry` shows the same id, and that this version was counted.
+    let status = json(&lane_counting(
+        &dir,
+        &server.url,
+        &[],
+        &["telemetry", "--json"],
+    ));
+    assert_eq!(status["on"], true);
+    assert_eq!(status["sends"]["id"], id);
+    assert_eq!(status["counted"], env!("CARGO_PKG_VERSION"));
+}
+
+#[test]
+fn opt_outs_ci_and_the_off_switch_send_nothing() {
+    let server = count_server(true);
+    // (settings folder, extra environment, arguments)
+    type Case<'a> = (&'a str, &'a [(&'a str, &'a str)], &'a [&'a str]);
+    let cases: [Case; 5] = [
+        (
+            "count-dnt",
+            &[("DO_NOT_TRACK", "1")],
+            &["setup", "--yes", "--json"],
+        ),
+        (
+            "count-env",
+            &[("LANE_TELEMETRY", "0")],
+            &["setup", "--yes", "--json"],
+        ),
+        ("count-ci", &[("CI", "true")], &["setup", "--yes", "--json"]),
+        (
+            "count-gha",
+            &[("GITHUB_ACTIONS", "true")],
+            &["setup", "--yes", "--json"],
+        ),
+        (
+            "count-off",
+            &[],
+            &["setup", "--yes", "--telemetry", "off", "--json"],
+        ),
+    ];
+    for (name, env, args) in cases {
+        let out = lane_counting(&config_dir(name), &server.url, env, args);
+        assert!(
+            out.status.success(),
+            "{name}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    // Switched off after setup: the next command sends nothing either.
+    let dir = config_dir("count-switched");
+    let off = json(&lane_counting(
+        &dir,
+        &server.url,
+        &[("DO_NOT_TRACK", "1")],
+        &["setup", "--yes", "--json"],
+    ));
+    assert_eq!(
+        off["settings"]["telemetry_forced_off"],
+        "DO_NOT_TRACK is set"
+    );
+    let switched = json(&lane_counting(
+        &dir,
+        &server.url,
+        &[],
+        &["telemetry", "off", "--json"],
+    ));
+    assert_eq!(switched["on"], false);
+    assert_eq!(switched["saved"], true);
+    assert!(
+        lane_counting(&dir, &server.url, &[], &["--version"])
+            .status
+            .success()
+    );
+
+    assert!(
+        server
+            .wait_for(1, std::time::Duration::from_secs(2))
+            .is_empty(),
+        "nothing may be sent"
+    );
+}
+
+#[test]
+fn a_hanging_endpoint_never_slows_a_command() {
+    let server = count_server(false);
+    let dir = config_dir("count-hang");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("config.toml"),
+        "onboarded = \"0.0.1\"\ntelemetry = true\n",
+    )
+    .unwrap();
+    let started = std::time::Instant::now();
+    let out = lane_counting(&dir, &server.url, &[], &["--version"]);
+    let took = started.elapsed();
+    assert!(out.status.success());
+    // curl gives up after 1 s; `lane` doesn't wait for it, and nor does whoever reads its output.
+    assert!(
+        took < std::time::Duration::from_millis(900),
+        "took {took:?}"
+    );
+    assert_eq!(
+        server.wait_for(1, std::time::Duration::from_secs(10)).len(),
+        1,
+        "it was still sent"
+    );
+}
+
+#[test]
+fn telemetry_switches_by_value_and_says_what_it_sends() {
+    let dir = config_dir("telemetry-cmd");
+    let on = json(&lane(&dir, &["telemetry", "on", "--json"]));
+    assert_eq!(
+        (on["on"].clone(), on["saved"].clone()),
+        (true.into(), true.into())
+    );
+    assert!(on["sends"]["id"].is_null(), "no id until the first send");
+    // Setting a value is safe to retry: twice off is off.
+    for _ in 0..2 {
+        assert_eq!(
+            json(&lane(&dir, &["telemetry", "off", "--json"]))["setting"],
+            false
+        );
+    }
+    let text = String::from_utf8_lossy(&lane(&dir, &["telemetry"]).stdout).into_owned();
+    assert!(text.contains("Install count: off."), "{text}");
+    assert!(
+        text.contains("never sends code, file paths, repo names"),
+        "{text}"
+    );
+    assert!(text.contains("lane telemetry on"), "{text}");
+    let bad = lane(&dir, &["telemetry", "maybe"]);
+    assert_eq!(bad.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&bad.stderr).contains("lane telemetry off"));
 }
