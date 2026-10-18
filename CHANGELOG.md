@@ -6,6 +6,25 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ## Unreleased
 
+## 0.0.6 (2026-10-18)
+
+**See what Lanes did, and what could stop it.** Two new commands, `lane doctor` and `lane logs`. A small update to 0.0.5, and still a preview.
+
+```sh
+lane doctor          # what could stop lanes working, and how to fix each thing
+lane logs            # what Lanes did: lanes made and removed, agents' hooks, installs
+lane logs fix-auth   # only what happened to one lane
+```
+
+In this version:
+- `lane doctor` checks your machine (Git, whether your disk clones files, free space), that `lane` is on PATH for agents' hooks, which agents put their work in lanes, this repo's Git hook, lanes whose folders have gone, the daemon, and recent errors. Each problem says what to do next. It exits 1 only when something must be fixed, and takes `--json`.
+- `lane logs` shows what Lanes did, newest last: lanes made and removed, agents' worktrees that became lanes, copies of the repo it turned down, and dependency installs. Lanes keeps the log in a file next to its state. Inside an agent's hook, problems and install output now go there instead of into the agent's view.
+- CI runs every test on Btrfs, XFS and ReFS disks too, and a lane there must be cloned, never copied.
+
+Not yet:
+- Gemini CLI, Copilot and other agents get lanes only when they make a Git worktree, through the hook `lane init` adds.
+- There's no background daemon, no checkpoints or undo, no promote to a pull request, and no database per lane.
+
 ### 2026-10-18
 
 - `03:00` **Added**: `lane doctor` checks what could stop lanes working, and says how to fix each thing. Exit code 1 when something must be fixed, and `--json` for scripts. (`d742748`)
@@ -17,6 +36,7 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
   - The daemon, and errors in the log.
 - `03:00` **Added**: `lane logs [<lane>]` shows what Lanes did, newest last: lanes made and removed, agents' hooks (worktrees that became lanes, copies turned down), dependency installs and failures. Lanes keeps one line per event in `lane.log` next to its state, and moves it aside past 2 MB. Inside an agent's hook, problems and an install's own output now go to the log instead of the agent's view. `-n`, `--path` and `--json` too. (`d742748`)
 - `03:00` **Changed**: CI runs every test, not only the clone tests, on its Btrfs, XFS and ReFS disks, with the test repos and their lanes on those disks. Lanes there must be cloned, never copied; macOS (APFS) is held to the same rule. (`d742748`)
+
 ### 2026-10-17
 
 - `18:51` **Changed**: the website offers 0.0.5, and the [guide](https://lanes.autter.dev/guide/) is rewritten around agents making lanes on their own: set it up once, start your agents as usual (Claude Code, Codex, Cursor), see the lanes and run the app. Making a lane by hand and `lane init` are now optional steps.
