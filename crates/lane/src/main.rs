@@ -23,6 +23,7 @@ use lane_core::machine::{self, Check};
 use lane_core::project::Project;
 use lane_core::state::{Lane, Status, Store};
 use lane_core::telemetry;
+use lane_core::writes::{self, Via};
 use lane_core::{VERSION, exit};
 use lane_core::{detect, lane_env, next};
 use lane_tui::theme::Theme;
@@ -243,11 +244,15 @@ lane daemon: laned, the Lanes daemon
 
 Usage: lane daemon [status|start|stop] [--json]
 
-laned runs in the background, one per user, and keeps the terminal app live: it reads each
-repo's lanes once and sends every open app what changed. The terminal app starts it, and it
-stops by itself after half an hour with nobody connected. Nothing needs it: every command works
-without it, and stopping it loses nothing. Agents' hooks, scripts and CI never start it, and
-LANE_DAEMON=0 keeps the terminal app from starting it too.
+laned runs in the background, one per user. It's the one writer: while it runs, `lane new`,
+`rm` and `adopt`, agents' hooks and the terminal app send it their changes, and it makes them one
+at a time per repo, with your environment, showing install output as it goes. It also keeps the
+terminal app live: it reads each repo's lanes once and sends every open app what changed.
+
+The terminal app and your own `lane new`, `rm` and `adopt` start it when it isn't running. It
+stops by itself after half an hour with nobody connected. Agents' sessions, hooks and CI never
+start it (they use it if it's running), and LANE_DAEMON=0 keeps anything from starting it.
+Nothing needs it: every command works without it, and stopping it loses nothing.
 
   status   whether it's running, since when, and who's connected (the default)
   start    start it, unless it's running; a laned from another Lanes version is replaced
@@ -518,14 +523,17 @@ fn new(args: &[String]) -> Result<()> {
     })?;
     let started = std::time::Instant::now();
     let repo = Repo::open(&here())?;
-    let mut store = Store::open()?;
-    let made = engine::new_lane(
-        &mut store,
-        &repo,
-        &name,
-        agent.as_deref(),
-        common.request_id.as_deref(),
-    )?;
+    let made = writes::make(
+        &writes::Write::New {
+            repo: repo.root.clone(),
+            name,
+            agent,
+            request_id: common.request_id.clone(),
+        },
+        Via::for_env(&Env::current()),
+        &mut writes::to_stderr_or_log,
+    )?
+    .made()?;
     let total = started.elapsed().as_secs_f64();
     lane_core::log::info(
         "new",
@@ -615,14 +623,17 @@ fn rm(args: &[String]) -> Result<()> {
             .hint("Run `lane list` to see the lanes you can remove.")
     })?;
     let repo = Repo::open(&here())?;
-    let mut store = Store::open()?;
-    let lane = engine::remove(
-        &mut store,
-        &repo,
-        &name,
-        keep_files,
-        common.request_id.as_deref(),
-    )?;
+    let lane = writes::make(
+        &writes::Write::Remove {
+            repo: repo.root.clone(),
+            name,
+            keep_files,
+            request_id: common.request_id.clone(),
+        },
+        Via::for_env(&Env::current()),
+        &mut writes::to_stderr_or_log,
+    )?
+    .lane()?;
     lane_core::log::info(
         "rm",
         match keep_files {
@@ -636,7 +647,7 @@ fn rm(args: &[String]) -> Result<()> {
     .lane(&lane.name)
     .repo(&repo.root)
     .write();
-    let steps = next::after_rm(&repo, store.lanes(Some(&repo.root))?.len());
+    let steps = next::after_rm(&repo, Store::open()?.lanes(Some(&repo.root))?.len());
     if common.json {
         print_json(&serde_json::json!({ "removed": lane, "next": steps }));
         return Ok(());
@@ -681,19 +692,31 @@ fn adopt(args: &[String]) -> Result<()> {
             }
         }
     }
-    let path = path.unwrap_or_else(here);
+    // Absolute, so it means the same to laned, which runs elsewhere.
+    let path = std::path::absolute(path.unwrap_or_else(here)).map_err(|e| {
+        Error::new(ErrorKind::Io, format!("couldn't resolve that folder: {e}"))
+            .hint("Pass the worktree's folder, like `lane adopt ../my-worktree`.")
+    })?;
     let repo = Repo::open(&path)?;
-    let mut store = Store::open()?;
-    let lane = engine::adopt(
-        &mut store,
-        &repo,
-        &path,
-        name.as_deref(),
-        agent.as_deref(),
-        common.request_id.as_deref(),
-    )?;
+    let via = Via::for_env(&Env::current());
+    let lane = writes::make(
+        &writes::Write::Adopt {
+            repo: repo.root.clone(),
+            path,
+            name,
+            agent,
+            request_id: common.request_id.clone(),
+        },
+        via,
+        &mut writes::to_stderr_or_log,
+    )?
+    .lane()?;
     let made_ready = if ready {
-        Some(engine::make_ready(&mut store, &repo, &lane)?)
+        let ready = writes::Write::Ready {
+            repo: repo.root.clone(),
+            path: lane.path.clone(),
+        };
+        Some(writes::make(&ready, via, &mut writes::to_stderr_or_log)?.ready()?)
     } else {
         None
     };
@@ -1353,6 +1376,7 @@ fn daemon_command(args: &[String]) -> Result<()> {
             // Not counting this command's own connection.
             out["clients"] = s.clients.saturating_sub(1).into();
             out["watching"] = s.watching.into();
+            out["writes"] = s.writes.into();
         }
         if let Some(was) = stopped {
             out["stopped"] = was.into();

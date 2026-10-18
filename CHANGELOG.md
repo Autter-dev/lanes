@@ -8,6 +8,12 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-18
 
+- `17:20` **Changed**: `laned` is the one writer. While it runs, `lane new`, `lane rm` and `lane adopt`, agents' hooks, `lane doctor --fix` and the terminal app send it their changes, and it makes them one at a time per repo.
+  - Install output comes back to your terminal as it happens, and installs run with your environment (PATH, package manager settings), not the daemon's.
+  - Results and errors are exactly as before: the same output, `--json`, exit codes and hints.
+  - Once it has a change it finishes it, even if the command that asked is stopped, so no lane is left half made. If it stops mid-change, the command says so and how to check where it got to.
+  - Your own `lane new`, `rm` and `adopt` start it when it isn't running. Agents' sessions, hooks and CI only use it if it's running, and `LANE_DAEMON=0` keeps anything from starting it. Without it, everything runs in `lane` as before.
+  - `lane daemon status` counts the changes it has made.
 - `17:02` **Added**: `laned`, the daemon, keeps the terminal app live, and `lane daemon` shows, starts and stops it (`e1b9b5a`).
   - One runs per user. The terminal app starts it; agents' hooks, scripts and CI never do, and `LANE_DAEMON=0` stops the app from starting it too. It stops by itself after half an hour with nobody connected.
   - It reads each repo's lanes once, however many terminal apps watch, and sends them only what changed. The app's status bar says "daemon running". If the daemon goes away, the app carries on by reading Lanes' state itself.

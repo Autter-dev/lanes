@@ -10,9 +10,12 @@
 //! nothing, and every caller falls back to reading the state itself.
 
 use crate::VERSION;
+use crate::engine::Output;
 use crate::env::Env;
+use crate::error::Error;
 use crate::snapshot::Snapshot;
 use crate::state::Lane;
+use crate::writes::{Done, Write as LaneWrite};
 use interprocess::local_socket::prelude::*;
 use interprocess::local_socket::traits::RecvHalf as _;
 use interprocess::local_socket::{Name, RecvHalf, SendHalf, Stream};
@@ -23,7 +26,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 /// The message format. Bump it when a message changes shape.
-pub const PROTOCOL: u32 = 1;
+pub const PROTOCOL: u32 = 2;
 
 /// What a client asks.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -49,6 +52,13 @@ pub enum Request {
     },
     /// Stop the daemon (after replying `bye`).
     Shutdown,
+    /// Make a change to the lanes (`lane new`, `rm`, `adopt`, ready). Install output comes back
+    /// as `output` lines, then `done` or `failed`. `env` is the caller's environment, which
+    /// installs run with.
+    Write {
+        write: LaneWrite,
+        env: Vec<(String, String)>,
+    },
 }
 
 /// What the daemon answers.
@@ -65,10 +75,29 @@ pub enum Reply {
         lanes: Vec<Lane>,
     },
     Snapshot(Box<Snapshot>),
+    /// Laned couldn't read the request: nothing was done.
     Error {
         message: String,
     },
     Bye,
+    /// A line of install output, while a write runs.
+    Output {
+        stream: Output,
+        line: String,
+    },
+    /// A write finished.
+    Done(Box<Done>),
+    /// A write failed, with the engine's own error.
+    Failed(Error),
+}
+
+/// Why a write through the daemon didn't finish.
+#[derive(Debug)]
+pub enum WriteError {
+    /// It was never taken on: nothing was done, so it can be made elsewhere.
+    NotSent(io::Error),
+    /// The daemon went away while it was being made.
+    Interrupted(io::Error),
 }
 
 /// How the daemon is doing.
@@ -82,6 +111,9 @@ pub struct Status {
     pub clients: usize,
     /// Terminal apps (or other clients) following a repo's lanes.
     pub watching: usize,
+    /// Changes to the lanes it has made since it started.
+    #[serde(default)]
+    pub writes: usize,
 }
 
 /// Where a daemon for one state folder listens, and the lock that keeps it to one.
@@ -200,8 +232,19 @@ pub struct Client {
 }
 
 impl Client {
-    /// Connect and say hello. Fails when no daemon answers.
+    /// Connect and say hello. Fails when no daemon answers, or one speaks another protocol.
     pub fn connect(at: &Endpoint) -> io::Result<Client> {
+        let (client, protocol) = Client::hello(at)?;
+        if protocol != PROTOCOL {
+            return Err(io::Error::other(format!(
+                "laned speaks protocol {protocol}; this lane speaks {PROTOCOL}"
+            )));
+        }
+        Ok(client)
+    }
+
+    /// Connect and say hello, whatever protocol the daemon speaks.
+    fn hello(at: &Endpoint) -> io::Result<(Client, u32)> {
         let stream = Stream::connect(at.name()?)?;
         same_user(&stream)?;
         let (recv, send) = stream.split();
@@ -223,15 +266,48 @@ impl Client {
                 version,
                 protocol,
                 pid,
-            } if protocol == PROTOCOL => {
+            } => {
                 client.version = version;
                 client.pid = pid;
-                Ok(client)
+                Ok((client, protocol))
             }
-            Reply::Hello { protocol, .. } => Err(io::Error::other(format!(
-                "laned speaks protocol {protocol}; this lane speaks {PROTOCOL}"
-            ))),
             other => Err(unexpected(&other)),
+        }
+    }
+
+    /// Make a write in the daemon. Install output reaches `output` as it happens. The outer
+    /// error says whether the daemon took the write on at all; the inner result is the engine's.
+    pub fn write(
+        &mut self,
+        write: &LaneWrite,
+        output: &mut dyn FnMut(Output, &str),
+    ) -> Result<Result<Done, Error>, WriteError> {
+        // Variables that aren't valid Unicode can't travel as JSON; they're left out.
+        let env = std::env::vars_os()
+            .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
+            .collect();
+        self.send(&Request::Write {
+            write: write.clone(),
+            env,
+        })
+        .map_err(WriteError::NotSent)?;
+        // Installs take as long as they take.
+        let _ = self.recv.get_ref().set_timeout(None);
+        let mut answered = false;
+        loop {
+            match self.receive() {
+                Ok(Reply::Output { stream, line }) => {
+                    answered = true;
+                    output(stream, &line);
+                }
+                Ok(Reply::Done(done)) => return Ok(Ok(*done)),
+                Ok(Reply::Failed(error)) => return Ok(Err(error)),
+                Ok(Reply::Error { message }) if !answered => {
+                    return Err(WriteError::NotSent(io::Error::other(message)));
+                }
+                Ok(_) => continue,
+                Err(e) => return Err(WriteError::Interrupted(e)),
+            }
         }
     }
 
@@ -326,9 +402,11 @@ pub fn start(at: &Endpoint, laned: &Path) -> io::Result<()> {
 /// Connect, starting `laned` first when it isn't running. A daemon from another Lanes version
 /// is stopped and replaced, so an upgrade takes effect at once.
 pub fn connect_or_start(at: &Endpoint, laned: &Path) -> io::Result<Client> {
-    match Client::connect(at) {
-        Ok(client) if client.version == VERSION => return Ok(client),
-        Ok(mut old) => {
+    match Client::hello(at) {
+        Ok((client, protocol)) if client.version == VERSION && protocol == PROTOCOL => {
+            return Ok(client);
+        }
+        Ok((mut old, _)) => {
             let _ = old.request(&Request::Shutdown);
             drop(old);
             wait_until_gone(at, Duration::from_secs(3));
@@ -358,7 +436,8 @@ pub fn connect_or_start(at: &Endpoint, laned: &Path) -> io::Result<Client> {
 
 /// Stop the daemon if it's running. True when one was.
 pub fn stop(at: &Endpoint) -> io::Result<bool> {
-    let Ok(mut client) = Client::connect(at) else {
+    // Whatever protocol it speaks: `shutdown` has meant the same since the first.
+    let Ok((mut client, _)) = Client::hello(at) else {
         return Ok(false);
     };
     match client.request(&Request::Shutdown) {
@@ -380,7 +459,9 @@ pub fn stop(at: &Endpoint) -> io::Result<bool> {
 fn wait_until_gone(at: &Endpoint, timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
-        if Client::connect(at).is_err() {
+        // A bare connection: one that speaks an older protocol still counts as there.
+        let there = at.name().and_then(Stream::connect).is_ok();
+        if !there {
             return true;
         }
         std::thread::sleep(Duration::from_millis(50));
@@ -412,6 +493,7 @@ mod tests {
             started: 1,
             clients: 1,
             watching: 0,
+            writes: 0,
         });
         let text = serde_json::to_string(&status).unwrap();
         assert!(

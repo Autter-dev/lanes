@@ -1,17 +1,21 @@
 //! `laned`: the Lanes background daemon. One per user (per state folder); the terminal app and
 //! `lane daemon start` start it, and it leaves after half an hour with nobody connected.
 //!
-//! For now it serves what's read most: status, the lanes, and live snapshots for the terminal
-//! app, built once per repo however many apps watch, and sent only when something changed.
-//! It keeps nothing of its own. Everything it knows is in Lanes' state, so killing it loses
-//! nothing. See `lane_core::daemon` for the messages.
+//! It's the one writer: `lane new`, `rm` and `adopt` (and the hooks and terminal app that make
+//! and remove lanes) send their changes here when it's running, and it makes them one at a time
+//! per repo, sending install output back as it happens. It also serves status, the lanes, and
+//! live snapshots for the terminal app, built once per repo however many apps watch, and sent
+//! only when something changed. It keeps nothing of its own. Everything it knows is in Lanes'
+//! state, so killing it loses nothing. See `lane_core::daemon` for the messages.
 
-use interprocess::local_socket::RecvHalf;
 use interprocess::local_socket::prelude::*;
 use interprocess::local_socket::{ListenerOptions, Stream};
+use interprocess::local_socket::{RecvHalf, SendHalf};
 use lane_core::daemon::{self, Endpoint, PROTOCOL, Reply, Request, Status};
+use lane_core::engine::{self, Context, Sink};
 use lane_core::snapshot::{self, Snapshot, Source};
 use lane_core::state::Store;
+use lane_core::writes::{self, Write};
 use lane_core::{VERSION, exit, log};
 use std::collections::HashMap;
 use std::fs::File;
@@ -64,8 +68,11 @@ struct Daemon {
     started: i64,
     clients: AtomicUsize,
     watching: AtomicUsize,
+    writes: AtomicUsize,
     last_seen: Mutex<Instant>,
     feeds: Mutex<HashMap<Option<PathBuf>, Arc<Feed>>>,
+    /// One write at a time per repo: Git and the lanes folder see a single writer.
+    writers: Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>,
 }
 
 /// One repo's snapshots, refreshed by one thread for every app watching it.
@@ -104,8 +111,10 @@ fn serve() -> Result<(), String> {
         started: unix_now(),
         clients: AtomicUsize::new(0),
         watching: AtomicUsize::new(0),
+        writes: AtomicUsize::new(0),
         last_seen: Mutex::new(Instant::now()),
         feeds: Mutex::new(HashMap::new()),
+        writers: Mutex::new(HashMap::new()),
     });
     let idle = Duration::from_secs(
         std::env::var("LANED_IDLE_SECS")
@@ -141,7 +150,9 @@ fn serve_one(conn: Stream, daemon: &Arc<Daemon>) {
     }
     daemon.clients.fetch_add(1, Ordering::SeqCst);
     touch(daemon);
-    let (recv, mut send) = conn.split();
+    let (recv, send) = conn.split();
+    // Shared, so install output can be sent from the threads that read it.
+    let send = Arc::new(Mutex::new(send));
     let mut reader = BufReader::new(recv);
     loop {
         let mut line = String::new();
@@ -154,7 +165,9 @@ fn serve_one(conn: Stream, daemon: &Arc<Daemon>) {
             Ok(r) => r,
             Err(e) => {
                 let message = format!("couldn't read that request ({e}); this is laned {VERSION}");
-                if daemon::write_line(&mut send, &Reply::Error { message }).is_err() {
+                if daemon::write_line(&mut *send.lock().unwrap(), &Reply::Error { message })
+                    .is_err()
+                {
                     break;
                 }
                 continue;
@@ -172,6 +185,7 @@ fn serve_one(conn: Stream, daemon: &Arc<Daemon>) {
                 started: daemon.started,
                 clients: daemon.clients.load(Ordering::SeqCst),
                 watching: daemon.watching.load(Ordering::SeqCst),
+                writes: daemon.writes.load(Ordering::SeqCst),
             }),
             Request::Lanes { repo } => match Store::open_existing() {
                 Ok(Some(store)) => match store.lanes(repo.as_deref()) {
@@ -187,21 +201,58 @@ fn serve_one(conn: Stream, daemon: &Arc<Daemon>) {
             },
             Request::Snapshot { repo } => Reply::Snapshot(Box::new(read(repo.as_deref()))),
             Request::Watch { repo } => {
-                watch(daemon, repo, &mut send, reader);
+                watch(daemon, repo, &mut *send.lock().unwrap(), reader);
                 break;
             }
+            Request::Write { write, env } => make(daemon, &write, env, &send),
             Request::Shutdown => {
-                let _ = daemon::write_line(&mut send, &Reply::Bye);
+                let _ = daemon::write_line(&mut *send.lock().unwrap(), &Reply::Bye);
                 log::info("laned", "stopped on request").write();
                 std::process::exit(0);
             }
         };
-        if daemon::write_line(&mut send, &reply).is_err() {
+        if daemon::write_line(&mut *send.lock().unwrap(), &reply).is_err() {
             break;
         }
     }
     daemon.clients.fetch_sub(1, Ordering::SeqCst);
     touch(daemon);
+}
+
+/// Make a write for a client: one at a time per repo, with the client's environment for installs,
+/// and their output sent back as it comes. It finishes even if the client goes away, so a lane
+/// is never left half made.
+fn make(
+    daemon: &Daemon,
+    write: &Write,
+    env: Vec<(String, String)>,
+    send: &Arc<Mutex<SendHalf>>,
+) -> Reply {
+    let writer = daemon
+        .writers
+        .lock()
+        .unwrap()
+        .entry(write.repo().to_path_buf())
+        .or_default()
+        .clone();
+    let _one_at_a_time = writer.lock().unwrap();
+    let to_client = send.clone();
+    let sink: Sink = Arc::new(move |stream, line| {
+        let reply = Reply::Output {
+            stream,
+            line: line.to_string(),
+        };
+        let _ = daemon::write_line(&mut *to_client.lock().unwrap(), &reply);
+    });
+    let context = Context {
+        env: Some(env),
+        output: Some(sink),
+    };
+    daemon.writes.fetch_add(1, Ordering::SeqCst);
+    match engine::with_context(context, || writes::run(write)) {
+        Ok(done) => Reply::Done(Box::new(done)),
+        Err(error) => Reply::Failed(error),
+    }
 }
 
 /// Send snapshots of `repo` to this client until it hangs up. A watcher sends nothing more, so

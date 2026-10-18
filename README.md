@@ -239,7 +239,7 @@ Prefer a Claude Code plugin? It carries the same hooks and skill:
 | `lane logs [<lane>]` | Shows what Lanes did: lanes made and removed, agents' hooks, dependency installs. Kept in a file, never in an agent's output |
 | `lane hook <agent> <event>` | What agents' hooks run, for Claude Code, Codex, Cursor and Git (set up by `lane setup` and `lane init`) |
 | `lane telemetry` | Shows exactly what the anonymous install count sends from your machine; `lane telemetry off` turns it off (so do `LANE_TELEMETRY=0` and `DO_NOT_TRACK=1`) |
-| `lane daemon` | Shows whether `laned` is running; `start` and `stop` it. The terminal app starts it to stay live, and nothing needs it: stopping it loses nothing |
+| `lane daemon` | Shows whether `laned` is running; `start` and `stop` it. While it runs it makes every change to lanes, one at a time per repo, and keeps the terminal app live. Nothing needs it: stopping it loses nothing |
 
 Coming next:
 

@@ -238,3 +238,211 @@ fn a_bad_request_gets_an_answer_not_a_hang_up() {
     reader.read_line(&mut line).unwrap();
     assert!(line.contains(r#""reply":"hello""#), "{line}");
 }
+
+// ---------- Writes ----------
+
+/// A Git repo with one commit and a lane.toml whose install runs `install`.
+fn repo(state: &Path, install: &[&str]) -> PathBuf {
+    let dir = state.join("app");
+    std::fs::create_dir_all(&dir).unwrap();
+    let list = install
+        .iter()
+        .map(|c| format!("{c:?}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    std::fs::write(
+        dir.join("lane.toml"),
+        format!("version = 1\n[setup]\ninstall = [{list}]\n"),
+    )
+    .unwrap();
+    std::fs::write(dir.join("a.txt"), "hi\n").unwrap();
+    let commit: &[&str] = &[
+        "-c",
+        "user.name=Lanes Test",
+        "-c",
+        "user.email=test@lanes.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-qm",
+        "first",
+    ];
+    for args in [&["init", "-q"][..], &["add", "-A"], commit] {
+        let ok = Command::new("git")
+            .args(args)
+            .current_dir(&dir)
+            .status()
+            .unwrap();
+        assert!(ok.success(), "git {args:?}");
+    }
+    lane_core::engine::Repo::open(&dir).unwrap().root
+}
+
+fn spawn_with(state: &Path, extra: &[(&str, &str)]) -> Laned {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_laned"));
+    cmd.env("LANE_STATE_DIR", state)
+        .env("LANED_IDLE_SECS", "60")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    for (k, v) in extra {
+        cmd.env(k, v);
+    }
+    Laned(cmd.spawn().expect("laned starts"))
+}
+
+#[test]
+fn writes_run_in_laned_with_the_callers_environment_and_stream_their_output() {
+    use lane_core::engine::Output;
+    use lane_core::error::ErrorKind;
+    use lane_core::writes::{Done, Write};
+
+    let state = state_dir("writes");
+    let at = Endpoint::at(&state);
+    // Set only for laned: installs must run with the caller's environment, which lacks it.
+    let _laned = spawn_with(&state, &[("LANED_ONLY", "daemon-env")]);
+    let var = if cfg!(windows) {
+        "%LANED_ONLY%"
+    } else {
+        "$LANED_ONLY"
+    };
+    let root = repo(
+        &state,
+        &[&format!("echo installing {var}"), "echo on stderr 1>&2"],
+    );
+    let mut client = connect(&at);
+    let mut lines: Vec<(Output, String)> = Vec::new();
+
+    let new = Write::New {
+        repo: root.clone(),
+        name: "fix-auth".into(),
+        agent: Some("claude".into()),
+        request_id: None,
+    };
+    let done = client
+        .write(&new, &mut |stream, line| {
+            lines.push((stream, line.to_string()))
+        })
+        .unwrap()
+        .unwrap();
+    let Done::Made(made) = done else {
+        panic!("{done:?}")
+    };
+    assert_eq!(made.lane.name, "fix-auth");
+    assert!(made.base.installed);
+    assert!(
+        lines
+            .iter()
+            .any(|(s, l)| *s == Output::Stdout && l.starts_with("installing")),
+        "{lines:?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|(s, l)| *s == Output::Stderr && l.contains("on stderr")),
+        "{lines:?}"
+    );
+    assert!(
+        !lines.iter().any(|(_, l)| l.contains("daemon-env")),
+        "installs use the caller's environment, not laned's: {lines:?}"
+    );
+
+    // A worktree another tool made becomes a lane, then gets ready.
+    let worktree = state.join("wt");
+    let ok = Command::new("git")
+        .args(["worktree", "add", "--detach", "-q"])
+        .arg(&worktree)
+        .current_dir(&root)
+        .status()
+        .unwrap();
+    assert!(ok.success());
+    let adopt = Write::Adopt {
+        repo: root.clone(),
+        path: worktree.clone(),
+        name: Some("from-git".into()),
+        agent: None,
+        request_id: None,
+    };
+    let lane = client
+        .write(&adopt, &mut |_, _| {})
+        .unwrap()
+        .unwrap()
+        .lane()
+        .unwrap();
+    assert_eq!(lane.name, "from-git");
+    let ready = Write::Ready {
+        repo: root.clone(),
+        path: lane.path.clone(),
+    };
+    let readied = client.write(&ready, &mut |_, _| {}).unwrap().unwrap();
+    assert!(readied.ready().is_ok());
+
+    // Removing works, and the engine's own errors come back as they are.
+    let remove = Write::Remove {
+        repo: root.clone(),
+        name: "fix-auth".into(),
+        keep_files: false,
+        request_id: None,
+    };
+    let gone = client
+        .write(&remove, &mut |_, _| {})
+        .unwrap()
+        .unwrap()
+        .lane()
+        .unwrap();
+    assert_eq!(gone.name, "fix-auth");
+    let again = client.write(&remove, &mut |_, _| {}).unwrap().unwrap_err();
+    assert_eq!(again.kind, ErrorKind::NotFound);
+    assert!(again.hint.is_some(), "{again}");
+
+    assert_eq!(client.status().unwrap().writes, 5);
+}
+
+#[test]
+fn a_write_finishes_even_if_the_caller_hangs_up() {
+    use interprocess::local_socket::Stream;
+    use interprocess::local_socket::prelude::*;
+    use lane_core::writes::Write;
+    use std::io::Write as _;
+
+    let state = state_dir("hangup");
+    let at = Endpoint::at(&state);
+    let _laned = spawn(&state, 60);
+    let pause = if cfg!(windows) {
+        "ping -n 3 127.0.0.1 > nul"
+    } else {
+        "sleep 2"
+    };
+    let root = repo(&state, &[pause]);
+    connect(&at);
+    {
+        // Ask for a lane, then leave at once, while its install is still running.
+        let raw = Stream::connect(at.name().unwrap()).unwrap();
+        let request = Request::Write {
+            write: Write::New {
+                repo: root.clone(),
+                name: "slow".into(),
+                agent: None,
+                request_id: None,
+            },
+            env: std::env::vars().collect(),
+        };
+        let mut line = serde_json::to_string(&request).unwrap();
+        line.push('\n');
+        (&raw).write_all(line.as_bytes()).unwrap();
+    }
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let lane = Store::open_existing_at(&state.join("state.db"))
+            .unwrap()
+            .and_then(|s| s.lane(&root, "slow").unwrap());
+        if lane.as_ref().is_some_and(|l| l.status == Status::Ready) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the lane never got made: {lane:?}"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}

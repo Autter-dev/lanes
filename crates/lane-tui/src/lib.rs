@@ -12,8 +12,8 @@ pub mod theme;
 pub mod widgets;
 mod wrap;
 
-use lane_core::engine::{self, Repo};
-use lane_core::state::Store;
+use lane_core::engine::Repo;
+use lane_core::writes::{self, Via, Write};
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
 use ratatui::layout::{Alignment, Constraint, Layout};
 use ratatui::text::Line;
@@ -66,6 +66,12 @@ pub fn run_home(input: home::Input, daemon: bool) -> io::Result<home::Outcome> {
     let root = input.repo.as_ref().map(|r| r.root.clone());
     let mut app = home::Home::new(input);
     let watch = feed::watch(root.clone(), Duration::from_secs(2), daemon);
+    // Making and removing lanes go through laned too: started here only if the app may.
+    let via = if daemon {
+        Via::Daemon
+    } else {
+        Via::DaemonIfRunning
+    };
     let (done_tx, done_rx) = mpsc::channel::<String>();
     let was_quiet = lane_core::log::quiet();
     lane_core::log::set_quiet(true);
@@ -92,10 +98,12 @@ pub fn run_home(input: home::Input, daemon: bool) -> io::Result<home::Outcome> {
                     match app.on_key(k) {
                         Some(home::Action::Exit(outcome)) => return Ok(outcome),
                         Some(home::Action::New(name)) => {
-                            background(&done_tx, root.clone(), move |root| make(&root, &name))
+                            background(&done_tx, root.clone(), move |root| make(&root, &name, via))
                         }
                         Some(home::Action::Remove(name)) => {
-                            background(&done_tx, root.clone(), move |root| drop_lane(&root, &name))
+                            background(&done_tx, root.clone(), move |root| {
+                                drop_lane(&root, &name, via)
+                            })
                         }
                         None => {}
                     }
@@ -126,11 +134,16 @@ fn background(
     });
 }
 
-fn make(root: &Path, name: &str) -> lane_core::error::Result<String> {
+fn make(root: &Path, name: &str, via: Via) -> lane_core::error::Result<String> {
     let started = std::time::Instant::now();
     let repo = Repo::open(root)?;
-    let mut store = Store::open()?;
-    let made = engine::new_lane(&mut store, &repo, name, None, None)?;
+    let new = Write::New {
+        repo: repo.root.clone(),
+        name: name.to_string(),
+        agent: None,
+        request_id: None,
+    };
+    let made = writes::make(&new, via, &mut writes::to_stderr_or_log)?.made()?;
     lane_core::log::info(
         "new",
         format!(
@@ -155,10 +168,15 @@ fn make(root: &Path, name: &str) -> lane_core::error::Result<String> {
     ))
 }
 
-fn drop_lane(root: &Path, name: &str) -> lane_core::error::Result<String> {
+fn drop_lane(root: &Path, name: &str, via: Via) -> lane_core::error::Result<String> {
     let repo = Repo::open(root)?;
-    let mut store = Store::open()?;
-    let lane = engine::remove(&mut store, &repo, name, false, None)?;
+    let remove = Write::Remove {
+        repo: repo.root.clone(),
+        name: name.to_string(),
+        keep_files: false,
+        request_id: None,
+    };
+    let lane = writes::make(&remove, via, &mut writes::to_stderr_or_log)?.lane()?;
     lane_core::log::info(
         "rm",
         "removed the lane and its folder from the terminal app",

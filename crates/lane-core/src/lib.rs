@@ -21,6 +21,7 @@ pub mod repo;
 pub mod snapshot;
 pub mod state;
 pub mod telemetry;
+pub mod writes;
 
 /// The Lanes version, shared by every binary.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

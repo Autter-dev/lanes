@@ -30,12 +30,14 @@ fn lane_in(dir: &PathBuf, cwd: &std::path::Path, args: &[&str]) -> Output {
         .env_remove("LANE_TELEMETRY")
         .env_remove("CI")
         .env("LANE_TELEMETRY_URL", NO_COUNT)
+        .env("LANE_DAEMON", "0")
         .output()
         .expect("lane runs")
 }
 
 /// Where tests' install counts go, unless a test listens for them: a closed local port, so a
-/// test run never reaches the real endpoint.
+/// test run never reaches the real endpoint. Tests also run with `LANE_DAEMON=0`, so nothing
+/// starts a daemon that outlives them; a test that wants one starts it.
 const NO_COUNT: &str = "http://127.0.0.1:9/";
 
 /// Run `lane` the way a Claude Code hook does: JSON on stdin, with extra environment.
@@ -56,6 +58,7 @@ fn lane_hook(
         .env_remove("LANE_REQUEST_ID")
         .env_remove("CLAUDE_ENV_FILE")
         .env("LANE_TELEMETRY_URL", NO_COUNT)
+        .env("LANE_DAEMON", "0")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -1114,6 +1117,7 @@ fn hook_raw(
         .env("LANE_STATE_DIR", dir.join("state"))
         .env("LANE_AGENTS_HOME", dir.join("home"))
         .env("LANE_TELEMETRY_URL", NO_COUNT)
+        .env("LANE_DAEMON", "0")
         .env_remove("LANE_REQUEST_ID")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1396,6 +1400,7 @@ fn doctor_checks_what_could_stop_lanes_working() {
             .current_dir(&repo)
             .env("PATH", path)
             .env("LANE_TELEMETRY_URL", NO_COUNT)
+            .env("LANE_DAEMON", "0")
             .env("LANE_CONFIG_DIR", &dir)
             .env("LANE_STATE_DIR", dir.join("state"))
             .env("LANE_AGENTS_HOME", dir.join("home"))
@@ -1487,6 +1492,7 @@ fn lane_typed(dir: &PathBuf, cwd: &std::path::Path, args: &[&str], answers: &str
         .env("LANE_AGENTS_HOME", dir.join("home"))
         .env("LANE_INTERACTIVE", "1")
         .env("LANE_TELEMETRY_URL", NO_COUNT)
+        .env("LANE_DAEMON", "0")
         .env_remove("CLAUDE_CONFIG_DIR")
         .env_remove("LANE_REQUEST_ID")
         .env_remove("CI")
@@ -1760,6 +1766,7 @@ fn lane_counting(dir: &PathBuf, url: &str, env: &[(&str, &str)], args: &[&str]) 
         .env("LANE_STATE_DIR", dir.join("state"))
         .env("LANE_AGENTS_HOME", dir.join("home"))
         .env("LANE_TELEMETRY_URL", url)
+        .env("LANE_DAEMON", "0")
         .env_remove("CLAUDE_CONFIG_DIR")
         .env_remove("DO_NOT_TRACK")
         .env_remove("LANE_TELEMETRY");
@@ -2022,6 +2029,32 @@ fn lane_daemon_starts_reports_and_stops_laned() {
         .unwrap()
         .clone();
     assert_eq!(check["status"], "ok", "{check}");
+
+    // With laned running, writes go through it: same results, install output on stderr.
+    let repo = repo_with_commit("daemon-writes");
+    std::fs::write(
+        repo.join("lane.toml"),
+        "version = 1\n[setup]\ninstall = [\"echo installing from lane.toml\"]\n",
+    )
+    .unwrap();
+    let made = lane_in(&dir, &repo, &["new", "fix-auth", "--json"]);
+    let stderr = String::from_utf8_lossy(&made.stderr).into_owned();
+    assert!(made.status.success(), "{stderr}");
+    assert_eq!(json(&made)["lane"]["name"], "fix-auth");
+    assert!(stderr.contains("installing from lane.toml"), "{stderr}");
+    let writes = || json(&lane(&dir, &["daemon", "status", "--json"]))["writes"].clone();
+    assert_eq!(writes(), 1, "laned made it");
+    let removed = lane_in(&dir, &repo, &["rm", "fix-auth", "--json"]);
+    assert!(removed.status.success());
+    assert_eq!(json(&removed)["removed"]["name"], "fix-auth");
+    let missing = lane_in(&dir, &repo, &["rm", "fix-auth", "--json"]);
+    assert_eq!(
+        missing.status.code(),
+        Some(1),
+        "the engine's own error, through laned"
+    );
+    assert_eq!(json(&missing)["error"]["code"], "not_found");
+    assert_eq!(writes(), 3);
 
     let stopped = json(&lane(&dir, &["daemon", "stop", "--json"]));
     assert_eq!(

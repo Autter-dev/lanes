@@ -20,6 +20,7 @@ use lane_core::engine::{self, Repo};
 use lane_core::error::{Error, ErrorKind, Result};
 use lane_core::exit;
 use lane_core::state::{Lane, Status, Store};
+use lane_core::writes::{self, Done, Via, Write};
 use serde_json::{Value, json};
 use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
@@ -133,6 +134,12 @@ fn input() -> Result<Value> {
     })
 }
 
+/// Make a change to the lanes from a hook: through `laned` if it's running (hooks never start
+/// it), otherwise here. Install output goes to the log, since the agent reads this hook's output.
+fn write(write: &Write) -> Result<Done> {
+    writes::make(write, Via::DaemonIfRunning, &mut writes::to_stderr_or_log)
+}
+
 fn cwd(input: &Value) -> PathBuf {
     input["cwd"]
         .as_str()
@@ -149,14 +156,19 @@ fn worktree_create(json: bool) -> Result<()> {
     let session = input["session_id"].as_str().unwrap_or_default();
     let name = agents::lane_name(input["name"].as_str().unwrap_or_default(), session);
     let repo = Repo::open(&cwd(&input))?;
-    let mut store = Store::open()?;
+    let store = Store::open()?;
     let lane = match existing(&store, &repo, &name)? {
         Some(lane) => lane,
         None => {
             let request = format!("claude:{session}:{name}");
             let request = (session.len() + name.len() < 110).then_some(request);
-            let made =
-                engine::new_lane(&mut store, &repo, &name, Some("claude"), request.as_deref())?;
+            let new = Write::New {
+                repo: repo.root.clone(),
+                name: name.clone(),
+                agent: Some("claude".into()),
+                request_id: request,
+            };
+            let made = write(&new)?.made()?;
             crate::copied_note(&made);
             made.lane
         }
@@ -210,9 +222,13 @@ fn worktree_remove(json: bool) -> Result<()> {
     };
     let removed = match lane {
         Some(lane) => {
-            let repo = Repo::open(&lane.repo)?;
-            let mut store = Store::open()?;
-            Some(engine::remove(&mut store, &repo, &lane.name, false, None)?)
+            let remove = Write::Remove {
+                repo: lane.repo.clone(),
+                name: lane.name.clone(),
+                keep_files: false,
+                request_id: None,
+            };
+            Some(write(&remove)?.lane()?)
         }
         None => {
             if path.exists() {
@@ -393,14 +409,25 @@ fn adopting_session(agent: &str, folder: &Path) -> Result<Option<String>> {
         return Ok(None);
     };
     let top = engine::norm(&lane_core::repo::top_level(folder)?);
-    let mut store = Store::open()?;
+    let store = Store::open()?;
     let lane = match store.lane_at(&top)? {
         Some(lane) => Some(lane),
         None if !engine::same_path(&top, &repo.root) => {
             let name = free_name(&store, &repo, &worktree_name(agent, &top))?;
-            let lane = engine::adopt(&mut store, &repo, &top, Some(&name), Some(agent), None)?;
+            let lane = write(&Write::Adopt {
+                repo: repo.root.clone(),
+                path: top.clone(),
+                name: Some(name),
+                agent: Some(agent.into()),
+                request_id: None,
+            })?
+            .lane()?;
             let log = |e: lane_core::log::Entry| e.lane(&lane.name).repo(&repo.root).write();
-            match engine::make_ready(&mut store, &repo, &lane) {
+            let ready = Write::Ready {
+                repo: repo.root.clone(),
+                path: lane.path.clone(),
+            };
+            match write(&ready) {
                 Ok(_) => log(lane_core::log::info(
                     format!("hook {agent} session-start"),
                     format!("{}'s worktree became a lane: {}", agent, top.display()),
@@ -503,11 +530,21 @@ fn adopt_here() -> Result<Option<Lane>> {
     if engine::same_path(&top, &repo.root) {
         return Ok(None);
     }
-    let mut store = Store::open()?;
-    let lane = engine::adopt(&mut store, &repo, &top, None, None, None)?;
+    let lane = write(&Write::Adopt {
+        repo: repo.root.clone(),
+        path: top.clone(),
+        name: None,
+        agent: None,
+        request_id: None,
+    })?
+    .lane()?;
     // Ready to run, like a lane from `lane new`. A worktree that can't be readied is still a
     // lane, and the checkout never fails over it.
-    let entry = match engine::make_ready(&mut store, &repo, &lane) {
+    let ready = Write::Ready {
+        repo: repo.root.clone(),
+        path: lane.path.clone(),
+    };
+    let entry = match write(&ready) {
         Ok(_) => lane_core::log::info(
             "hook git post-checkout",
             format!("a new worktree became a lane: {}", top.display()),

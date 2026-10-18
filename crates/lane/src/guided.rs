@@ -10,6 +10,7 @@ use lane_core::error::{Error, ErrorKind, Result};
 use lane_core::machine::{self, Status};
 use lane_core::next::Step;
 use lane_core::state::Store;
+use lane_core::writes;
 use serde::Serialize;
 use std::io::{BufRead, Write};
 use std::path::Path;
@@ -418,7 +419,7 @@ pub fn fix(dir: &Path, ask: &mut dyn Ask) -> Result<Vec<Fixed>> {
     }
 
     // Lanes whose folders have gone, or that were left half-made.
-    if let Some(mut store) = Store::open_existing()? {
+    if let Some(store) = Store::open_existing()? {
         let lanes = store.lanes(Some(&repo.root))?;
         let gone: Vec<String> = lanes
             .iter()
@@ -439,7 +440,17 @@ pub fn fix(dir: &Path, ask: &mut dyn Ask) -> Result<Vec<Fixed>> {
             );
             if ask.ask(&q, true) {
                 for name in &gone {
-                    engine::remove(&mut store, &repo, name, false, None)?;
+                    let remove = writes::Write::Remove {
+                        repo: repo.root.clone(),
+                        name: name.clone(),
+                        keep_files: false,
+                        request_id: None,
+                    };
+                    writes::make(
+                        &remove,
+                        writes::Via::for_env(&lane_core::env::Env::current()),
+                        &mut writes::to_stderr_or_log,
+                    )?;
                     lane_core::log::info("doctor", "removed a lane whose folder had gone")
                         .lane(name)
                         .repo(&repo.root)

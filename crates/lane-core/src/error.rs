@@ -10,12 +10,12 @@
 //! `code` values and exit codes are part of the CLI contract: add new ones, never rename them.
 
 use crate::exit;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorKind {
     /// The command line was wrong: unknown command or option, missing argument.
@@ -65,7 +65,8 @@ impl ErrorKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Serializable so `laned` can hand an error back exactly as the engine made it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Error {
     pub kind: ErrorKind,
     /// What went wrong, without a trailing full stop.

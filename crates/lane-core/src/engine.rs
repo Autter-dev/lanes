@@ -400,34 +400,75 @@ fn install_key(base: &Path, commit: &str, commands: &[String]) -> Result<String>
     Ok(format!("{}\n--\n{}", commands.join("\n"), blobs.join("\n")))
 }
 
+/// Which of a command's outputs a line came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Output {
+    Stdout,
+    Stderr,
+}
+
+/// Where an install's output goes, line by line.
+pub type Sink = std::sync::Arc<dyn Fn(Output, &str) + Send + Sync>;
+
+/// How the engine runs for one caller: `laned` makes writes for clients whose environment and
+/// terminal it doesn't share. Unset, installs use this process's environment and its stderr.
+#[derive(Clone, Default)]
+pub struct Context {
+    /// The environment install commands run with: the caller's PATH, package manager settings
+    /// and the rest, not the daemon's.
+    pub env: Option<Vec<(String, String)>>,
+    /// Install output, a line at a time, as it happens.
+    pub output: Option<Sink>,
+}
+
+thread_local! {
+    static CONTEXT: std::cell::RefCell<Context> = std::cell::RefCell::new(Context::default());
+}
+
+/// Run `f` with `context` in force on this thread, then put the old one back.
+pub fn with_context<T>(context: Context, f: impl FnOnce() -> T) -> T {
+    let old = CONTEXT.with(|c| c.replace(context));
+    let out = f();
+    CONTEXT.with(|c| c.replace(old));
+    out
+}
+
 /// Run the install commands in `_base`, in order. Their output goes to stderr, so `--json`
-/// output stays clean.
+/// output stays clean; to the log inside an agent's hook; or to the context's sink, which is
+/// how `laned` sends it to whoever asked.
 fn install(base: &Path, commands: &[String]) -> Result<()> {
+    let context = CONTEXT.with(|c| c.borrow().clone());
     for cmd in commands {
         let started = std::time::Instant::now();
-        // Inside an agent's hook the agent reads stderr, so the install talks to the log instead.
-        let (out, err) = match crate::log::quiet().then(crate::log::file).flatten() {
-            Some(f) => match f.try_clone() {
-                Ok(g) => (Stdio::from(f), Stdio::from(g)),
-                Err(_) => (Stdio::null(), Stdio::null()),
-            },
-            None => (Stdio::from(io::stderr()), Stdio::from(io::stderr())),
-        };
-        let status = shell(cmd)
-            .current_dir(base)
-            .stdin(Stdio::null())
-            .stdout(out)
-            .stderr(err)
-            .status()
-            .map_err(|e| {
-                crate::log::error(
-                    "install",
-                    format!("couldn't run `{cmd}` in {}: {e}", base.display()),
-                )
-                .write();
-                Error::new(ErrorKind::Failure, format!("couldn't run `{cmd}`: {e}"))
-                    .hint("Check the command in `[setup] install` in lane.toml.")
-            })?;
+        let mut command = shell(cmd);
+        command.current_dir(base).stdin(Stdio::null());
+        if let Some(env) = &context.env {
+            command.env_clear().envs(env.iter().map(|(k, v)| (k, v)));
+        }
+        let status = match &context.output {
+            Some(sink) => run_into(&mut command, sink),
+            None => {
+                // Inside an agent's hook the agent reads stderr, so the install talks to the log.
+                let (out, err) = match crate::log::quiet().then(crate::log::file).flatten() {
+                    Some(f) => match f.try_clone() {
+                        Ok(g) => (Stdio::from(f), Stdio::from(g)),
+                        Err(_) => (Stdio::null(), Stdio::null()),
+                    },
+                    None => (Stdio::from(io::stderr()), Stdio::from(io::stderr())),
+                };
+                command.stdout(out).stderr(err).status()
+            }
+        }
+        .map_err(|e| {
+            crate::log::error(
+                "install",
+                format!("couldn't run `{cmd}` in {}: {e}", base.display()),
+            )
+            .write();
+            Error::new(ErrorKind::Failure, format!("couldn't run `{cmd}`: {e}"))
+                .hint("Check the command in `[setup] install` in lane.toml.")
+        })?;
         let ms = started.elapsed().as_millis() as u64;
         if !status.success() {
             let code = status
@@ -450,6 +491,46 @@ fn install(base: &Path, commands: &[String]) -> Result<()> {
             .write();
     }
     Ok(())
+}
+
+/// Run `command`, sending each line it prints to `sink` as it comes.
+fn run_into(command: &mut Command, sink: &Sink) -> io::Result<std::process::ExitStatus> {
+    use std::io::BufRead;
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let pipe = |from: Option<Box<dyn io::Read + Send>>, which: Output| {
+        let sink = sink.clone();
+        std::thread::spawn(move || {
+            let Some(from) = from else { return };
+            let mut reader = io::BufReader::new(from);
+            let mut line = Vec::new();
+            while matches!(reader.read_until(b'\n', &mut line), Ok(n) if n > 0) {
+                let text = String::from_utf8_lossy(&line);
+                sink(which, text.trim_end_matches(['\n', '\r']));
+                line.clear();
+            }
+        })
+    };
+    let out = pipe(
+        child
+            .stdout
+            .take()
+            .map(|s| Box::new(s) as Box<dyn io::Read + Send>),
+        Output::Stdout,
+    );
+    let err = pipe(
+        child
+            .stderr
+            .take()
+            .map(|s| Box::new(s) as Box<dyn io::Read + Send>),
+        Output::Stderr,
+    );
+    let status = child.wait();
+    let _ = out.join();
+    let _ = err.join();
+    status
 }
 
 fn shell(cmd: &str) -> Command {
@@ -528,7 +609,7 @@ pub fn adopt(
 }
 
 /// How an adopted worktree was made ready to run.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Deps {
     /// The repo installs nothing, or the worktree already had its dependency folders.
@@ -539,7 +620,7 @@ pub enum Deps {
     Installed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ready {
     pub deps: Deps,
     /// Dependency folders cloned from `_base`, relative to the worktree.
