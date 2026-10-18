@@ -1468,3 +1468,206 @@ fn doctor_checks_what_could_stop_lanes_working() {
     assert_eq!(v["healthy"], false);
     assert_eq!(out.status.code(), Some(1));
 }
+
+/// Run `lane` as a person at a terminal would (LANE_INTERACTIVE=1), typing `answers`.
+fn lane_typed(dir: &PathBuf, cwd: &std::path::Path, args: &[&str], answers: &str) -> Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_lane"))
+        .args(args)
+        .current_dir(cwd)
+        .env("LANE_CONFIG_DIR", dir)
+        .env("LANE_STATE_DIR", dir.join("state"))
+        .env("LANE_AGENTS_HOME", dir.join("home"))
+        .env("LANE_INTERACTIVE", "1")
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .env_remove("LANE_REQUEST_ID")
+        .env_remove("CI")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("lane runs");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(answers.as_bytes())
+        .unwrap();
+    child.wait_with_output().unwrap()
+}
+
+/// A repo whose install step is harmless and quick, with Claude Code "installed" in a fake home.
+fn guided_repo(name: &str) -> (PathBuf, PathBuf) {
+    let dir = config_dir(name);
+    let repo = repo_with_commit(name);
+    std::fs::write(
+        repo.join("lane.toml"),
+        "version = 1\n[setup]\ninstall = [\"git --version\"]\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.join("home/.claude")).unwrap();
+    (dir, repo)
+}
+
+#[test]
+fn init_asks_before_each_step_and_no_changes_nothing() {
+    let (dir, repo) = guided_repo("init-no");
+    let out = lane_typed(&dir, &repo, &["init"], "n\nn\nn\nn\nn\nn\n");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    for q in [
+        "? Put Claude Code in lanes on this machine?",
+        "? Add the Git hook",
+        "? Add a short note on working in lanes to AGENTS.md",
+        "? Install dependencies now (git --version)",
+    ] {
+        assert!(text.contains(q), "missing {q:?} in:\n{text}");
+    }
+    assert!(text.contains("[Y/n]"));
+    assert!(
+        !dir.join("home/.claude/settings.json").exists(),
+        "nothing on the machine"
+    );
+    assert!(!repo.join("AGENTS.md").exists());
+    assert!(!repo.join(".git/hooks/post-checkout").exists());
+    assert!(
+        !repo
+            .with_file_name(format!(
+                "{}.lanes",
+                repo.file_name().unwrap().to_string_lossy()
+            ))
+            .join("_base")
+            .exists()
+    );
+    assert!(text.contains("Next:"), "{text}");
+}
+
+#[test]
+fn init_with_every_yes_sets_it_all_up_and_says_what_is_left() {
+    let (dir, repo) = guided_repo("init-yes");
+    let out = lane_typed(&dir, &repo, &["init"], "\n\n\n\n\n\n");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(
+        text.contains("✓ Claude Code put their work in lanes now"),
+        "{text}"
+    );
+    assert!(
+        dir.join("home/.claude/settings.json").is_file(),
+        "the machine's agents"
+    );
+    assert!(repo.join("AGENTS.md").is_file());
+    assert!(repo.join(".git/hooks/post-checkout").is_file());
+    assert!(
+        text.contains("dependencies installed in a clean copy"),
+        "{text}"
+    );
+    assert!(text.contains("git add AGENTS.md"), "{text}");
+    assert!(text.contains("claude -w fix-auth"), "{text}");
+
+    // Run again: everything is in place, so nothing is asked.
+    let out = lane_typed(&dir, &repo, &["init"], "");
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(!text.contains("[Y/n]"), "nothing left to ask:\n{text}");
+    assert!(
+        text.contains("dependencies are installed in the clean copy"),
+        "{text}"
+    );
+}
+
+#[test]
+fn init_yes_takes_every_default_without_asking() {
+    let (dir, repo) = guided_repo("init-yes-flag");
+    let v = json(&lane_in(&dir, &repo, &["init", "--yes", "--json"]));
+    let done: Vec<(&str, bool)> = v["done"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| (d["what"].as_str().unwrap(), d["done"].as_bool().unwrap()))
+        .collect();
+    assert_eq!(
+        done,
+        [
+            ("lane_toml", false),
+            ("agents", true),
+            ("git_hook", true),
+            ("agents_md", true),
+            ("dependencies", true),
+        ],
+        "{v}"
+    );
+    assert!(
+        v["next"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["run"] == "claude -w fix-auth")
+    );
+
+    // Agents, scripts and CI (no terminal, no --yes) get the plain init: nothing outside the repo.
+    let (dir2, repo2) = guided_repo("init-plain");
+    let v = json(&lane_in(&dir2, &repo2, &["init", "--json"]));
+    assert!(v.get("done").is_none(), "the plain init: {v}");
+    assert!(!dir2.join("home/.claude/settings.json").exists());
+}
+
+#[test]
+fn doctor_fix_makes_the_fixes_lanes_can_make() {
+    let (dir, repo) = guided_repo("doctor-fix");
+    assert_eq!(
+        lane_in(&dir, &repo, &["new", "gone", "--json"])
+            .status
+            .code(),
+        Some(0)
+    );
+    let lanes_dir = repo.with_file_name(format!(
+        "{}.lanes",
+        repo.file_name().unwrap().to_string_lossy()
+    ));
+    std::fs::remove_dir_all(lanes_dir.join("gone")).unwrap();
+
+    // In a script, --fix needs --yes; and --yes needs --fix.
+    assert_eq!(
+        lane_in(&dir, &repo, &["doctor", "--fix"]).status.code(),
+        Some(2)
+    );
+    assert_eq!(
+        lane_in(&dir, &repo, &["doctor", "--yes"]).status.code(),
+        Some(2)
+    );
+
+    let v = json(&lane_in(
+        &dir,
+        &repo,
+        &["doctor", "--fix", "--yes", "--json"],
+    ));
+    let fixed: Vec<&str> = v["fixed"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["check"].as_str().unwrap())
+        .collect();
+    assert_eq!(fixed, ["agent-hooks", "git-hook", "lanes"], "{v}");
+    let status = |id: &str| {
+        v["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["id"] == id)
+            .unwrap()["status"]
+            .clone()
+    };
+    assert_eq!(status("agent-hooks"), "ok");
+    assert_eq!(status("git-hook"), "ok");
+    assert_eq!(status("lanes"), "info", "no lanes left in this repo");
+    assert!(dir.join("home/.claude/settings.json").is_file());
+}

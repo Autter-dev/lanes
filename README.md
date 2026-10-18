@@ -198,7 +198,7 @@ lane exec fix-auth -- npm run dev
 open http://fix-auth.localhost:4100
 ```
 
-**How agents get lanes.** The first run of `lane` (or `lane setup --yes`, for scripts) adds Lanes to each agent's own user settings, once per machine. It's a switch: `lane setup --yes --agents off` takes back exactly what was added, and nothing else in those files changes. Set up Lanes before 0.0.5? Run `lane setup` once more to put your agents in lanes; the home screen says when one isn't.
+**How agents get lanes.** The installer offers to set Lanes up as soon as it's done. The first run of `lane` (or `lane setup --yes`, for scripts) adds Lanes to each agent's own user settings, once per machine. It's a switch: `lane setup --yes --agents off` takes back exactly what was added, and nothing else in those files changes. Set up Lanes before 0.0.5? Run `lane setup` once more to put your agents in lanes; the home screen says when one isn't.
 
 - **Claude Code:** `claude -w <name>`, subagents with `isolation: worktree` and background sessions each get a lane. A `lanes` skill has Claude start a task in a lane of its own. If it tries `git worktree add`, a `git clone` of the repo or a recursive copy of its folder, it's pointed to `lane new` instead. Removing the worktree removes the lane.
 - **Codex:** when a Codex session starts in a worktree Codex made, that worktree becomes a lane, ready to run, and Codex is told which lane it's in. Codex runs new hooks only once you trust them, so open `/hooks` in Codex once.
@@ -206,6 +206,8 @@ open http://fix-auth.localhost:4100
 - **Any other tool:** a worktree it makes with Git becomes a lane through a Git `post-checkout` hook that `lane init` adds.
 
 A lane is ready to run: dependencies installed (cloned from a clean `_base` copy when the lockfiles match), a block of ports of its own, and its own `.env`. Without a `lane.toml`, Lanes finds your stack by itself.
+
+**In a repo:** run `lane init`. It does everything it can by itself and asks Y/n before each step that's yours to choose: writing `lane.toml` for your team, putting this machine's agents in lanes, the Git hook, a note in `AGENTS.md`, and installing dependencies now so the first lane is ready in seconds. Then it says what's left. `lane init --yes` takes every default; agents and scripts are never asked. When something's off later, `lane doctor --fix` fixes what Lanes can fix by itself, asking first.
 
 **For your team:** `lane init` writes what Lanes found to `lane.toml`, adds a short note on working in lanes to `AGENTS.md`, and sets up the repo's Git hook. Check `lane.toml` and `AGENTS.md` in. With Husky, the hook is one line at the top of `.husky/post-checkout`. That file is checked in, so `lane init` says to `git add` it, and the line does nothing for a teammate without `lane`. With lefthook or another `core.hooksPath`, `lane init` changes nothing there and prints the command or line to add. `lane init --no-agents` writes `lane.toml` only.
 
@@ -226,14 +228,14 @@ Prefer a Claude Code plugin? It carries the same hooks and skill:
 | --- | --- |
 | `lane` | Opens the terminal app, with a short welcome the first time |
 | `lane setup` | Checks your machine, chooses your settings and puts your agents in lanes (`--yes`, `--agents on\|off` and `--json` for scripts) |
-| `lane init` | Writes what Lanes found to `lane.toml` (install steps, dev server, `.env` template) for your team, a note in `AGENTS.md`, and the repo's Git hook |
+| `lane init` | Sets up a repo, asking Y/n before each step: `lane.toml` for your team, your agents in lanes, the Git hook, a note in `AGENTS.md`, and dependencies installed ahead of time (`--yes` takes every default) |
 | `lane new <name>` | Creates a lane |
 | `lane list` | Lists your lanes with their ports and folders |
 | `lane exec <name> -- <cmd>` | Runs a command inside a lane, with its own `PORT` and `LANE_URL` |
 | `lane env <name>` | Prints a lane's variables for sh, PowerShell, cmd or a `.env` file |
 | `lane adopt <path>` | Turns a worktree you already have into a lane (`--ready` gives it its dependencies and `.env` too) |
 | `lane rm <name>` | Removes a lane and frees its ports |
-| `lane doctor` | Checks what could stop lanes working (Git, clones, `lane` on PATH, agents' hooks, the Git hook, lanes whose folders have gone) and says how to fix each |
+| `lane doctor` | Checks what could stop lanes working (Git, clones, `lane` on PATH, agents' hooks, the Git hook, lanes whose folders have gone) and says how to fix each. `--fix` fixes what Lanes can, asking Y/n first |
 | `lane logs [<lane>]` | Shows what Lanes did: lanes made and removed, agents' hooks, dependency installs. Kept in a file, never in an agent's output |
 | `lane hook <agent> <event>` | What agents' hooks run, for Claude Code, Codex, Cursor and Git (set up by `lane setup` and `lane init`) |
 

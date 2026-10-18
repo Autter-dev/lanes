@@ -67,17 +67,20 @@ pub fn claude_dir() -> Result<PathBuf> {
     }
 }
 
-/// The agents installed here: their user folder exists, or the program is on PATH.
+/// The agents installed here: their user folder exists, or the program is on PATH. Under
+/// `LANE_AGENTS_HOME` (a whole stand-in home, for tests) only the folders there count.
 pub fn found() -> Vec<Agent> {
+    let fake_home = std::env::var_os("LANE_AGENTS_HOME").is_some_and(|d| !d.is_empty());
+    let on_path = |p: &str| !fake_home && super::on_path(p);
     AGENTS
         .into_iter()
         .filter(|a| match a.id {
-            "claude" => claude_dir().is_ok_and(|d| d.is_dir()) || super::on_path("claude"),
-            "codex" => codex_dir().is_ok_and(|d| d.is_dir()) || super::on_path("codex"),
+            "claude" => claude_dir().is_ok_and(|d| d.is_dir()) || on_path("claude"),
+            "codex" => codex_dir().is_ok_and(|d| d.is_dir()) || on_path("codex"),
             "cursor" => {
                 cursor_dir().is_ok_and(|d| d.is_dir())
-                    || super::on_path("cursor")
-                    || super::on_path("cursor-agent")
+                    || on_path("cursor")
+                    || on_path("cursor-agent")
             }
             _ => false,
         })

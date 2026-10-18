@@ -600,6 +600,7 @@ version = "0.0.6"
 dependencies = [
  "lane-core",
  "lane-tui",
+ "serde",
  "serde_json",
 ]
 

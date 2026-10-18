@@ -8,6 +8,12 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-18
 
+- `07:36` **Added**: setup does everything it can by itself and asks Y/n where the choice is yours, then says what's left.
+  - **`lane init`** in a terminal walks through each step and asks before it: write `lane.toml` for your team; put this machine's agents (Claude Code, Codex, Cursor) in lanes; add or update the Git hook; add the note to `AGENTS.md`; set up Claude Code for this repo only, if not for the machine; and install dependencies now in a clean copy, so the first lane is ready in seconds. Steps already in place aren't asked about. It ends with what's left: trusting the hooks in Codex once, the `git add`, the first `claude -w`, and getting instant lanes where this disk copies them. `--yes` takes every default without asking.
+  - **`lane doctor --fix`** fixes what Lanes can fix by itself, asking first: agents not in lanes yet, this repo's Git hook, and lanes whose folders have gone. What only you can do (install Git, move a repo to a Dev Drive, change PATH) keeps its steps. `--fix --yes` makes every fix without asking.
+  - **The install scripts** ask at the end whether to set Lanes up now, and run `lane setup` if you say yes. `--no-setup` or `LANES_NO_SETUP=1` skips it.
+  - **After the welcome,** Lanes prints what's next: `lane init` in the repo you're in, trusting Codex's hooks once, and how to get instant lanes.
+  - Agents, scripts and CI are never asked anything: without a terminal, `lane init` does what it did before. `LANE_INTERACTIVE=1` asks even where Lanes can't tell it's a terminal (some Windows terminals); `LANE_INTERACTIVE=0` never asks.
 - `07:22` **Changed**: the website offers 0.0.6, and the guide has a step for when something's off: `lane doctor` and `lane logs`.
 
 ## 0.0.6 (2026-10-18)

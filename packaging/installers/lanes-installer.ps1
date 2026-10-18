@@ -6,9 +6,12 @@
 #   $env:LANES_VERSION = '0.1.0'       install this version instead of the one this script came with
 #   $env:LANES_INSTALL_DIR = 'C:\bin'  where to put the binaries (default: %LOCALAPPDATA%\Programs\Lanes\bin)
 #   $env:LANES_NO_MODIFY_PATH = '1'    don't add that folder to your user PATH
+#   $env:LANES_NO_SETUP = '1'          don't offer to set Lanes up afterwards
 #
 # It downloads one archive and its checksum from github.com, checks the checksum, copies two files
-# and adds their folder to your user PATH. It sends nothing anywhere else. Run it again to update.
+# and adds their folder to your user PATH. It sends nothing anywhere else. In an interactive
+# window it then asks whether to set Lanes up now (`lane setup`); in CI it never asks. Run it
+# again to update.
 # To uninstall, delete the folder it printed and remove it from your PATH.
 
 & {
@@ -94,7 +97,7 @@
     $raw = (Get-Item -Path $key).GetValue('Path', '', 'DoNotExpandEnvironmentNames')
     $parts = @($raw -split ';' | Where-Object { $_ })
     if ($parts -contains $dir) {
-        Say 'run `lane` in a repo to start'
+        # Already on PATH: nothing to add.
     } elseif ($env:LANES_NO_MODIFY_PATH) {
         Say "$dir isn't on your PATH. Add it to run lane from anywhere."
     } else {
@@ -103,6 +106,21 @@
         [Environment]::SetEnvironmentVariable('LANES_INSTALLER', '1', 'User')
         [Environment]::SetEnvironmentVariable('LANES_INSTALLER', $null, 'User')
         $env:Path = "$env:Path;$dir"
-        Say "added $dir to your user PATH. Run ``lane`` in a repo to start; other open terminals need restarting to see it."
+        Say "added $dir to your user PATH; other open terminals need restarting to see it."
+    }
+
+    # In an interactive window, offer to set Lanes up straight away: check this machine and put
+    # its agents in lanes. Never in CI, with redirected input, or with LANES_NO_SETUP.
+    $canAsk = [Environment]::UserInteractive -and -not $env:CI -and -not $env:LANES_NO_SETUP
+    try { $canAsk = $canAsk -and -not [Console]::IsInputRedirected } catch { $canAsk = $false }
+    if ($canAsk) {
+        $answer = Read-Host 'lanes: set Lanes up now? It checks this machine and puts your agents in lanes. [Y/n]'
+        if ($answer -eq '' -or $answer -match '^(y|yes)$') {
+            & (Join-Path $dir 'lane.exe') setup
+        } else {
+            Say 'later: run `lane setup` to check this machine and put your agents in lanes'
+        }
+    } else {
+        Say 'next: run `lane setup` to check this machine and put your agents in lanes'
     }
 }

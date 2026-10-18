@@ -17,7 +17,7 @@ Run format, lint and tests before you finish.
 
 ## Rules for every command
 
-- Supports `--json`, never prompts, never opens a pager.
+- Supports `--json`. Never prompts or opens a pager for agents, scripts or CI: it asks Y/n only when a person is at a terminal (`Env::can_ask`), and `--yes` takes every default without asking.
 - Uses the exit codes in `lane_core::exit`. Never renumber them.
 - Error messages say what to do next.
 - Writes are safe to retry.

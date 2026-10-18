@@ -342,6 +342,29 @@ pub fn ensure_base(store: &mut Store, repo: &Repo) -> Result<BaseInfo> {
     })
 }
 
+/// Whether `_base` is there and its dependencies are installed for the base branch's current
+/// lockfiles and install steps, so the next lane needs no install.
+pub fn base_is_ready(store: &Store, repo: &Repo) -> Result<bool> {
+    let path = repo.base_path();
+    if !path.join(".git").is_file() {
+        return Ok(false);
+    }
+    let (_, commit) = git::base_branch(&repo.root, repo.project.lanes.base.as_deref())?;
+    if git::commit_of(&path, "HEAD").as_deref() != Some(commit.as_str()) {
+        return Ok(false);
+    }
+    let key = install_key(&path, &commit, &repo.project.setup.install)?;
+    Ok(store.base(&repo.root)?.and_then(|b| b.install_key) == Some(key))
+}
+
+/// Make `_base` ready ahead of time, so the first lane is quick: the clean copy, with its
+/// dependencies installed. Safe to run again.
+pub fn prepare(store: &mut Store, repo: &Repo) -> Result<BaseInfo> {
+    fs::create_dir_all(&repo.lanes_dir).map_err(|e| io_error("create", &repo.lanes_dir, e))?;
+    let _lock = RepoLock::acquire(&repo.lanes_dir)?;
+    ensure_base(store, repo)
+}
+
 /// What dependencies were installed from: the install commands and the lockfiles' blobs.
 fn install_key(base: &Path, commit: &str, commands: &[String]) -> Result<String> {
     let blobs = git::blobs(base, commit, &LOCKFILES)?;

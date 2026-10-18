@@ -6,10 +6,12 @@
 # Options, as flags (`... | sh -s -- --dir ~/bin`) or environment variables:
 #   --version X   LANES_VERSION       install version X instead of the one this script came with
 #   --dir DIR     LANES_INSTALL_DIR   where to put the binaries (default: ~/.local/bin)
+#   --no-setup    LANES_NO_SETUP=1    don't offer to set Lanes up afterwards
 #
 # It downloads one archive and its checksum from github.com, checks the checksum and copies two
-# files. It sends nothing anywhere else and doesn't touch your shell profile. Run it again to
-# update. To uninstall, delete `lane` and `laned` from the folder it printed.
+# files. It sends nothing anywhere else and doesn't touch your shell profile. At a terminal, it
+# then asks whether to set Lanes up now (`lane setup`); in CI or a pipe it never asks. Run it
+# again to update. To uninstall, delete `lane` and `laned` from the folder it printed.
 
 set -eu
 
@@ -32,6 +34,7 @@ Install Lanes from GitHub Releases.
 Options:
   --version X   install version X (default: $DEFAULT_VERSION)
   --dir DIR     install into DIR (default: ~/.local/bin)
+  --no-setup    don't offer to set Lanes up afterwards
   -h, --help    show this
 EOF
 }
@@ -99,6 +102,10 @@ main() {
 			dir="$2"
 			shift 2
 			;;
+		--no-setup)
+			LANES_NO_SETUP=1
+			shift
+			;;
 		-h | --help)
 			usage
 			exit 0
@@ -141,11 +148,30 @@ main() {
 
 	say "installed lane and laned $version in $dir"
 	case ":$PATH:" in
-	*":$dir:"*) say "run \`lane\` in a repo to start" ;;
+	*":$dir:"*) ;;
 	*)
 		say "$dir isn't on your PATH yet. Add this line to your shell profile (~/.zshrc or ~/.bashrc), then open a new terminal:"
 		printf '\n  export PATH="%s:$PATH"\n\n' "$dir"
 		;;
+	esac
+	offer_setup "$dir"
+}
+
+# At a terminal, offer to set Lanes up straight away: check this machine and put its agents in
+# lanes (`lane setup`). Never in CI, without a terminal, or with LANES_NO_SETUP / --no-setup.
+offer_setup() {
+	if [ -n "${LANES_NO_SETUP:-}" ] || [ -n "${CI:-}" ] || [ ! -t 1 ] || ! (: </dev/tty) 2>/dev/null; then
+		say "next: run \`lane setup\` to check this machine and put your agents in lanes"
+		return 0
+	fi
+	printf 'lanes: set Lanes up now? It checks this machine and puts your agents in lanes. [Y/n] ' >/dev/tty
+	answer=""
+	read -r answer </dev/tty || answer="n"
+	case "$answer" in
+	"" | y | Y | yes | Yes | YES)
+		"$1/lane" setup </dev/tty >/dev/tty 2>&1 || say "setup didn't finish; run \`lane setup\` any time"
+		;;
+	*) say "later: run \`lane setup\` to check this machine and put your agents in lanes" ;;
 	esac
 }
 

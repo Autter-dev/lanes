@@ -430,6 +430,11 @@ This repo uses [Lanes](https://lanes.autter.dev) for parallel work. Each agent w
 
 const AGENTS_MARKER: &str = "<!-- Added by `lane init`.";
 
+/// Whether `AGENTS.md` has the Lanes note already.
+pub fn has_agents_note(repo: &Repo) -> bool {
+    fs::read_to_string(repo.root.join("AGENTS.md")).is_ok_and(|t| t.contains(AGENTS_MARKER))
+}
+
 /// Add the Lanes note to `AGENTS.md` (made if there isn't one). Claude Code reads `AGENTS.md`
 /// only when there's no `CLAUDE.md`, so a `CLAUDE.md` gets an `@AGENTS.md` line too.
 pub fn setup_agents_md(repo: &Repo) -> Result<Vec<Change>> {

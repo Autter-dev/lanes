@@ -9,6 +9,7 @@
 //!   the first result and changes nothing.
 
 mod args;
+mod guided;
 mod hook;
 
 use lane_core::agents;
@@ -161,12 +162,19 @@ Options:
 const INIT_HELP: &str = "\
 lane init: set up Lanes for this repo and the agents you use
 
-Usage: lane init [--force] [--print] [--no-agents] [--json]
+Usage: lane init [--yes] [--force] [--print] [--no-agents] [--json]
 
 Looks at the repo (package manager, dev server and its port, .env template, Compose file,
 migration tool) and writes lane.toml with what it found: how to install dependencies in the
-clean _base lane, how to start the dev server, and where each lane's .env starts from. Runs
-nothing and installs nothing. Check lane.toml in, so teammates get the same lanes.
+clean _base lane, how to start the dev server, and where each lane's .env starts from. Check
+lane.toml in, so teammates get the same lanes.
+
+In a terminal, it sets everything up and asks Y/n before each step that's yours to choose:
+lane.toml, putting this machine's agents in lanes (Claude Code, Codex, Cursor), the Git hook,
+the AGENTS.md note, and installing dependencies now so the first lane is ready in seconds. Then
+it says what's left to do. `--yes` takes every default without asking. Agents, scripts and CI
+are never asked: for them it writes lane.toml and the repo's hooks, and installs nothing.
+(Set LANE_INTERACTIVE=1 if your terminal isn't recognised as one, and you'll be asked.)
 
 Then it puts agents in lanes:
   Claude Code   hooks in .claude/settings.local.json (kept out of Git): `claude -w <name>`
@@ -180,6 +188,7 @@ Then it puts agents in lanes:
 Running it again changes nothing that's already set up.
 
 Options:
+  --yes         Set everything up without asking, taking every default
   --force       Rewrite lane.toml even if it's already there
   --print       Show the lane.toml it would write, and write nothing
   --no-agents   Write lane.toml only: no hooks, no AGENTS.md note
@@ -190,15 +199,21 @@ Options:
 const DOCTOR_HELP: &str = "\
 lane doctor: check what could stop lanes working, and say how to fix it
 
-Usage: lane doctor [--json]
+Usage: lane doctor [--fix] [--yes] [--json]
 
 Everything `lane setup` checks about this machine (Git, whether this disk clones files, disk
 space), and then: that `lane` is on PATH so agents' hooks can run it, which agents put their work
 in lanes, this repo's Git hook, lanes whose folders have gone, the daemon, and errors in the log.
-Each problem says what to do next. Nothing is changed. Exits 1 when something must be fixed.
+Each problem says what to do next, and nothing is changed. Exits 1 when something must be fixed.
+
+With --fix, Lanes fixes what it can by itself, asking Y/n before each: agents not in lanes yet,
+this repo's Git hook, lanes whose folders have gone. What only you can do (install Git, move a
+repo to a Dev Drive, change PATH) keeps its steps. In a script, add --yes to make every fix.
 
 Options:
-  --json       Print {\"healthy\": ..., \"checks\": [...]}
+  --fix        Fix what Lanes can fix by itself, asking first
+  --yes        With --fix: make every fix without asking
+  --json       Print {\"healthy\": ..., \"checks\": [...]} (and \"fixed\" with --fix)
   -h, --help   Show this help
 ";
 
@@ -821,7 +836,7 @@ fn env_vars(args: &[String]) -> Result<()> {
 /// `lane init`: find what the repo needs and write lane.toml.
 fn init(args: &[String]) -> Result<()> {
     let (common, rest) = args::split(args)?;
-    let (mut force, mut print_only, mut no_agents) = (false, false, false);
+    let (mut force, mut print_only, mut no_agents, mut yes) = (false, false, false, false);
     for arg in &rest {
         match arg.as_str() {
             "-h" | "--help" => {
@@ -831,6 +846,7 @@ fn init(args: &[String]) -> Result<()> {
             "--force" => force = true,
             "--print" => print_only = true,
             "--no-agents" => no_agents = true,
+            "--yes" | "-y" => yes = true,
             s => return Err(unknown_option("init", s)),
         }
     }
@@ -842,6 +858,12 @@ fn init(args: &[String]) -> Result<()> {
         found.env_template.as_deref(),
     );
     let path = repo.root.join(lane_core::project::FILE_NAME);
+    // A person at a terminal is guided, with a question before each step; --yes takes every
+    // default. Agents, scripts and CI get the plain init below, which asks nothing.
+    let person = !common.json && Env::current().can_ask();
+    if !print_only && !no_agents && (yes || person) {
+        return init_guided(&repo, &found, &text, &path, force, yes, common.json);
+    }
     let existed = path.exists();
     let write = !print_only && (!existed || force);
     if write {
@@ -923,27 +945,7 @@ fn init(args: &[String]) -> Result<()> {
         print!("{text}");
         return Ok(());
     }
-    if found.stack.is_empty() {
-        println!("Nothing recognised in {}.", repo.root.display());
-    } else {
-        println!("Found: {}", found.stack.join(", "));
-    }
-    if !found.install.is_empty() {
-        println!("  install  {}", found.install.join(" && "));
-    }
-    if let Some(dev) = &found.dev {
-        let port = dev
-            .default_port
-            .map(|p| format!(" (usually port {p})"))
-            .unwrap_or_default();
-        println!("  dev      {}{port}", dev.command);
-    }
-    if let Some(t) = &found.env_template {
-        println!("  env      each lane's .env starts from {}", t.display());
-    }
-    for note in &found.notes {
-        println!("  note     {note}");
-    }
+    print_found(&found, &repo.root);
     if write {
         println!("Wrote {}.", path.display());
     } else {
@@ -981,6 +983,76 @@ fn init(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// The guided init: what was found, each step done or asked about, and what's left to do.
+fn init_guided(
+    repo: &Repo,
+    found: &detect::Detected,
+    text: &str,
+    path: &std::path::Path,
+    force: bool,
+    yes: bool,
+    json: bool,
+) -> Result<()> {
+    if !json {
+        println!("Setting up Lanes for {}", repo.root.display());
+        print_found(found, &repo.root);
+        println!();
+    }
+    let (done, steps) = match yes {
+        true => guided::init(repo, text, path, force, &mut guided::Defaults, !json)?,
+        false => guided::init(repo, text, path, force, &mut guided::Terminal, true)?,
+    };
+    let did: Vec<&str> = done.iter().filter(|d| d.done).map(|d| d.what).collect();
+    lane_core::log::info(
+        "init",
+        match did.is_empty() {
+            true => "nothing to set up".to_string(),
+            false => format!("set up {}", did.join(", ")),
+        },
+    )
+    .repo(&repo.root)
+    .write();
+    if json {
+        print_json(&serde_json::json!({
+            "repo": repo.root,
+            "found": found,
+            "lane_toml": path,
+            "text": text,
+            "done": done,
+            "next": steps,
+        }));
+        return Ok(());
+    }
+    println!();
+    print!("{}", next::render(&steps));
+    Ok(())
+}
+
+/// What `lane init` found in the repo.
+fn print_found(found: &detect::Detected, root: &std::path::Path) {
+    if found.stack.is_empty() {
+        println!("Nothing recognised in {}.", root.display());
+    } else {
+        println!("Found: {}", found.stack.join(", "));
+    }
+    if !found.install.is_empty() {
+        println!("  install  {}", found.install.join(" && "));
+    }
+    if let Some(dev) = &found.dev {
+        let port = dev
+            .default_port
+            .map(|p| format!(" (usually port {p})"))
+            .unwrap_or_default();
+        println!("  dev      {}{port}", dev.command);
+    }
+    if let Some(t) = &found.env_template {
+        println!("  env      each lane's .env starts from {}", t.display());
+    }
+    for note in &found.notes {
+        println!("  note     {note}");
+    }
+}
+
 /// Put agents in lanes: the Git hook and the AGENTS.md note always, Claude Code's hooks when
 /// Claude Code is in use here. Each step is safe to run again.
 fn setup_agents(repo: &Repo) -> Result<Vec<(&'static str, agents::Change)>> {
@@ -1001,9 +1073,12 @@ fn setup_agents(repo: &Repo) -> Result<Vec<(&'static str, agents::Change)>> {
 /// `lane doctor`: every check, and exit 1 when something must be fixed.
 fn doctor(args: &[String]) -> ExitCode {
     let json = args::wants_json(args);
+    let (mut fix, mut yes) = (false, false);
     for arg in args {
         match arg.as_str() {
             "--json" => {}
+            "--fix" => fix = true,
+            "--yes" | "-y" => yes = true,
             "-h" | "--help" => {
                 print!("{DOCTOR_HELP}");
                 return ExitCode::from(exit::OK);
@@ -1011,10 +1086,50 @@ fn doctor(args: &[String]) -> ExitCode {
             s => return report(Some("doctor"), &unknown_option("doctor", s), json),
         }
     }
+    let person = !json && Env::current().can_ask();
+    if fix && !yes && !person {
+        let e = Error::usage("`lane doctor --fix` asks before each fix")
+            .hint("In a script, add --yes to make every fix: `lane doctor --fix --yes`.");
+        return report(Some("doctor"), &e, json);
+    }
+    if yes && !fix {
+        let e = Error::usage("--yes only works with --fix")
+            .hint("Run `lane doctor --fix --yes` to make every fix without asking.");
+        return report(Some("doctor"), &e, json);
+    }
+    let mut fixed = Vec::new();
+    if fix {
+        if person && !yes {
+            print_checks(&lane_core::doctor::run(&here()));
+            println!();
+            println!("Lanes can fix some of this itself:");
+        }
+        let result = match yes {
+            true => guided::fix(&here(), &mut guided::Defaults),
+            false => guided::fix(&here(), &mut guided::Terminal),
+        };
+        fixed = match result {
+            Ok(f) => f,
+            Err(e) => return report(Some("doctor"), &e, json),
+        };
+        if !json {
+            if fixed.is_empty() {
+                println!("Nothing for Lanes to fix by itself.");
+            }
+            for f in &fixed {
+                println!("  ✓ {}", f.summary);
+            }
+            println!();
+        }
+    }
     let checks = lane_core::doctor::run(&here());
     let healthy = lane_core::doctor::healthy(&checks);
     if json {
-        print_json(&serde_json::json!({ "healthy": healthy, "checks": checks }));
+        let mut v = serde_json::json!({ "healthy": healthy, "checks": checks });
+        if fix {
+            v["fixed"] = serde_json::json!(fixed);
+        }
+        print_json(&v);
     } else {
         print_checks(&checks);
         println!();
@@ -1178,7 +1293,8 @@ fn run_onboarding(env: &Env, config: &mut Config) -> Result<bool, ExitCode> {
             match agents::user::setup(agents) {
                 Ok(done) => {
                     log_agent_setup(&done, agents);
-                    print_agent_setup(&done, agents)
+                    print_agent_setup(&done, agents);
+                    print!("{}", next::render(&after_welcome(&done, agents)));
                 }
                 Err(e) => eprintln!("lane: {e}"),
             }
@@ -1422,6 +1538,40 @@ fn agents_json(done: Option<&[(agents::user::Agent, Vec<agents::Change>)]>) -> s
             })
             .collect::<Vec<_>>()
     )
+}
+
+/// What's left after the welcome: set up the repo you're in (or go to one), trust Codex's hooks
+/// once, and get instant lanes where this disk copies them.
+fn after_welcome(done: &[(agents::user::Agent, Vec<agents::Change>)], on: bool) -> Vec<next::Step> {
+    let mut steps = Vec::new();
+    let codex_now = done
+        .iter()
+        .any(|(a, c)| a.id == "codex" && c.iter().any(|c| c.changed));
+    if on && codex_now {
+        steps.push(next::Step {
+            run: "/hooks".into(),
+            why: "in Codex, once: trust Lanes' two hooks, so Codex sessions get lanes".into(),
+        });
+    }
+    match Repo::open(&here()) {
+        Ok(_) => steps.push(next::Step {
+            run: "lane init".into(),
+            why: "set this repo up, with a Y/n before each step".into(),
+        }),
+        Err(_) => steps.push(next::Step {
+            run: "cd your-project && lane init".into(),
+            why: "set up a repo you work on, with a Y/n before each step".into(),
+        }),
+    }
+    if machine::run_check("copies", &here()).status == machine::Status::Warn {
+        steps.push(next::Step {
+            run: "lane doctor".into(),
+            why:
+                "this disk copies lanes instead of cloning them; it shows how to get instant lanes"
+                    .into(),
+        });
+    }
+    steps
 }
 
 /// A log line per agent that putting agents in lanes changed.

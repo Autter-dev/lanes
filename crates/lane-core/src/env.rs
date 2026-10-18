@@ -102,6 +102,16 @@ impl Env {
             || self.var("WT_SESSION").is_some()
     }
 
+    /// Whether Lanes may ask a person Y/n questions: a terminal on both ends, not CI, not an
+    /// agent's session. `LANE_INTERACTIVE=1` says yes where Lanes can't tell (some Windows
+    /// terminals don't look like one to programs); `LANE_INTERACTIVE=0` says no.
+    pub fn can_ask(&self) -> bool {
+        match self.var("LANE_INTERACTIVE") {
+            Some(_) => self.truthy("LANE_INTERACTIVE"),
+            None => self.interactive().is_ok(),
+        }
+    }
+
     /// `Ok` when a full-screen app may open; otherwise why not, in words for a plain-text notice.
     pub fn interactive(&self) -> Result<(), &'static str> {
         if !self.stdin_tty || !self.stdout_tty {
@@ -165,5 +175,15 @@ mod tests {
             None
         );
         assert_eq!(Env::fake(&[], true).telemetry_forced_off(), None);
+    }
+
+    #[test]
+    fn a_person_is_asked_only_at_a_terminal_unless_told() {
+        assert!(Env::fake(&[], true).can_ask());
+        assert!(!Env::fake(&[], false).can_ask(), "a pipe is never asked");
+        assert!(!Env::fake(&[("CI", "true")], true).can_ask());
+        assert!(!Env::fake(&[("CLAUDECODE", "1")], true).can_ask());
+        assert!(Env::fake(&[("LANE_INTERACTIVE", "1")], false).can_ask());
+        assert!(!Env::fake(&[("LANE_INTERACTIVE", "0")], true).can_ask());
     }
 }
