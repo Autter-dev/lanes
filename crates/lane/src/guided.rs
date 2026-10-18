@@ -144,7 +144,7 @@ pub fn init(
         done(
             "agents",
             false,
-            "no Claude Code, Codex or Cursor found on this machine",
+            "no Claude Code, Codex, Cursor, Gemini CLI or GitHub Copilot found on this machine",
         )
     } else if unset.is_empty() {
         done(

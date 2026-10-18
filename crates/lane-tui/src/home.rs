@@ -979,6 +979,8 @@ fn agent_name(agent: Option<&str>) -> String {
         Some("claude") => "Claude Code".into(),
         Some("codex") => "Codex".into(),
         Some("cursor") => "Cursor".into(),
+        Some("gemini") => "Gemini CLI".into(),
+        Some("copilot") => "GitHub Copilot".into(),
         Some(other) => other.to_string(),
         None => "—".into(),
     }

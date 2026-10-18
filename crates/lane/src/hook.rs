@@ -8,6 +8,10 @@
 //! - `pre-tool-use` turns down `git worktree add`, a clone of the repo or a copy of its folder in
 //!   a Lanes repo, pointing to `lane new`.
 //!
+//! `lane hook codex|cursor|gemini|copilot <event>` do the same for those agents, in each one's
+//! own format: a session that starts in a worktree the agent made makes it a lane, and a copy of
+//! the repo is turned down. `lane setup` adds these hooks to each agent's user settings.
+//!
 //! `lane hook git post-checkout` is what a Git hook that Lanes doesn't own runs (Husky's, or
 //! lefthook's): a new worktree becomes a lane.
 //!
@@ -33,9 +37,15 @@ lane hook: what an agent's hooks run (`lane init` sets them up)
 Usage: lane hook claude <event> [--json]
        lane hook codex <session-start|pre-tool-use>
        lane hook cursor <session-start|before-shell>
+       lane hook gemini <session-start|before-tool>
+       lane hook copilot <session-start|pre-tool-use>
        lane hook git post-checkout <previous HEAD> <new HEAD> <flag> [--json]
 
 `lane hook claude` reads Claude Code's hook input on stdin and answers in Claude Code's format.
+The others do the same for Codex, Cursor, Gemini CLI and GitHub Copilot (the Copilot CLI and
+VS Code), whose hooks `lane setup` adds: session-start makes a worktree the agent made a lane,
+and the shell hooks turn down copies of the repo. `lane hook copilot pre-tool-use` exits 2 when
+it turns one down, which is how Copilot hooks say no.
 
 Events:
   worktree-create   Make a lane for `claude -w` and print its folder (WorktreeCreate)
@@ -76,6 +86,13 @@ pub fn hook(args: &[String]) -> ExitCode {
         ["codex", "session-start"] => quiet(codex_session_start()),
         ["codex", "pre-tool-use"] => quiet(codex_pre_tool_use()),
         ["cursor", "before-shell"] => quiet(cursor_before_shell()),
+        ["gemini", "session-start"] => quiet(gemini_session_start()),
+        ["gemini", "before-tool"] => quiet(gemini_before_tool()),
+        ["copilot", "session-start"] => quiet(copilot_session_start()),
+        ["copilot", "pre-tool-use"] => match copilot_pre_tool_use() {
+            Ok(Some(_)) => ExitCode::from(COPILOT_DENY),
+            other => quiet(other.map(|_| ())),
+        },
         ["git", "post-checkout", git_args @ ..] => quiet(post_checkout(git_args, json)),
         ["git", ..] => report(
             Some("hook"),
@@ -87,7 +104,7 @@ pub fn hook(args: &[String]) -> ExitCode {
         [agent, ..] if *agent != "claude" => report(
             Some("hook"),
             &Error::usage(format!("no hooks for `{agent}` yet")).hint(
-                "Lanes has hooks for Claude Code, Codex, Cursor and Git: `lane hook claude|codex|cursor <event>` and `lane hook git post-checkout`. Run `lane hook --help`.",
+                "Lanes has hooks for Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot and Git: `lane hook claude|codex|cursor|gemini|copilot <event>` and `lane hook git post-checkout`. Run `lane hook --help`.",
             ),
             json,
         ),
@@ -108,6 +125,10 @@ fn done(result: Result<()>, json: bool) -> ExitCode {
     }
 }
 
+/// Copilot's code for "turned down": its hooks read exit 2 as a deny, and VS Code gives stderr to
+/// the model. It belongs to Copilot's hooks, not to `lane`'s own exit codes.
+const COPILOT_DENY: u8 = 2;
+
 fn quiet(result: Result<()>) -> ExitCode {
     if let Err(e) = result {
         lane_core::log::error("hook", e.to_string()).write();
@@ -120,7 +141,7 @@ fn input() -> Result<Value> {
     let mut stdin = std::io::stdin();
     if stdin.is_terminal() {
         return Err(Error::usage("`lane hook` reads a hook's input on stdin")
-            .hint("Claude Code runs it for you once `lane init` has set up the hooks; there's no need to run it by hand."));
+            .hint("Your agent runs it for you once `lane setup` or `lane init` has set up its hooks; there's no need to run it by hand."));
     }
     let mut text = String::new();
     stdin.read_to_string(&mut text).map_err(|e| {
@@ -401,8 +422,8 @@ fn codex_pre_tool_use() -> Result<()> {
     Ok(())
 }
 
-/// For an agent that makes its own worktrees out of Lanes' sight (Cursor, Codex): when a session
-/// starts in one, make it a lane, ready to run like one from `lane new`. Returns what to tell
+/// For an agent that makes its own worktrees out of Lanes' sight (Cursor, Codex, Gemini CLI,
+/// Copilot): when a session starts in one, make it a lane, ready to run like one from `lane new`. Returns what to tell
 /// the agent: which lane it's in, or how to get one in a Lanes repo; nothing elsewhere.
 fn adopting_session(agent: &str, folder: &Path) -> Result<Option<String>> {
     let Ok(repo) = Repo::open(folder) else {
@@ -451,7 +472,8 @@ fn adopting_session(agent: &str, folder: &Path) -> Result<Option<String>> {
 
 /// A lane name for an agent's own worktree. Codex names every worktree folder after the repo,
 /// under a short id (`.../a1b2/app`), so its lanes are `codex-a1b2`; Cursor's folder is the id
-/// (`.../app/zjm`), so its lanes are `cursor-zjm`.
+/// (`.../app/zjm`), so its lanes are `cursor-zjm`; `gemini -w fix-auth` makes
+/// `.gemini/worktrees/fix-auth`, so its lane is `gemini-fix-auth`.
 fn worktree_name(agent: &str, top: &Path) -> String {
     let file = |p: Option<&Path>| {
         p.and_then(Path::file_name)
@@ -506,6 +528,92 @@ fn cursor_before_shell() -> Result<()> {
         "agent_message": reason,
     }));
     Ok(())
+}
+
+/// A Gemini CLI session starts (or resumes, or is cleared). A worktree `gemini -w` made becomes a
+/// lane here, ready to run, and the agent is told which lane it's in.
+fn gemini_session_start() -> Result<()> {
+    let input = input()?;
+    if let Some(context) = adopting_session("gemini", &cwd(&input))? {
+        print_json(&json!({
+            "hookSpecificOutput": { "hookEventName": "SessionStart", "additionalContext": context }
+        }));
+    }
+    Ok(())
+}
+
+/// Before Gemini CLI runs a shell command (`run_shell_command`, in PowerShell on Windows): turn
+/// down copies of the repo. The reason goes to the model as the tool's error, and a line to you.
+fn gemini_before_tool() -> Result<()> {
+    let input = input()?;
+    if input["tool_name"]
+        .as_str()
+        .is_some_and(|t| t != "run_shell_command")
+    {
+        return Ok(());
+    }
+    let command = input["tool_input"]["command"].as_str().unwrap_or_default();
+    // `dir_path` is where the command runs, from the workspace or absolute.
+    let folder = match input["tool_input"]["dir_path"].as_str() {
+        Some(dir) if !dir.is_empty() => cwd(&input).join(dir),
+        _ => cwd(&input),
+    };
+    let Some(reason) = denied(command, cfg!(windows), &folder)? else {
+        return Ok(());
+    };
+    print_json(&json!({
+        "decision": "deny",
+        "reason": reason,
+        "systemMessage": "Lanes turned this down: this repo uses lanes instead of copies.",
+    }));
+    Ok(())
+}
+
+/// A Copilot session starts, in the Copilot CLI or VS Code. A worktree Copilot made becomes a
+/// lane here, ready to run, and the agent is told which lane it's in: the CLI reads
+/// `additionalContext`, VS Code `hookSpecificOutput`. (VS Code may leave out `cwd`; it runs hooks
+/// in the workspace.)
+fn copilot_session_start() -> Result<()> {
+    let input = input()?;
+    if let Some(context) = adopting_session("copilot", &cwd(&input))? {
+        print_json(&json!({
+            "additionalContext": context,
+            "hookSpecificOutput": { "hookEventName": "SessionStart", "additionalContext": context },
+        }));
+    }
+    Ok(())
+}
+
+/// Before Copilot runs a tool: turn down a shell command that copies the repo. The Copilot CLI
+/// sends `toolName` (`bash` or `powershell`) and `toolArgs`, VS Code `tool_name` and
+/// `tool_input`; any tool with a `command` is a shell here. A deny goes out as JSON for the CLI,
+/// which shows its reason to the agent, and on stderr for VS Code, which gives that to the model;
+/// the caller then exits 2. Returns the reason.
+fn copilot_pre_tool_use() -> Result<Option<&'static str>> {
+    let input = input()?;
+    let tool = input["toolName"]
+        .as_str()
+        .or(input["tool_name"].as_str())
+        .unwrap_or_default();
+    let args = match input.get("toolArgs").or(input.get("tool_input")) {
+        Some(Value::String(text)) => serde_json::from_str(text).unwrap_or(Value::Null),
+        Some(args) => args.clone(),
+        None => Value::Null,
+    };
+    let Some(command) = args["command"].as_str() else {
+        return Ok(None);
+    };
+    let powershell = match tool.to_ascii_lowercase().as_str() {
+        "bash" => false,
+        "powershell" => true,
+        _ => cfg!(windows),
+    };
+    let reason = denied(command, powershell, &cwd(&input))?;
+    if let Some(reason) = reason {
+        print_json(&json!({ "permissionDecision": "deny", "permissionDecisionReason": reason }));
+        eprintln!("{reason}");
+    }
+    Ok(reason)
 }
 
 /// Git's post-checkout hook: a new worktree, checked out from nothing so the previous HEAD is

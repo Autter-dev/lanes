@@ -1293,6 +1293,301 @@ fn a_codex_session_in_its_own_worktree_gets_a_lane() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// A worktree an agent made itself, out of Lanes' sight (its Git hooks don't make it a lane).
+fn agent_worktree(repo: &std::path::Path, worktree: &std::path::Path) {
+    let _ = std::fs::remove_dir_all(worktree);
+    let ok = Command::new("git")
+        .args([
+            "-C",
+            &repo.to_string_lossy(),
+            "worktree",
+            "add",
+            "-q",
+            "--detach",
+        ])
+        .arg(worktree)
+        .env("LANE_GIT", "1")
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok);
+}
+
+#[test]
+fn setup_puts_gemini_cli_and_copilot_in_lanes_and_off_gives_their_files_back_byte_for_byte() {
+    let dir = config_dir("gemini-copilot-setup");
+    let home = dir.join("home");
+    // Gemini CLI's settings, with a comment, and Copilot's folder: both "installed" here.
+    let gemini = home.join(".gemini/settings.json");
+    std::fs::create_dir_all(gemini.parent().unwrap()).unwrap();
+    let gemini_text = "{\n  // Mine.\n  \"ui\": { \"theme\": \"GitHub\" },\n  \"context\": { \"fileName\": \"CONTEXT.md\" }\n}\n";
+    std::fs::write(&gemini, gemini_text).unwrap();
+    std::fs::create_dir_all(home.join(".copilot")).unwrap();
+    // VS Code's user settings, where this system keeps them.
+    let config = if cfg!(windows) {
+        home.join("AppData/Roaming")
+    } else if cfg!(target_os = "macos") {
+        home.join("Library/Application Support")
+    } else {
+        home.join(".config")
+    };
+    let vscode = config.join("Code/User/settings.json");
+    std::fs::create_dir_all(vscode.parent().unwrap()).unwrap();
+    let vscode_text = "{\n    \"editor.fontSize\": 14 // big\n}";
+    std::fs::write(&vscode, vscode_text).unwrap();
+
+    let v = json(&lane(&dir, &["setup", "--yes", "--json"]));
+    let set_up: Vec<(&str, bool)> = v["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| (a["id"].as_str().unwrap(), a["set_up"].as_bool().unwrap()))
+        .collect();
+    assert_eq!(set_up, [("gemini", true), ("copilot", true)], "{v}");
+    let text = std::fs::read_to_string(&gemini).unwrap();
+    assert!(
+        text.contains("\"command\": \"lane hook gemini before-tool\""),
+        "{text}"
+    );
+    assert!(text.contains("\"CONTEXT.md\", \"AGENTS.md\"") && text.contains("// Mine."));
+    let hooks = std::fs::read_to_string(home.join(".copilot/hooks/lanes.json")).unwrap();
+    assert!(hooks.contains("lane hook copilot pre-tool-use"), "{hooks}");
+    assert!(
+        std::fs::read_to_string(&vscode)
+            .unwrap()
+            .contains("\"chat.useAgentsMdFile\": true")
+    );
+    assert!(home.join(".agents/skills/lanes/SKILL.md").is_file());
+
+    // `lane doctor` agrees.
+    let doctor = json(&lane(&dir, &["doctor", "--json"]));
+    let check = doctor["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == "agent-hooks")
+        .unwrap()
+        .clone();
+    assert_eq!(check["status"], "ok", "{check}");
+    assert!(
+        check["summary"]
+            .as_str()
+            .unwrap()
+            .contains("Gemini CLI, GitHub Copilot"),
+        "{check}"
+    );
+
+    // Off: every file is back exactly as it was, and what Lanes made is gone.
+    let v = json(&lane(
+        &dir,
+        &["setup", "--yes", "--agents", "off", "--json"],
+    ));
+    assert_eq!(v["settings"]["agents"], false);
+    assert_eq!(std::fs::read_to_string(&gemini).unwrap(), gemini_text);
+    assert_eq!(std::fs::read_to_string(&vscode).unwrap(), vscode_text);
+    assert!(!home.join(".copilot/hooks").exists());
+    assert!(!home.join(".agents/skills/lanes").exists());
+    assert!(
+        !dir.join("agent-settings.json").exists(),
+        "nothing left to take back"
+    );
+}
+
+#[test]
+fn a_gemini_cli_session_in_its_own_worktree_gets_a_lane() {
+    let dir = config_dir("gemini-hooks");
+    let repo = repo_with_commit("gemini-hooks");
+    std::fs::write(repo.join("lane.toml"), "version = 1\n").unwrap();
+    // `gemini -w fix-auth` works in .gemini/worktrees/fix-auth.
+    let worktree = repo.join(".gemini/worktrees/fix-auth");
+    agent_worktree(&repo, &worktree);
+
+    // SessionStart, as Gemini CLI's hooks reference documents it.
+    let input = serde_json::json!({
+        "session_id": "4f1c",
+        "transcript_path": "/tmp/gemini/chats/4f1c.json",
+        "cwd": worktree,
+        "hook_event_name": "SessionStart",
+        "timestamp": "2026-10-18T09:30:00.000Z",
+        "source": "startup",
+    });
+    let out = hook_raw(
+        &dir,
+        &worktree,
+        "gemini",
+        "session-start",
+        input.to_string().as_bytes(),
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v = json(&out);
+    let context = v["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap();
+    assert!(context.contains("lane `gemini-fix-auth`"), "{context}");
+    let listed = json(&lane_in(&dir, &repo, &["list", "--json"]));
+    assert_eq!(listed["lanes"][0]["name"], "gemini-fix-auth");
+    assert_eq!(listed["lanes"][0]["agent"], "gemini");
+
+    // BeforeTool on run_shell_command: a copy of the repo is turned down, the reason for the
+    // model; anything else gets no answer.
+    let tool = |command: &str| {
+        serde_json::json!({
+            "session_id": "4f1c",
+            "transcript_path": "/tmp/gemini/chats/4f1c.json",
+            "cwd": worktree,
+            "hook_event_name": "BeforeTool",
+            "timestamp": "2026-10-18T09:31:00.000Z",
+            "tool_name": "run_shell_command",
+            "tool_input": { "command": command, "description": "Make a copy" },
+        })
+        .to_string()
+    };
+    let out = hook_raw(
+        &dir,
+        &worktree,
+        "gemini",
+        "before-tool",
+        tool("git worktree add ../x").as_bytes(),
+    );
+    assert_eq!(out.status.code(), Some(0));
+    let v = json(&out);
+    assert_eq!(v["decision"], "deny");
+    assert!(v["reason"].as_str().unwrap().contains("lane new"), "{v}");
+    let out = hook_raw(
+        &dir,
+        &worktree,
+        "gemini",
+        "before-tool",
+        tool("npm test").as_bytes(),
+    );
+    assert_eq!(out.status.code(), Some(0));
+    assert!(out.stdout.is_empty(), "no answer, so Gemini CLI runs it");
+}
+
+#[test]
+fn a_copilot_session_in_its_own_worktree_gets_a_lane_in_the_cli_and_in_vs_code() {
+    let dir = config_dir("copilot-hooks");
+    let repo = repo_with_commit("copilot-hooks");
+    std::fs::write(repo.join("lane.toml"), "version = 1\n").unwrap();
+    let worktree = repo.with_file_name("copilot-worktrees").join("fix-login");
+    agent_worktree(&repo, &worktree);
+
+    // The Copilot CLI's sessionStart: camelCase, a timestamp in milliseconds.
+    let input = serde_json::json!({
+        "sessionId": "c0p1",
+        "timestamp": 1_760_779_800_000_u64,
+        "cwd": worktree,
+        "source": "new",
+        "initialPrompt": "Fix the login bug",
+    });
+    let out = hook_raw(
+        &dir,
+        &worktree,
+        "copilot",
+        "session-start",
+        input.to_string().as_bytes(),
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v = json(&out);
+    let context = v["additionalContext"].as_str().unwrap();
+    assert!(context.contains("lane `copilot-fix-login`"), "{context}");
+    assert_eq!(
+        v["hookSpecificOutput"]["additionalContext"], context,
+        "VS Code's shape too"
+    );
+
+    // The Copilot CLI's preToolUse: `toolArgs` is the tool's arguments as a JSON string. A copy
+    // of the repo is turned down with exit 2, the reason for the agent in JSON and on stderr.
+    let cli = |command: &str| {
+        serde_json::json!({
+            "sessionId": "c0p1",
+            "timestamp": 1_760_779_860_000_u64,
+            "cwd": worktree,
+            "toolName": "bash",
+            "toolArgs": serde_json::json!({ "command": command, "description": "Copy" }).to_string(),
+        })
+        .to_string()
+    };
+    let out = hook_raw(
+        &dir,
+        &worktree,
+        "copilot",
+        "pre-tool-use",
+        cli("git worktree add ../x").as_bytes(),
+    );
+    assert_eq!(out.status.code(), Some(2));
+    let v = json(&out);
+    assert_eq!(v["permissionDecision"], "deny");
+    assert!(
+        v["permissionDecisionReason"]
+            .as_str()
+            .unwrap()
+            .contains("lane new")
+    );
+    assert!(String::from_utf8_lossy(&out.stderr).contains("lane new"));
+    let out = hook_raw(
+        &dir,
+        &worktree,
+        "copilot",
+        "pre-tool-use",
+        cli("npm test").as_bytes(),
+    );
+    assert_eq!(out.status.code(), Some(0));
+    assert!(out.stdout.is_empty());
+
+    // VS Code's PreToolUse: snake_case, the terminal tool's input as an object. The model gets
+    // stderr on exit 2.
+    let vscode = serde_json::json!({
+        "timestamp": "2026-10-18T09:32:00.000Z",
+        "cwd": worktree,
+        "session_id": "vs-1",
+        "hook_event_name": "PreToolUse",
+        "tool_name": "run_in_terminal",
+        "tool_input": { "command": "git worktree add ../y", "explanation": "Copy", "isBackground": false },
+        "tool_use_id": "t-1",
+    });
+    let out = hook_raw(
+        &dir,
+        &worktree,
+        "copilot",
+        "pre-tool-use",
+        vscode.to_string().as_bytes(),
+    );
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("lane new"));
+    // A tool that isn't a shell passes without a word.
+    let read = serde_json::json!({
+        "timestamp": "2026-10-18T09:33:00.000Z",
+        "cwd": worktree,
+        "hook_event_name": "PreToolUse",
+        "tool_name": "read_file",
+        "tool_input": { "filePath": "src/app.ts" },
+    });
+    let out = hook_raw(
+        &dir,
+        &worktree,
+        "copilot",
+        "pre-tool-use",
+        read.to_string().as_bytes(),
+    );
+    assert_eq!(out.status.code(), Some(0));
+    assert!(out.stdout.is_empty() && out.stderr.is_empty());
+
+    let listed = json(&lane_in(&dir, &repo, &["list", "--json"]));
+    assert_eq!(listed["lanes"][0]["agent"], "copilot");
+    let _ = std::fs::remove_dir_all(worktree.parent().unwrap());
+}
+
 #[test]
 fn logs_keep_what_changed_lanes() {
     let dir = config_dir("logs");

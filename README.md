@@ -163,9 +163,11 @@ The gateway arrives in December. Over time, it turns Lanes and Autter into one l
 | --- | --- |
 | Instant lanes, `lane init`, ports and env per lane | ● Now |
 | Terminal app | ● Now |
-| Claude Code, Codex and Cursor put their work in lanes on their own | ● Now |
+| Claude Code, Codex, Cursor, Gemini CLI and GitHub Copilot put their work in lanes on their own | ● Now |
+| The MCP server (`lane mcp`), so agents read the repo and make lanes through tools | ● Now |
+| A background daemon (`laned`) that makes every change to lanes and keeps the terminal app live | ● Now |
 | Sign-in to Autter (`lane login`) | ○ Next |
-| Gemini CLI, Copilot and other agents, the MCP server | ○ Next |
+| Other agents | ○ Next |
 | Databases and Docker Compose per lane, `*.localhost` URLs | ○ Next |
 | Undo, conflict warnings, `lane race`, `lane promote` | ○ Next |
 | Cloud agent setup snippets, GitHub Action | ○ Next |
@@ -178,7 +180,7 @@ macOS, Linux and Windows at launch. On Windows, Lanes is fastest on a Windows 11
 
 ## 07 / Quick start
 
-Lanes is a preview. Install it, run `lane` once, and your agents put their work in lanes on their own: Claude Code, Codex and Cursor, in every repo, with nothing to set up per repo. Every option installs the same `lane` command; winget is on the way.
+Lanes is a preview. Install it, run `lane` once, and your agents put their work in lanes on their own: Claude Code, Codex, Cursor, Gemini CLI and GitHub Copilot, in every repo, with nothing to set up per repo. Every option installs the same `lane` command; winget is on the way.
 
 | On | Install with |
 | --- | --- |
@@ -203,6 +205,8 @@ open http://fix-auth.localhost:4100
 - **Claude Code:** `claude -w <name>`, subagents with `isolation: worktree` and background sessions each get a lane. A `lanes` skill has Claude start a task in a lane of its own. If it tries `git worktree add`, a `git clone` of the repo or a recursive copy of its folder, it's pointed to `lane new` instead. Removing the worktree removes the lane.
 - **Codex:** when a Codex session starts in a worktree Codex made, that worktree becomes a lane, ready to run, and Codex is told which lane it's in. Codex runs new hooks only once you trust them, so open `/hooks` in Codex once.
 - **Cursor:** when a Cursor agent starts in a worktree Cursor made, it becomes a lane the same way.
+- **Gemini CLI:** when a session starts in a worktree `gemini -w` made, it becomes a lane the same way. A shell command that copies the repo is turned down, with the reason shown to the model, and Gemini CLI reads `AGENTS.md` as well as `GEMINI.md`.
+- **GitHub Copilot:** the Copilot CLI and VS Code's agent mode both read Lanes' hooks in `~/.copilot/hooks/lanes.json`: a session that starts in a worktree Copilot made becomes a lane, and a copy of the repo is turned down with the reason shown to the model. VS Code gets `chat.useAgentsMdFile`, so it reads `AGENTS.md`, unless you've switched that off.
 - **Any other tool:** a worktree it makes with Git becomes a lane through a Git `post-checkout` hook that `lane init` adds.
 
 A lane is ready to run: dependencies installed (cloned from a clean `_base` copy when the lockfiles match), a block of ports of its own, and its own `.env`. Without a `lane.toml`, Lanes finds your stack by itself.
@@ -238,7 +242,7 @@ Prefer a Claude Code plugin? It carries the same hooks and skill:
 | `lane doctor` | Checks what could stop lanes working (Git, clones, `lane` on PATH, agents' hooks, the Git hook, lanes whose folders have gone) and says how to fix each. `--fix` fixes what Lanes can, asking Y/n first |
 | `lane logs [<lane>]` | Shows what Lanes did: lanes made and removed, agents' hooks, dependency installs. Kept in a file, never in an agent's output |
 | `lane mcp` | An MCP server over stdio, so agents read the repo and make lanes through tools: `repo.read`, `repo.outline`, `repo.grep`, `lane.new` and `lane.list`. Add it to Claude Code with `claude mcp add lanes -- lane mcp` |
-| `lane hook <agent> <event>` | What agents' hooks run, for Claude Code, Codex, Cursor and Git (set up by `lane setup` and `lane init`) |
+| `lane hook <agent> <event>` | What agents' hooks run, for Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot and Git (set up by `lane setup` and `lane init`) |
 | `lane telemetry` | Shows exactly what the anonymous install count sends from your machine; `lane telemetry off` turns it off (so do `LANE_TELEMETRY=0` and `DO_NOT_TRACK=1`) |
 | `lane daemon` | Shows whether `laned` is running; `start` and `stop` it. While it runs it makes every change to lanes, one at a time per repo, and keeps the terminal app live. Nothing needs it: stopping it loses nothing |
 
