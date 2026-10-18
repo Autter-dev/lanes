@@ -57,7 +57,7 @@ Found: npm, Vite
 
 ? Write lane.toml with what Lanes found, so teammates get the same lanes? [Y/n] y
   ✓ wrote ${repoAt[os]}${sep(os)}lane.toml
-  · Claude Code, Codex and Cursor already put their work in lanes
+  · Claude Code, Codex, Cursor, Gemini CLI and GitHub Copilot already put their work in lanes
 ? Add the Git hook, so worktrees other tools make with Git become lanes too? [Y/n] y
   ✓ Git hook: worktrees other tools make become lanes
 ? Add a short note on working in lanes to AGENTS.md, for every agent that reads it? [Y/n] y
@@ -90,10 +90,12 @@ const listOut = (os: Os) => {
 
 const setupOut = (os: Os) => `Saved: install count on. Settings are in ${configAt[os]}.
 Agents in lanes:
-  Claude Code  set up: its worktrees become lanes, in every repo
-  Codex        set up: its worktrees become lanes, in every repo
-               Codex runs new hooks only once you trust them: open /hooks in Codex and trust Lanes' two hooks.
-  Cursor       set up: its worktrees become lanes, in every repo`;
+  Claude Code    set up: its worktrees become lanes, in every repo
+  Codex          set up: its worktrees become lanes, in every repo
+                 Codex runs new hooks only once you trust them: open /hooks in Codex and trust Lanes' two hooks.
+  Cursor         set up: its worktrees become lanes, in every repo
+  Gemini CLI     set up: its worktrees become lanes, in every repo
+  GitHub Copilot set up: its worktrees become lanes, in every repo`;
 
 const perSystem = (make: (os: Os) => string): Block[] => every.map((os) => ({ kind: 'out', text: make(os), only: [os] }));
 
@@ -117,7 +119,7 @@ export const steps: Step[] = [
   {
     id: 'setup',
     title: 'Set it up once.',
-    text: 'Run `lane` on its own. The first time, it checks Git, your disk and your agents, and puts the agents it finds in lanes: Claude Code, Codex and Cursor get Lanes\' hooks and a `lanes` skill in their own user settings. From then on, every repo gets lanes, with nothing more to set up. Nothing is sent while you look around.',
+    text: 'Run `lane` on its own. The first time, it checks Git, your disk and your agents, and puts the agents it finds in lanes: Claude Code, Codex, Cursor, Gemini CLI and GitHub Copilot get Lanes\' hooks and a `lanes` skill in their own user settings. From then on, every repo gets lanes, with nothing more to set up. Nothing is sent while you look around.',
     blocks: [
       { kind: 'cmd', cmd: 'lane' },
       { kind: 'note', text: 'Every Mac disk is APFS, so a lane is a copy-on-write clone: instant, and it takes almost no extra space.', only: ['macos'] },
@@ -141,6 +143,9 @@ export const steps: Step[] = [
       { kind: 'note', text: 'Or pick a worktree for a new chat in the Codex app. When the session starts, the worktree becomes a lane named `codex-<id>`, ready to run, and Codex is told which lane it\'s in. The first time, open `/hooks` in Codex and trust Lanes\' hooks.' },
       { kind: 'cmd', cmd: 'agent -w fix-auth', label: 'Cursor' },
       { kind: 'note', text: 'Or start an agent in a worktree from Cursor\'s Agents window, or with `/worktree`. When it starts, the worktree becomes a lane named `cursor-<name>`, ready to run.' },
+      { kind: 'cmd', cmd: 'gemini -w fix-auth', label: 'Gemini CLI' },
+      { kind: 'note', text: 'Worktrees are an experimental Gemini CLI feature: switch them on with `"experimental": { "worktrees": true }` in its settings. When the session starts, the worktree becomes a lane named `gemini-<name>`, ready to run, and Gemini is told which lane it\'s in. Gemini CLI reads the note in `AGENTS.md` too.' },
+      { kind: 'note', text: 'GitHub Copilot, in the Copilot CLI or VS Code\'s agent mode: a session that starts in a worktree Copilot made becomes a lane named `copilot-<folder>` the same way. Both read Lanes\' hooks from `~/.copilot/hooks`, and a copy of the repo is turned down with the reason shown to the model.' },
       { kind: 'note', text: 'Any other tool: a worktree it makes with Git becomes a lane, dependencies and all, through the Git hook `lane init` adds (step 6).' },
     ],
   },
@@ -250,7 +255,7 @@ export const upkeep: { os: Os; update: string; remove: string; note?: string }[]
 
 // Coming, not built: said plainly so nobody looks for it.
 export const notYet = [
-  'Gemini CLI, Copilot and other agents get lanes only when they make a Git worktree, through the hook `lane init` adds.',
+  'Other agents, like OpenCode, Amp and Aider, get lanes only when they make a Git worktree, through the hook `lane init` adds.',
   'No background daemon, checkpoints or undo, and no promote to one pull request.',
   'No database or Docker Compose project per lane yet.',
 ];

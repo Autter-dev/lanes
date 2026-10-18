@@ -78,7 +78,7 @@ fn agent_hooks() -> Check {
             "agent-hooks",
             "Agents in lanes",
             Status::Info,
-            "no Claude Code, Codex or Cursor found",
+            "no Claude Code, Codex, Cursor, Gemini CLI or GitHub Copilot found",
         )
         .hint("Run `lane setup` after you install one, and its worktrees become lanes.");
     }
@@ -123,7 +123,7 @@ fn git_hook(repo: &Repo) -> Check {
             Status::Info,
             "not set up: worktrees tools make with Git won't become lanes",
         )
-        .hint("Run `lane init` in this repo. Claude Code, Codex and Cursor don't need it."),
+        .hint("Run `lane init` in this repo. Claude Code, Codex, Cursor, Gemini CLI and Copilot don't need it."),
         Err(e) => Check::new("git-hook", "Git hook", Status::Warn, e.to_string())
             .hint(e.hint.unwrap_or_default()),
     }

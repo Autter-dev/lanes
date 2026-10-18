@@ -8,7 +8,11 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-18
 
-- `14:58` **Changed**: the website offers 0.0.7. The guide shows the guided `lane init` with its Y/n questions, the terminal app and what lanes saved, `lane doctor --fix`, and what the install count sends with `lane telemetry`. (`4e7be85`)
+- `17:14` **Added**: Gemini CLI and GitHub Copilot put their work in lanes on their own, set up once per machine by `lane setup` and the welcome, like Claude Code, Codex and Cursor.
+  - Gemini CLI, in `~/.gemini/settings.json`: a SessionStart hook makes a worktree `gemini -w` made a lane, a BeforeTool hook on `run_shell_command` turns down copies of the repo with the reason shown to the model, and `AGENTS.md` joins `context.fileName` (keeping `GEMINI.md`).
+  - GitHub Copilot: the Copilot CLI and VS Code's agent mode both read Lanes' own `~/.copilot/hooks/lanes.json`, with sessionStart and preToolUse hooks; a turned-down command exits 2 so the model sees why. VS Code's user settings get `chat.useAgentsMdFile` unless you've set it.
+  - `lane hook gemini session-start|before-tool` and `lane hook copilot session-start|pre-tool-use` answer in each agent's documented format. `lane doctor`, the welcome and `lane init` list both agents.
+  - Their settings allow comments, so Lanes edits them as text, and `lane setup --yes --agents off` gives each file back byte for byte. Lanes notes the values it set (`agent-settings.json`, next to its settings) and puts back what was there, unless you've changed them since. The guide shows the guided `lane init` with its Y/n questions, the terminal app and what lanes saved, `lane doctor --fix`, and what the install count sends with `lane telemetry`. (`4e7be85`)
 
 ## 0.0.7 (2026-10-18)
 

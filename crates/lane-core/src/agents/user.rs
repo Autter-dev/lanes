@@ -4,9 +4,9 @@
 //! added and leaves everything else in those files as it was.
 
 use super::{
-    Change, claude_hooks_present, codex_hooks_present, cursor_hooks_present, io_error,
-    merge_claude_hooks, merge_codex_hooks, merge_cursor_hooks, read_or_empty, remove_claude_hooks,
-    remove_codex_hooks, remove_cursor_hooks, write_atomic,
+    Change, claude_hooks_present, codex_hooks_present, copilot, cursor_hooks_present, gemini,
+    io_error, merge_claude_hooks, merge_codex_hooks, merge_cursor_hooks, read_or_empty,
+    remove_claude_hooks, remove_codex_hooks, remove_cursor_hooks, write_atomic,
 };
 use crate::error::{Error, ErrorKind, Result};
 use serde_json::{Value, json};
@@ -41,8 +41,18 @@ pub const CURSOR: Agent = Agent {
     name: "Cursor",
 };
 
+pub const GEMINI: Agent = Agent {
+    id: "gemini",
+    name: "Gemini CLI",
+};
+
+pub const COPILOT: Agent = Agent {
+    id: "copilot",
+    name: "GitHub Copilot",
+};
+
 /// The agents Lanes knows how to set up, in the order it shows them.
-pub const AGENTS: [Agent; 3] = [CLAUDE, CODEX, CURSOR];
+pub const AGENTS: [Agent; 5] = [CLAUDE, CODEX, CURSOR, GEMINI, COPILOT];
 
 /// Where agents keep their user settings: your home folder. `LANE_AGENTS_HOME` points it
 /// somewhere else, so tests never touch a real agent's settings.
@@ -67,7 +77,8 @@ pub fn claude_dir() -> Result<PathBuf> {
     }
 }
 
-/// The agents installed here: their user folder exists, or the program is on PATH. Under
+/// The agents installed here: their user folder exists (for Gemini CLI, its settings file), the
+/// program is on PATH, or (for Copilot) VS Code has the Copilot extension. Under
 /// `LANE_AGENTS_HOME` (a whole stand-in home, for tests) only the folders there count.
 pub fn found() -> Vec<Agent> {
     let fake_home = std::env::var_os("LANE_AGENTS_HOME").is_some_and(|d| !d.is_empty());
@@ -82,6 +93,18 @@ pub fn found() -> Vec<Agent> {
                     || on_path("cursor")
                     || on_path("cursor-agent")
             }
+            "gemini" => {
+                gemini_dir().is_ok_and(|d| d.join("settings.json").is_file()) || on_path("gemini")
+            }
+            "copilot" => {
+                copilot_dir().is_ok_and(|d| d.is_dir())
+                    || on_path("copilot")
+                    || home().is_ok_and(|h| {
+                        [".vscode", ".vscode-insiders"]
+                            .iter()
+                            .any(|v| copilot::in_vscode(&h.join(v).join("extensions")))
+                    })
+            }
             _ => false,
         })
         .collect()
@@ -95,6 +118,14 @@ pub fn setup(on: bool) -> Result<Vec<(Agent, Vec<Change>)>> {
             "claude" => claude(&claude_dir()?, on)?,
             "codex" => codex(&codex_dir()?, &shared_skills()?, on)?,
             "cursor" => cursor(&cursor_dir()?, &shared_skills()?, on)?,
+            "gemini" => gemini::setup(&gemini_dir()?, &shared_skills()?, &record()?, on)?,
+            "copilot" => copilot::setup(
+                &copilot_dir()?,
+                &vscode_settings()?,
+                &shared_skills()?,
+                &record()?,
+                on,
+            )?,
             _ => Vec::new(),
         };
         out.push((agent, changes));
@@ -118,6 +149,18 @@ pub fn is_set_up(agent: Agent) -> bool {
             cursor_dir().is_ok_and(|d| {
                 cursor_hooks_present(&read_json(&d.join("hooks.json")).unwrap_or(Value::Null))
             }) && shared_skills().is_ok_and(|d| is_ours(&d.join("lanes/SKILL.md")))
+        }
+        "gemini" => {
+            gemini_dir().is_ok_and(|d| {
+                read_or_empty(&d.join("settings.json"))
+                    .ok()
+                    .and_then(|t| super::jsonc::Doc::parse(&t).ok())
+                    .is_some_and(|doc| gemini::is_set_up(doc.value()))
+            }) && shared_skills().is_ok_and(|d| is_ours(&d.join("lanes/SKILL.md")))
+        }
+        "copilot" => {
+            copilot_dir().is_ok_and(|d| copilot::is_set_up(&d))
+                && shared_skills().is_ok_and(|d| is_ours(&d.join("lanes/SKILL.md")))
         }
         _ => false,
     }
@@ -160,7 +203,7 @@ pub fn cursor_dir() -> Result<PathBuf> {
 }
 
 /// The skills folder every agent following the Agent Skills standard reads: `~/.agents/skills`.
-/// Codex and Cursor both read it, so they share one copy of the skill.
+/// Codex, Cursor, Gemini CLI and Copilot all read it, so they share one copy of the skill.
 pub fn shared_skills() -> Result<PathBuf> {
     Ok(home()?.join(".agents").join("skills"))
 }
@@ -174,6 +217,66 @@ pub fn codex_dir() -> Result<PathBuf> {
         Some(d) => Ok(PathBuf::from(d)),
         None => Ok(home()?.join(".codex")),
     }
+}
+
+/// Gemini CLI's user folder: `$GEMINI_CLI_HOME/.gemini`, else `~/.gemini`.
+pub fn gemini_dir() -> Result<PathBuf> {
+    if std::env::var_os("LANE_AGENTS_HOME").is_some_and(|d| !d.is_empty()) {
+        return Ok(home()?.join(".gemini"));
+    }
+    match std::env::var_os("GEMINI_CLI_HOME").filter(|d| !d.is_empty()) {
+        Some(d) => Ok(PathBuf::from(d).join(".gemini")),
+        None => Ok(home()?.join(".gemini")),
+    }
+}
+
+/// Copilot's user folder, where the Copilot CLI and VS Code read hooks: `COPILOT_HOME`, else
+/// `~/.copilot`.
+pub fn copilot_dir() -> Result<PathBuf> {
+    if std::env::var_os("LANE_AGENTS_HOME").is_some_and(|d| !d.is_empty()) {
+        return Ok(home()?.join(".copilot"));
+    }
+    match std::env::var_os("COPILOT_HOME").filter(|d| !d.is_empty()) {
+        Some(d) => Ok(PathBuf::from(d)),
+        None => Ok(home()?.join(".copilot")),
+    }
+}
+
+/// The user settings of each VS Code installed here (and Insiders): `<config>/Code/User/
+/// settings.json`, where `<config>` is `%APPDATA%` on Windows, `~/Library/Application Support`
+/// on macOS and `$XDG_CONFIG_HOME` (or `~/.config`) elsewhere. Only those whose `User` folder
+/// exists.
+pub fn vscode_settings() -> Result<Vec<PathBuf>> {
+    let fake_home = std::env::var_os("LANE_AGENTS_HOME").is_some_and(|d| !d.is_empty());
+    let env = |name: &str| {
+        std::env::var_os(name)
+            .filter(|d| !d.is_empty() && !fake_home)
+            .map(PathBuf::from)
+    };
+    let home = home()?;
+    let config = if cfg!(windows) {
+        env("APPDATA").unwrap_or_else(|| home.join("AppData").join("Roaming"))
+    } else if cfg!(target_os = "macos") {
+        home.join("Library").join("Application Support")
+    } else {
+        env("XDG_CONFIG_HOME").unwrap_or_else(|| home.join(".config"))
+    };
+    Ok(["Code", "Code - Insiders"]
+        .iter()
+        .map(|product| config.join(product).join("User"))
+        .filter(|dir| dir.is_dir())
+        .map(|dir| dir.join("settings.json"))
+        .collect())
+}
+
+/// Lanes' note of the values it set in agents' settings, so `--agents off` can put back what was
+/// there: `agent-settings.json` next to Lanes' own settings.
+fn record() -> Result<PathBuf> {
+    let dir = crate::config::config_dir().map_err(|e| {
+        Error::new(ErrorKind::Config, e.to_string())
+            .hint("Set LANE_CONFIG_DIR to a folder you can write to, then run `lane setup` again.")
+    })?;
+    Ok(dir.join("agent-settings.json"))
 }
 
 /// Codex: its hooks in `~/.codex/hooks.json` (a session in a Codex worktree makes it a lane;

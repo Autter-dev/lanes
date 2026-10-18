@@ -172,10 +172,11 @@ clean _base lane, how to start the dev server, and where each lane's .env starts
 lane.toml in, so teammates get the same lanes.
 
 In a terminal, it sets everything up and asks Y/n before each step that's yours to choose:
-lane.toml, putting this machine's agents in lanes (Claude Code, Codex, Cursor), the Git hook,
-the AGENTS.md note, and installing dependencies now so the first lane is ready in seconds. Then
-it says what's left to do. `--yes` takes every default without asking. Agents, scripts and CI
-are never asked: for them it writes lane.toml and the repo's hooks, and installs nothing.
+lane.toml, putting this machine's agents in lanes (Claude Code, Codex, Cursor, Gemini CLI,
+GitHub Copilot), the Git hook, the AGENTS.md note, and installing dependencies now so the first
+lane is ready in seconds. Then it says what's left to do. `--yes` takes every default without
+asking. Agents, scripts and CI are never asked: for them it writes lane.toml and the repo's
+hooks, and installs nothing.
 (Set LANE_INTERACTIVE=1 if your terminal isn't recognised as one, and you'll be asked.)
 
 Then it puts agents in lanes:
@@ -259,8 +260,11 @@ Usage: lane setup [--json] [--yes] [--telemetry on|off] [--agents on|off]
 In a terminal, `lane setup` opens the welcome: your machine, how a lane works, privacy and sign-in.
 
 It also puts your agents in lanes, once for this machine: it adds Lanes' hooks and a `lanes`
-skill to each agent's own user settings (Claude Code's in ~/.claude), so every repo gets lanes
-without `lane init`. `--agents off` takes exactly that back out.
+skill to each agent's own user settings (Claude Code's in ~/.claude, Codex's in ~/.codex,
+Cursor's in ~/.cursor, Gemini CLI's in ~/.gemini, GitHub Copilot's in ~/.copilot for the Copilot
+CLI and VS Code), so every repo gets lanes without `lane init`. Gemini CLI also reads AGENTS.md
+from then on, and VS Code gets `chat.useAgentsMdFile` unless you've set it. `--agents off` takes
+exactly that back out, and leaves each file as it was.
 
 Options:
   --json               Print the machine checks and settings as JSON; changes nothing unless --yes is given
@@ -1750,9 +1754,9 @@ fn print_agent_setup(done: &[(agents::user::Agent, Vec<agents::Change>)], on: bo
             (false, true) => "taken back out of its settings",
             (false, false) => "not set up",
         };
-        println!("  {:<12} {state}", agent.name);
+        println!("  {:<14} {state}", agent.name);
         for note in changes.iter().filter_map(|c| c.note.as_deref()) {
-            println!("  {:<12} {note}", "");
+            println!("  {:<14} {note}", "");
         }
     }
 }

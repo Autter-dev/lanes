@@ -5,6 +5,10 @@
 //! gets a short note. `lane init` writes all of it; everything here is safe to run again.
 
 mod copies;
+pub mod copilot;
+pub mod gemini;
+mod jsonc;
+mod record;
 pub mod user;
 
 pub use copies::{RepoCopy, deny_reason, makes_worktree, repo_copies};
