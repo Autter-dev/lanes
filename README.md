@@ -176,6 +176,15 @@ The gateway arrives in December. Over time, it turns Lanes and Autter into one l
 
 macOS, Linux and Windows at launch. On Windows, Lanes is fastest on a Windows 11 Dev Drive and also works on regular NTFS drives. WSL2 uses the Linux build.
 
+### Versions
+
+Lanes uses [semantic versioning](https://semver.org). 0.0.x versions are previews. From 0.1.0 until 1.0:
+
+- **A minor release** (0.1.0 to 0.2.0) can change commands, `lane.toml` or `--json` output in ways that break what you built on them. The [changelog](CHANGELOG.md) says what changed and what to do.
+- **A patch release** (0.1.0 to 0.1.1) only fixes things.
+- **Exit codes and documented `--json` fields don't change**, even before 1.0, so scripts and agents can rely on them. Exit codes are 0 done, 1 failed, 2 wrong command line and 3 not built yet.
+- **Release candidates**, like 0.1.0-rc.1, are for trying a version before it ships. They're only on [GitHub Releases](https://github.com/Autter-dev/lanes/releases), marked as pre-releases, and on npm with `npm install -g @autter/lanes@next`. Homebrew, Scoop, winget, the install scripts and `npm install -g @autter/lanes` always install the latest release.
+
 <br>
 
 ## 07 / Quick start

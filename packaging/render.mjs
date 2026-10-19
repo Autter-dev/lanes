@@ -187,9 +187,26 @@ if (args.notes) {
     const end = lines.findIndex((l, i) => i > start && /^## /.test(l));
     return lines.slice(start + 1, end < 0 ? undefined : end).join('\n').trim();
   };
-  const escaped = version.replace(/\./g, '\\.');
-  const changes = section(new RegExp(`^## \\[?v?${escaped}\\]?`)) || section(/^## Unreleased/);
-  const notes = `Install or update:
+  const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // `## 0.1.0 (date)`, but never `## 0.1.0-rc.1 (date)` for 0.1.0.
+  let changes = section(new RegExp(`^## \\[?v?${escaped}\\]?(?:\\s|$)`));
+  if (!changes) {
+    console.warn(`render: CHANGELOG.md has no "## ${version} (<date>)" section, so the notes list what's under "Unreleased".`);
+    changes = section(/^## Unreleased/);
+  }
+  // A release candidate is a GitHub pre-release and npm's `next`: every usual install command
+  // still gets the latest release, so its notes give the commands that get this one.
+  const install = version.includes('-')
+    ? `This is a release candidate for ${version.split('-')[0]}, to try before it ships. It isn't the latest release: Homebrew, Scoop, winget, the install scripts and \`npm install -g @autter/lanes\` still install the latest release. To try this one:
+
+| On | Command |
+| --- | --- |
+| macOS, Linux, WSL | \`curl -fsSL ${base}/lanes-installer.sh \\| sh\` |
+| Windows | \`irm ${base}/lanes-installer.ps1 \\| iex\` |
+| Anywhere with Node | \`npm install -g @autter/lanes@${version}\` |
+
+To go back, install the latest release the usual way: ${HOMEPAGE}/download.`
+    : `Install or update:
 
 | On | Command |
 | --- | --- |
@@ -197,7 +214,8 @@ if (args.notes) {
 | Windows | \`winget install Autter.Lanes\`, \`scoop install lanes\` (after \`scoop bucket add autter https://github.com/Autter-dev/scoop-bucket\`), or \`irm https://github.com/${REPO}/releases/latest/download/lanes-installer.ps1 \\| iex\` |
 | Anywhere with Node | \`npm install -g @autter/lanes\` |
 
-More ways, and how to check a download, at ${HOMEPAGE}/download.
+More ways, and how to check a download, at ${HOMEPAGE}/download.`;
+  const notes = `${install}
 
 Verify an archive: \`gh attestation verify <file> --repo ${REPO}\`, or compare it with \`SHA256SUMS\`.
 
