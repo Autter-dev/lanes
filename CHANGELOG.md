@@ -6,6 +6,10 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ## Unreleased
 
+### 2026-10-19
+
+- `09:18` **Changed**: the website offers 0.0.9, and the guide says to run `lane setup --yes` once on Windows after updating from 0.0.8, so Copilot's hooks are written again.
+
 ## 0.0.9 (2026-10-18)
 
 **GitHub Copilot on Windows, fixed.** Copilot's hooks on Windows do nothing when `lane` isn't there, so removing Lanes no longer leaves the Copilot CLI turning down every tool, and VS Code on Windows now turns down copies of the repo like everywhere else. Still a preview.
