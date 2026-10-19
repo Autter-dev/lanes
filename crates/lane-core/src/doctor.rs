@@ -1,7 +1,8 @@
 //! `lane doctor`: everything `lane setup` checks about this machine, and then what can quietly
 //! stop lanes working: `lane` missing from PATH (agents' hooks call it by name), agents that
-//! aren't set up, this repo's Git hook, lanes whose folders have gone, the state store, the
-//! daemon, and errors in the log. Each check says what to do next; nothing is changed.
+//! aren't set up, this repo's Git hook, where Lanes keeps its state and settings (and, on
+//! Windows, what's left in the old AppData folders), lanes whose folders have gone, the state
+//! store, the daemon, and errors in the log. Each check says what to do next; nothing is changed.
 
 use crate::agents::copilot::{self, Hooks};
 use crate::agents::{self, GitHook, user};
@@ -9,6 +10,7 @@ use crate::config::Config;
 use crate::engine::{Repo, norm};
 use crate::log;
 use crate::machine::{self, Check, Status};
+use crate::moved;
 use crate::state::Store;
 use std::path::Path;
 
@@ -21,6 +23,8 @@ pub fn run(dir: &Path) -> Vec<Check> {
     if let Some(repo) = &repo {
         checks.push(git_hook(repo));
     }
+    checks.push(folders());
+    checks.extend(old_folders());
     checks.push(state(repo.as_ref()));
     checks.push(daemon());
     checks.push(recent_errors());
@@ -165,6 +169,88 @@ fn git_hook(repo: &Repo) -> Check {
         Err(e) => Check::new("git-hook", "Git hook", Status::Warn, e.to_string())
             .hint(e.hint.unwrap_or_default()),
     }
+}
+
+/// Where Lanes keeps its state and its settings.
+fn folders() -> Check {
+    let state = crate::state::state_dir()
+        .map(|p| norm(&p).display().to_string())
+        .unwrap_or_else(|e| e.to_string());
+    let settings = crate::config::config_dir()
+        .map(|p| norm(&p).display().to_string())
+        .unwrap_or_else(|e| e.to_string());
+    Check::new(
+        "folders",
+        "Folders",
+        Status::Info,
+        format!("state in {state}, settings in {settings}"),
+    )
+}
+
+/// On Windows, Lanes before 0.1.0 kept its state and settings in AppData, and an app installed
+/// from a package (like the Claude desktop app) had its own copy of them. Each comes across to
+/// the new folders by itself (`lane doctor` looks in every package first); this says what's
+/// left. Nothing on other systems, or once the old folders are gone.
+fn old_folders() -> Option<Check> {
+    let left = moved::leftovers();
+    let list = |paths: &[std::path::PathBuf]| {
+        paths
+            .iter()
+            .map(|p| norm(p).display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    if !left.waiting.is_empty() {
+        return Some(
+            Check::new(
+                "old-folders",
+                "Old folders",
+                Status::Warn,
+                format!(
+                    "lanes or settings in {} haven't come across yet",
+                    list(&left.waiting)
+                ),
+            )
+            .hint("See why with `lane logs`, then run `lane doctor` again: Lanes tries each time. If an old store is damaged and you don't need its lanes, delete that folder."),
+        );
+    }
+    if let Some(copy) = &left.hidden_by {
+        return Some(
+            Check::new(
+                "old-folders",
+                "Old folders",
+                Status::Warn,
+                format!(
+                    "this `lane` runs inside the {} app package, where Windows shows the package's own copy of AppData, so lanes made outside that app can't come across from here",
+                    moved::package_name(copy)
+                ),
+            )
+            .hint("Run `lane doctor` once in your own terminal (not one this app started), and they come across."),
+        );
+    }
+    if left.across.is_empty() {
+        return None;
+    }
+    let quoted = left
+        .across
+        .iter()
+        .map(|p| format!("'{}'", norm(p).display()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(
+        Check::new(
+            "old-folders",
+            "Old folders",
+            Status::Info,
+            format!(
+                "everything in {} has come across, so Lanes doesn't use them any more",
+                list(&left.across)
+            ),
+        )
+        .hint(format!(
+            "Delete them when you like, from your own terminal: Remove-Item -Recurse {quoted}"
+        )),
+    )
 }
 
 /// The state store, and this repo's lanes: any whose folder has gone (a tool cleaned up its own

@@ -986,6 +986,7 @@ fn hooks_stay_quiet_outside_a_lanes_repo() {
     // Not JSON: a hook that can't stop the session still exits 0.
     let mut child = Command::new(env!("CARGO_BIN_EXE_lane"))
         .args(["hook", "claude", "pre-tool-use"])
+        .env("LANE_CONFIG_DIR", &dir)
         .env("LANE_STATE_DIR", dir.join("state"))
         .env("LANE_AGENTS_HOME", dir.join("home"))
         .stdin(Stdio::piped())
@@ -2875,4 +2876,188 @@ fn lane_daemon_starts_reports_and_stops_laned() {
     let bad = lane(&dir, &["daemon", "restart"]);
     assert_eq!(bad.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&bad.stderr).contains("lane daemon start"));
+}
+
+/// Windows gives an app installed from a package (the Claude desktop app) its own copy of
+/// AppData, and Lanes 0.0.9 kept its state and settings there. So lanes made in a terminal and
+/// lanes made by Claude Code in that app lived in two stores, with the same ports. Here both
+/// old stores are made the way 0.0.9 had them (in a stand-in home, never the real one), with an
+/// older daemon running for the old folder. The first `lane` after the upgrade stops that
+/// daemon and brings both stores into one in `%USERPROFILE%\.lane`, five at once.
+#[cfg(windows)]
+#[test]
+fn old_appdata_stores_come_across_into_one() {
+    let dir = config_dir("moved");
+    let home = dir.join("home");
+    let local = home.join("AppData").join("Local");
+    let roaming = home.join("AppData").join("Roaming");
+    let copy = |under: &str| {
+        local
+            .join("Packages")
+            .join("Claude_pzs8sxrjxfjjc")
+            .join("LocalCache")
+            .join(under)
+            .join("lane")
+    };
+    let repo = repo_with_commit("moved");
+    let bin = env!("CARGO_BIN_EXE_lane");
+    let before = |state: &std::path::Path, config: &std::path::Path, args: &[&str]| {
+        Command::new(bin)
+            .args(args)
+            .current_dir(&repo)
+            .env("LANE_STATE_DIR", state)
+            .env("LANE_CONFIG_DIR", config)
+            .env("LANE_AGENTS_HOME", &home)
+            .env("LANE_TELEMETRY_URL", NO_COUNT)
+            .env("LANE_DAEMON", "0")
+            .env_remove("LANE_REQUEST_ID")
+            .env_remove("CI")
+            .output()
+            .unwrap()
+    };
+    let terminal = json(&before(
+        &local.join("lane"),
+        &roaming.join("lane"),
+        &["new", "terminal", "--json"],
+    ));
+    let app = json(&before(
+        &copy("Local"),
+        &copy("Roaming"),
+        &["new", "app", "--json"],
+    ));
+    assert_eq!(
+        terminal["lane"]["ports"], app["lane"]["ports"],
+        "the bug: two stores, the same ports"
+    );
+    std::fs::create_dir_all(roaming.join("lane")).unwrap();
+    std::fs::write(
+        roaming.join("lane").join("config.toml"),
+        "version = 1\nonboarded = \"0.0.9\"\ntelemetry = false\n",
+    )
+    .unwrap();
+
+    // An older daemon still serving the old folder.
+    let laned = PathBuf::from(bin).with_file_name("laned.exe");
+    let mut old_daemon = laned.is_file().then(|| {
+        Command::new(&laned)
+            .env("LANE_STATE_DIR", local.join("lane"))
+            .env("LANED_IDLE_SECS", "120")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap()
+    });
+    if old_daemon.is_some() {
+        eventually("the old daemon never started", || {
+            json(&before(
+                &local.join("lane"),
+                &roaming.join("lane"),
+                &["daemon", "status", "--json"],
+            ))["running"]
+                == true
+        });
+    }
+
+    // The upgraded `lane`: no overrides, so its folders come from the (stand-in) home.
+    let after = |args: &[&str]| {
+        Command::new(bin)
+            .args(args)
+            .current_dir(&repo)
+            .env_remove("LANE_STATE_DIR")
+            .env_remove("LANE_CONFIG_DIR")
+            .env_remove("LANE_AGENTS_HOME")
+            .env_remove("CLAUDE_CONFIG_DIR")
+            .env_remove("LANE_REQUEST_ID")
+            .env_remove("CI")
+            .env("USERPROFILE", &home)
+            .env("LOCALAPPDATA", &local)
+            .env("APPDATA", &roaming)
+            .env("LANE_TELEMETRY_URL", NO_COUNT)
+            .env("LANE_DAEMON", "0")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap()
+    };
+    let five: Vec<_> = (0..5)
+        .map(|_| after(&["list", "--all", "--json"]))
+        .collect();
+    for child in five {
+        let out = child.wait_with_output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let v = json(&out);
+        let lanes = v["lanes"].as_array().unwrap();
+        let mut names: Vec<&str> = lanes.iter().map(|l| l["name"].as_str().unwrap()).collect();
+        names.sort();
+        assert_eq!(names, ["app", "terminal"], "{v}");
+        assert_ne!(
+            lanes[0]["ports"], lanes[1]["ports"],
+            "one store, no shared ports"
+        );
+    }
+    let new = home.join(".lane");
+    assert!(new.join("state").join("state.db").is_file());
+    let config = std::fs::read_to_string(new.join("config.toml")).unwrap();
+    assert!(config.contains("telemetry = false"), "{config}");
+    assert!(
+        local.join("lane").join("state.db").is_file() && copy("Local").join("state.db").is_file(),
+        "the old stores are left for you to delete"
+    );
+    if let Some(daemon) = &mut old_daemon {
+        eventually("the old daemon kept running", || {
+            daemon.try_wait().unwrap().is_some()
+        });
+    }
+
+    // `lane doctor` says where things are now, and that the old folders aren't used.
+    let doctor = after(&["doctor", "--json"]).wait_with_output().unwrap();
+    let v = json(&doctor);
+    let check = |id: &str| {
+        v["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["id"] == id)
+            .unwrap_or_else(|| panic!("no {id} check in {v}"))
+            .clone()
+    };
+    let folders = check("folders");
+    assert!(
+        folders["summary"]
+            .as_str()
+            .unwrap()
+            .contains(&new.join("state").display().to_string()),
+        "{folders}"
+    );
+    let old = check("old-folders");
+    assert_eq!(old["status"], "info", "{old}");
+    let summary = old["summary"].as_str().unwrap();
+    assert!(
+        summary.contains(&local.join("lane").display().to_string())
+            && summary.contains("Claude_pzs8sxrjxfjjc"),
+        "{old}"
+    );
+    assert!(
+        old["hint"].as_str().unwrap().contains("Remove-Item"),
+        "{old}"
+    );
+
+    // Lanes made after the move are in the new store only.
+    let made = after(&["new", "later", "--json"])
+        .wait_with_output()
+        .unwrap();
+    assert!(made.status.success());
+    let list = json(&after(&["list", "--json"]).wait_with_output().unwrap());
+    assert_eq!(list["lanes"].as_array().unwrap().len(), 3);
+    let old_list = json(&before(
+        &local.join("lane"),
+        &roaming.join("lane"),
+        &["list", "--json"],
+    ));
+    assert_eq!(old_list["lanes"].as_array().unwrap().len(), 1);
 }

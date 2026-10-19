@@ -32,14 +32,19 @@ const STALE_CREATING_SECS: i64 = 15 * 60;
 /// The highest port a block may end on.
 const MAX_PORT: u32 = 65_535;
 
-/// The folder Lanes keeps its state in.
+/// The folder Lanes keeps its state in: `~/.local/state/lane`, or `%USERPROFILE%\.lane\state` on
+/// Windows (see [`crate::config::windows_home`] for why not AppData).
 pub fn state_dir() -> Result<PathBuf> {
     if let Some(dir) = std::env::var_os("LANE_STATE_DIR").filter(|d| !d.is_empty()) {
         return Ok(PathBuf::from(dir));
     }
-    #[cfg(windows)]
-    if let Some(local) = std::env::var_os("LOCALAPPDATA").filter(|d| !d.is_empty()) {
-        return Ok(PathBuf::from(local).join("lane"));
+    if cfg!(windows) {
+        return crate::config::windows_home()
+            .map(|home| home.join("state"))
+            .ok_or_else(|| {
+                Error::new(ErrorKind::State, "couldn't find your home folder")
+                    .hint("Set LANE_STATE_DIR to a folder you can write to.")
+            });
     }
     use etcetera::BaseStrategy;
     let base = etcetera::choose_base_strategy().map_err(|_| {
@@ -648,6 +653,278 @@ impl Store {
         tx.commit().map_err(db_err)?;
         Ok(out)
     }
+
+    /// Bring across what an older store (`old`) has and this one doesn't: its lanes, with their
+    /// history and what they cost and saved, its repos' `_base`, and its request ids. With
+    /// `since` (Unix seconds), only lanes made at or after it: the rest were looked at last time,
+    /// and a lane removed here since then mustn't come back.
+    ///
+    /// A lane already here (the same id) is left as it is. One whose folder has gone, or whose
+    /// name a lane of its repo here has, stays out. One whose ports a lane here has gets the next
+    /// free block. Safe to repeat: the same `old` again changes nothing. `from` names the old
+    /// store in the operation log.
+    pub fn take_in(&mut self, old: &Store, since: Option<i64>, from: &str) -> Result<TakenIn> {
+        let since = since.unwrap_or(i64::MIN);
+        let repos: HashMap<i64, (String, i64)> =
+            old.rows("SELECT id, root, created_at FROM repos", [], |r| {
+                Ok((r.get(0)?, (r.get(1)?, r.get(2)?)))
+            })?;
+        let lanes: Vec<(Lane, i64)> = old.rows(
+            &format!(
+                "SELECT {LANE_COLUMNS}, l.updated_at FROM lanes l JOIN repos r ON r.id = l.repo_id
+                 WHERE l.created_at >= ?1 ORDER BY l.created_at, l.name"
+            ),
+            [since],
+            |r| Ok((row_to_lane(r)?, r.get(11)?)),
+        )?;
+        let operations: Vec<(String, String, String, i64)> = old.rows(
+            "SELECT lane_id, kind, detail, at FROM operations WHERE lane_id IS NOT NULL ORDER BY id",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )?;
+        let mut history: HashMap<String, Vec<(String, String, i64)>> = HashMap::new();
+        for (lane, kind, detail, at) in operations {
+            history.entry(lane).or_default().push((kind, detail, at));
+        }
+        let records: Vec<(LaneRecord, Option<String>)> = old.rows(
+            "SELECT s.lane_id, s.method, s.files, s.bytes, s.made_ms, s.install_ms, s.at,
+                    s.removed_at, s.extra_bytes, r.root
+             FROM lane_stats s LEFT JOIN repos r ON r.id = s.repo_id
+             WHERE s.at >= ?1 ORDER BY s.at",
+            [since],
+            |r| {
+                Ok((
+                    LaneRecord {
+                        lane_id: r.get(0)?,
+                        stats: LaneStats {
+                            method: r.get(1)?,
+                            files: r.get::<_, i64>(2)? as u64,
+                            bytes: r.get::<_, i64>(3)? as u64,
+                            made_ms: r.get::<_, i64>(4)? as u64,
+                            install_ms: r.get::<_, Option<i64>>(5)?.map(|v| v as u64),
+                        },
+                        at: r.get(6)?,
+                        removed_at: r.get(7)?,
+                        extra_bytes: r.get::<_, Option<i64>>(8)?.map(|v| v as u64),
+                    },
+                    r.get(9)?,
+                ))
+            },
+        )?;
+        let bases: Vec<(String, Base, Option<i64>)> = old.rows(
+            "SELECT r.root, b.path, b.base_commit, b.install_key, b.updated_at, b.install_ms
+             FROM bases b JOIN repos r ON r.id = b.repo_id",
+            [],
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    Base {
+                        path: PathBuf::from(r.get::<_, String>(1)?),
+                        commit: r.get(2)?,
+                        install_key: r.get(3)?,
+                        updated_at: r.get(4)?,
+                    },
+                    r.get(5)?,
+                ))
+            },
+        )?;
+        let requests: Vec<(String, String, String, i64)> =
+            old.rows("SELECT id, command, result, at FROM requests", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+            })?;
+
+        self.write(None, |tx| {
+            let t = tx.tx;
+            let repo_id = |root: &str| -> Result<i64> {
+                let created = repos
+                    .values()
+                    .find(|(r, _)| r == root)
+                    .map_or_else(now, |(_, at)| *at);
+                t.execute(
+                    "INSERT INTO repos (root, created_at) VALUES (?1, ?2) ON CONFLICT (root) DO NOTHING",
+                    params![root, created],
+                )
+                .map_err(db_err)?;
+                t.query_row("SELECT id FROM repos WHERE root = ?1", [root], |r| r.get(0))
+                    .map_err(db_err)
+            };
+            let exists = |sql: &str, p: &[&dyn rusqlite::ToSql]| -> Result<bool> {
+                t.query_row(&format!("SELECT EXISTS ({sql})"), p, |r| r.get(0))
+                    .map_err(db_err)
+            };
+            let mut out = TakenIn::default();
+            for (mut lane, updated_at) in lanes {
+                if exists("SELECT 1 FROM lanes WHERE id = ?1", &[&lane.id])? {
+                    continue;
+                }
+                if !lane.path.exists() {
+                    out.left_out.push((lane, "its folder has gone".into()));
+                    continue;
+                }
+                let root = lane.repo.to_string_lossy().into_owned();
+                let repo = repo_id(&root)?;
+                if exists(
+                    "SELECT 1 FROM lanes WHERE repo_id = ?1 AND name = ?2",
+                    &[&repo, &lane.name],
+                )? {
+                    out.left_out
+                        .push((lane, "a lane of its repo here has its name".into()));
+                    continue;
+                }
+                let was = lane.ports;
+                if exists(
+                    "SELECT 1 FROM lanes WHERE port_start <= ?2 AND port_start + port_count - 1 >= ?1",
+                    &[&was.start, &was.end()],
+                )? {
+                    match tx.allocate_ports(was.start, was.count) {
+                        Ok(block) => {
+                            lane.ports = block;
+                            out.new_ports.push((lane.clone(), was));
+                        }
+                        Err(_) => {
+                            out.left_out
+                                .push((lane, "there are no free ports for it".into()));
+                            continue;
+                        }
+                    }
+                }
+                t.execute(
+                    "INSERT INTO lanes (id, repo_id, name, path, base_commit, port_start, port_count,
+                                        agent, outcome, created_at, updated_at, status)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                    params![
+                        lane.id,
+                        repo,
+                        lane.name,
+                        lane.path.to_string_lossy(),
+                        lane.base_commit,
+                        lane.ports.start,
+                        lane.ports.count,
+                        lane.agent,
+                        lane.outcome.map(Outcome::as_str),
+                        lane.created_at,
+                        updated_at,
+                        lane.status.as_str(),
+                    ],
+                )
+                .map_err(db_err)?;
+                for (kind, detail, at) in history.remove(&lane.id).unwrap_or_default() {
+                    t.execute(
+                        "INSERT INTO operations (lane_id, kind, detail, at) VALUES (?1, ?2, ?3, ?4)",
+                        params![lane.id, kind, detail, at],
+                    )
+                    .map_err(db_err)?;
+                }
+                tx.log(
+                    Some(&lane.id),
+                    "moved",
+                    &serde_json::json!({ "name": lane.name, "from": from }),
+                )?;
+                out.lanes.push(lane);
+            }
+            // What lanes saved outlives them: a record comes across even for a lane that
+            // didn't, marked removed then, so the totals still add up.
+            for (record, root) in records {
+                if exists(
+                    "SELECT 1 FROM lane_stats WHERE lane_id = ?1",
+                    &[&record.lane_id],
+                )? {
+                    continue;
+                }
+                let here = exists("SELECT 1 FROM lanes WHERE id = ?1", &[&record.lane_id])?;
+                let removed_at = match here {
+                    true => record.removed_at,
+                    false => record.removed_at.or(Some(now())),
+                };
+                let repo = root.as_deref().map(repo_id).transpose()?;
+                let s = &record.stats;
+                t.execute(
+                    "INSERT INTO lane_stats (lane_id, repo_id, method, files, bytes, made_ms,
+                                             install_ms, at, removed_at, extra_bytes)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    params![
+                        record.lane_id,
+                        repo,
+                        s.method,
+                        s.files as i64,
+                        s.bytes as i64,
+                        s.made_ms as i64,
+                        s.install_ms.map(|v| v as i64),
+                        record.at,
+                        removed_at,
+                        record.extra_bytes.map(|v| v as i64),
+                    ],
+                )
+                .map_err(db_err)?;
+            }
+            // A repo has one `_base` folder: whichever store touched it last knows it best.
+            for (root, base, install_ms) in bases {
+                let repo = repo_id(&root)?;
+                let here: Option<i64> = t
+                    .query_row(
+                        "SELECT updated_at FROM bases WHERE repo_id = ?1",
+                        [repo],
+                        |r| r.get(0),
+                    )
+                    .optional()
+                    .map_err(db_err)?;
+                if here.is_some_and(|at| at >= base.updated_at) {
+                    continue;
+                }
+                t.execute(
+                    "INSERT INTO bases (repo_id, path, base_commit, install_key, updated_at, install_ms)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                     ON CONFLICT (repo_id) DO UPDATE SET
+                       path = excluded.path, base_commit = excluded.base_commit,
+                       install_key = excluded.install_key, updated_at = excluded.updated_at,
+                       install_ms = excluded.install_ms",
+                    params![
+                        repo,
+                        base.path.to_string_lossy(),
+                        base.commit,
+                        base.install_key,
+                        base.updated_at,
+                        install_ms,
+                    ],
+                )
+                .map_err(db_err)?;
+            }
+            // A retry of a write made before the move still gets its first answer.
+            for (id, command, result, at) in requests {
+                t.execute(
+                    "INSERT INTO requests (id, command, result, at) VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT (id) DO NOTHING",
+                    params![id, command, result, at],
+                )
+                .map_err(db_err)?;
+            }
+            Ok(out)
+        })
+    }
+
+    /// Every row of a query, collected.
+    fn rows<C, P, F>(&self, sql: &str, params: P, f: F) -> Result<C>
+    where
+        C: FromIterator<<C as IntoIterator>::Item> + IntoIterator,
+        P: rusqlite::Params,
+        F: FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<<C as IntoIterator>::Item>,
+    {
+        let mut stmt = self.conn.prepare(sql).map_err(db_err)?;
+        let rows = stmt.query_map(params, f).map_err(db_err)?;
+        rows.collect::<rusqlite::Result<C>>().map_err(db_err)
+    }
+}
+
+/// What [`Store::take_in`] brought across.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TakenIn {
+    /// The lanes that came across, as they are here now.
+    pub lanes: Vec<Lane>,
+    /// Those of them that got other ports, because a lane here had theirs, with the ports they
+    /// had before.
+    pub new_ports: Vec<(Lane, PortBlock)>,
+    /// Lanes that stayed out, and why.
+    pub left_out: Vec<(Lane, String)>,
 }
 
 fn row_to_lane(r: &rusqlite::Row<'_>) -> rusqlite::Result<Lane> {
@@ -1536,6 +1813,158 @@ mod tests {
             })
             .unwrap_err();
         assert_eq!(e.kind, ErrorKind::Conflict);
+    }
+
+    /// Two stores that grew apart (a terminal's and an app package's copy of AppData) become
+    /// one: every lane once, nothing here overwritten, no ports shared, and doing it again
+    /// changes nothing.
+    #[test]
+    fn an_older_store_is_taken_in_once() {
+        let db = temp_db("take-in-here");
+        let lanes = db.parent().unwrap().join("lanes");
+        let folder = |name: &str| {
+            let p = lanes.join(name);
+            fs::create_dir_all(&p).unwrap();
+            p
+        };
+        let (acme, other) = (Path::new("/work/acme"), Path::new("/work/other"));
+        let block = |start| PortBlock { start, count: 10 };
+        let (a, b, gone, same) = (folder("a"), folder("b"), lanes.join("gone"), folder("same"));
+        let mut old = Store::open_at(&temp_db("take-in-old")).unwrap();
+        let old_lanes = old
+            .write(None, |tx| {
+                let shared = tx.insert_lane(new_lane(acme, "shared", &a, block(4100)))?;
+                let b = tx.insert_lane(new_lane(acme, "b", &b, block(4110)))?;
+                let gone = tx.insert_lane(new_lane(other, "gone", &gone, block(4120)))?;
+                let same = tx.insert_lane(new_lane(other, "same", &same, block(4130)))?;
+                tx.set_lane_stats(&b.id, &stats(200))?;
+                tx.set_lane_stats(&gone.id, &stats(300))?;
+                tx.set_base(acme, Path::new("/work/acme.lanes/_base"), "new", None)?;
+                Ok([shared, b, gone, same])
+            })
+            .unwrap();
+        old.write(
+            Some(Request {
+                id: "req-1",
+                command: "new b",
+            }),
+            |_| Ok("made b".to_string()),
+        )
+        .unwrap();
+
+        // Here: the same lane as the old store (copied before they grew apart), the base
+        // touched earlier, a lane on b's ports, and another lane called `same`.
+        let mut here = Store::open_at(&db).unwrap();
+        here.write(None, |tx| {
+            tx.set_base(acme, Path::new("/work/acme.lanes/_base"), "old", None)?;
+            tx.insert_lane(new_lane(other, "same", &same, block(4200)))?;
+            tx.insert_lane(new_lane(other, "x", &folder("x"), block(4110)))?;
+            let shared = tx.insert_lane(new_lane(acme, "shared", &a, block(4100)))?;
+            tx.tx
+                .execute(
+                    "UPDATE lanes SET id = ?1 WHERE id = ?2",
+                    params![old_lanes[0].id, shared.id],
+                )
+                .map_err(db_err)?;
+            Ok(())
+        })
+        .unwrap();
+        // The base here was touched first.
+        here.conn
+            .execute("UPDATE bases SET updated_at = 1", [])
+            .unwrap();
+
+        let taken = here.take_in(&old, None, "C:/old/lane").unwrap();
+        let names = |l: &[Lane]| l.iter().map(|l| l.name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(&taken.lanes), ["b"], "shared is here already");
+        let out: Vec<(&str, &str)> = taken
+            .left_out
+            .iter()
+            .map(|(l, why)| (l.name.as_str(), why.as_str()))
+            .collect();
+        assert_eq!(
+            out,
+            [
+                ("gone", "its folder has gone"),
+                ("same", "a lane of its repo here has its name")
+            ]
+        );
+        assert_eq!(taken.new_ports.len(), 1, "x had b's ports");
+        let b_here = here.lane(acme, "b").unwrap().unwrap();
+        assert_eq!(b_here.id, old_lanes[1].id, "it keeps its id");
+        assert_ne!(b_here.ports, block(4110));
+        assert_eq!(taken.new_ports[0].1, block(4110));
+        // Its history came too, and a note of where from.
+        let kinds: Vec<String> = here
+            .rows(
+                "SELECT kind FROM operations WHERE lane_id = ?1 ORDER BY id",
+                [&b_here.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(kinds, ["new", "moved"]);
+        // What lanes saved: b's, and gone's, marked removed since it didn't come.
+        let records = here.lane_records(None).unwrap();
+        assert_eq!(records.len(), 2);
+        let gone_record = records
+            .iter()
+            .find(|r| r.lane_id == old_lanes[2].id)
+            .unwrap();
+        assert!(gone_record.removed_at.is_some());
+        // The base the old store touched last.
+        assert_eq!(here.base(acme).unwrap().unwrap().commit, "new");
+        // A retry of a request made before the move gets its first answer.
+        let again: Option<String> = here
+            .request_result(Request {
+                id: "req-1",
+                command: "new b",
+            })
+            .unwrap();
+        assert_eq!(again.as_deref(), Some("made b"));
+
+        // Again: nothing more.
+        let before = here.lanes(None).unwrap();
+        let ops: i64 = here
+            .conn
+            .query_row("SELECT count(*) FROM operations", [], |r| r.get(0))
+            .unwrap();
+        let twice = here.take_in(&old, None, "C:/old/lane").unwrap();
+        assert!(twice.lanes.is_empty() && twice.new_ports.is_empty());
+        assert_eq!(here.lanes(None).unwrap(), before);
+        let ops_after: i64 = here
+            .conn
+            .query_row("SELECT count(*) FROM operations", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(ops, ops_after);
+        assert_eq!(here.lane_records(None).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn taking_in_since_a_time_leaves_older_lanes_alone() {
+        let db = temp_db("take-in-since");
+        let lanes = db.parent().unwrap().join("lanes");
+        fs::create_dir_all(lanes.join("kept")).unwrap();
+        let acme = Path::new("/work/acme");
+        let mut old = Store::open_at(&temp_db("take-in-since-old")).unwrap();
+        let kept = lanes.join("kept");
+        old.write(None, |tx| {
+            tx.insert_lane(new_lane(
+                acme,
+                "kept",
+                &kept,
+                PortBlock {
+                    start: 4100,
+                    count: 10,
+                },
+            ))
+        })
+        .unwrap();
+        // Removed here with `--keep-files` after an earlier move: its folder is still there,
+        // but it mustn't come back.
+        let mut here = Store::open_at(&db).unwrap();
+        let taken = here.take_in(&old, Some(now() + 60), "old").unwrap();
+        assert!(taken.lanes.is_empty() && taken.left_out.is_empty());
+        assert!(here.lanes(None).unwrap().is_empty());
     }
 
     #[test]

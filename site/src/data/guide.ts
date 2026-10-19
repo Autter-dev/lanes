@@ -33,7 +33,7 @@ const homeAt: Record<Os, string> = { macos: '/Users/you', linux: '/home/you', wi
 const configAt: Record<Os, string> = {
   macos: '/Users/you/.config/lane/config.toml',
   linux: '/home/you/.config/lane/config.toml',
-  windows: 'C:\\Users\\you\\AppData\\Roaming\\lane\\config.toml',
+  windows: 'C:\\Users\\you\\.lane\\config.toml',
 };
 // Codex puts a worktree at <CODEX_HOME>/worktrees/<id>/<repo folder>.
 const codexPath = (os: Os) => [homeAt[os], '.codex', 'worktrees', 'a1b2', 'your-app'].join(sep(os));

@@ -289,6 +289,16 @@ Not unless you choose to connect a repo to the Lanes gateway on Autter. Otherwis
 </details>
 
 <details>
+<summary>Where does Lanes keep its state and settings?</summary>
+<br>
+
+On your machine, in your home folder. Settings are in `~/.config/lane/config.toml` on macOS and Linux and `%USERPROFILE%\.lane\config.toml` on Windows. State (your lanes, their ports, what they saved, and Lanes' log) is in `~/.local/state/lane` and `%USERPROFILE%\.lane\state`. `LANE_CONFIG_DIR` and `LANE_STATE_DIR` move them, and `lane doctor` says where they are.
+
+On Windows, Lanes before 0.1.0 used AppData. Apps installed from a package, like the Claude desktop app, get a private copy of AppData, so lanes made by an agent in the app and lanes made in your terminal didn't see each other, and could get the same ports. The first `lane` you run after updating brings both across into one store, and every lane keeps its own ports. Once everything has come across, `lane doctor` lists the old folders for you to delete.
+
+</details>
+
+<details>
 <summary>Do I need Autter to use Lanes?</summary>
 <br>
 

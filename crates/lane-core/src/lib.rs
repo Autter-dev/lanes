@@ -14,6 +14,7 @@ pub mod insight;
 pub mod lane_env;
 pub mod log;
 pub mod machine;
+pub mod moved;
 pub mod next;
 pub mod process;
 pub mod project;
