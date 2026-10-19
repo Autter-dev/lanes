@@ -401,6 +401,10 @@ fn new_list_and_rm_work_end_to_end() {
 fn savings_count_lanes_after_they_are_removed() {
     let dir = config_dir("savings");
     let repo = repo_with_commit("savings");
+    // A tree big enough that what the lane adds is small next to it.
+    std::fs::write(repo.join("src/data.bin"), vec![b'd'; 200_000]).unwrap();
+    git_in(&repo, &["add", "-A"]);
+    git_in(&repo, &["commit", "-q", "-m", "data"]);
     let savings = |cwd: &std::path::Path, extra: &[&str]| {
         let mut args = vec!["savings", "--json"];
         args.extend_from_slice(extra);

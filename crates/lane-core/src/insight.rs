@@ -189,7 +189,9 @@ pub fn savings(rows: &[(&Lane, Option<&LaneStats>, Option<&Details>)]) -> Saving
                 stats.bytes
             }
         };
-        s.as_lanes += extra;
+        // A lane never counts as taking more than a worktree would: files it adds, a worktree
+        // would hold too.
+        s.as_lanes += extra.min(stats.bytes);
         if let Some(ms) = stats.install_ms {
             s.installs_skipped += 1;
             s.install_ms_skipped += ms;
@@ -394,6 +396,28 @@ mod tests {
         assert_eq!((t.installs_skipped, t.install_ms_skipped), (5, 240_000));
         assert_eq!(t.ms_saved, 4 * 47_100);
         assert_eq!(totals(&[], &live), Totals::default());
+    }
+
+    #[test]
+    fn a_lane_never_counts_as_more_than_a_worktree() {
+        // A tiny tree, and a lane that added a big file: a worktree would hold that file too.
+        let tiny = LaneStats {
+            method: "clone".into(),
+            files: 1,
+            bytes: 22,
+            made_ms: 900,
+            install_ms: None,
+        };
+        let added = Details {
+            changed_bytes: 5_000,
+            ..Details::default()
+        };
+        let a = lane("a");
+        let s = savings(&[(&a, Some(&tiny), Some(&added))]);
+        assert_eq!((s.as_worktrees, s.as_lanes, s.saved), (22, 22, 0));
+        let gone = record("a", &tiny, Some(Some(5_000)));
+        let t = totals(&[gone], &HashMap::new());
+        assert_eq!((t.as_worktrees, t.as_lanes, t.not_written), (22, 22, 0));
     }
 
     #[test]
