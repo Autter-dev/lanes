@@ -43,6 +43,8 @@ Options:
   --settle SECS     Read free space once it has held still this long, within 1 MiB
                     (default 5; whole seconds)
   --no-first-test   Skip the time to the first passing test
+  --no-copies       Skip the copies measurements: to check a repo's test subset, or to
+                    measure only that
   --smoke           Mark the results as a smoke run whatever the settings
   -h, --help        Show this help
 EOF
@@ -329,10 +331,11 @@ shell_cmd() {
   if [[ $os == windows ]]; then printf '"%s"' "$1"; else printf '%s' "$1"; fi
 }
 
-# measure LABEL STEP DISK(0|1) JSON: time STEP with hyperfine, removing the copies before every
-# run. Free-space samples land in JSON.disk.
+# measure LABEL STEP DISK(0|1) JSON [MAY_FAIL]: time STEP with hyperfine, removing the copies
+# before every run. Free-space samples land in JSON.disk. A failure stops the bench, unless
+# MAY_FAIL is 1: then it returns 1.
 measure() {
-  local label=$1 step=$2 disk=$3 json=$4 samples=none
+  local label=$1 step=$2 disk=$3 json=$4 may_fail=${5:-0} samples=none
   rm -f "$dir/free.before"
   export BENCH_WARNINGS="$json.warnings"
   : >"$BENCH_WARNINGS"
@@ -351,8 +354,27 @@ measure() {
     reset_copies "$dir" none final || true
     echo "The last lines of $logs/$(basename "$step" .sh).log:" >&2
     tail -n 40 "$logs/$(basename "$step" .sh).log" >&2 || true
+    if [[ $may_fail == 1 ]]; then
+      say "$repo: $label failed; the results say so, and the bench goes on."
+      return 1
+    fi
     die "$repo: $label failed" "Fix the command in bench/repos.ini, or run $step by hand to see why."
   fi
+}
+
+# failed_result METHOD VARIANT STEP JSON: a first test that didn't pass in a fresh copy, for the
+# results: no time, and the end of its log (lines cut to 300 characters: some tools print whole
+# scripts in their errors).
+failed_result() {
+  local warn_file="$4.warnings"
+  [[ -f $warn_file ]] || warn_file=/dev/null
+  jq -n --arg method "$1" --arg variant "$2" --rawfile warn "$warn_file" \
+    --arg err "$(tail -n 25 "$logs/$(basename "$3" .sh).log" 2>/dev/null | cut -c 1-300)" \
+    '{measure: "first_test", method: $method,
+      variant: (if $variant == "" then null else $variant end), copies: 1, failed: true,
+      error: ($err | split("\n") | map(select(test("\\S")))),
+      wall_seconds: null, disk_added_bytes: null,
+      warnings: ($warn | split("\n") | map(select(length > 0))), hyperfine: null}'
 }
 
 # result METHOD VARIANT COPIES JSON KIND: one entry of the results file.
@@ -455,21 +477,39 @@ run_repo() {
     reset_copies "$dir" none final
     rm -rf "$dir/lanes" "$dir/wt"
     git -C "$dir/main" worktree prune
-    settled_free "$dir" "" $((BENCH_SETTLE * 10)) >/dev/null
+    # Their size is unknown, so no floor: a long quiet spell instead. A Dev Drive gave back a
+    # deleted Astro lane well after 50 quiet seconds.
+    settled_free "$dir" "" $((BENCH_SETTLE * 10 > 120 ? BENCH_SETTLE * 10 : 120)) >/dev/null
   fi
   mkdir -p "$dir/wt"
 
-  # Warm package caches: what a careful user has today. Every variant's install runs once.
+  # Warm package caches: what a careful user has today. Every variant's install runs once: the
+  # first in the clone, the others each in a worktree of their own, as the baseline installs, so
+  # the clone never switches layouts (pnpm won't remove node_modules without a terminal).
+  local warm_dir="" first_variant=1 ok
   for v in $variants; do
     say "$repo: warming the package cache ($v): $install"
+    warm_dir=""
+    [[ $first_variant == 1 ]] || warm_dir="$dir/wt/warm-$v"
+    first_variant=0
+    ok=1
     (
       eval "$(env_lines "$repo_env")"
       cd "$dir/main"
+      if [[ -n $warm_dir ]]; then
+        git worktree add --detach --quiet "$warm_dir" "$commit"
+        cd "$warm_dir"
+      fi
       eval "$(env_prefix "$(conf "$repo" "env.$v")")$install"
-    ) >"$logs/warm-$v.log" 2>&1 || {
+    ) >"$logs/warm-$v.log" 2>&1 || ok=0
+    if [[ -n $warm_dir ]]; then
+      git -C "$dir/main" worktree remove --force --force "$warm_dir" >/dev/null 2>&1 || rm -rf "$warm_dir"
+      git -C "$dir/main" worktree prune
+    fi
+    if [[ $ok == 0 ]]; then
       tail -n 40 "$logs/warm-$v.log" >&2
       die "$repo: \`$install\` failed in a plain checkout" "Fix the install in bench/repos.ini."
-    }
+    fi
   done
 
   local frags=()
@@ -496,7 +536,9 @@ run_repo() {
     >"$dir/out/base-result.json"
 
   # Wall time and disk added for N copies at once.
-  for n in "${copy_counts[@]}"; do
+  local counts=("${copy_counts[@]}")
+  [[ $copies_on == 1 ]] || counts=()
+  for n in ${counts[@]+"${counts[@]}"}; do
     for v in $variants lane; do
       local method=worktree variant=$v venv=""
       if [[ $v == lane ]]; then method=lane variant=""; else venv=$(conf "$repo" "env.$v"); fi
@@ -521,9 +563,13 @@ run_repo() {
 cd $(printf '%q' "$(copy_path "$method" bench-t)")
 $(env_prefix "$venv")$test_cmd"
       json="$dir/out/first-test-$v.json"
-      measure "first test, $method${variant:+ ($variant)}" "$step" 0 "$json"
       frag="$dir/out/first-test-$v.result.json"
-      result "$method" "$variant" 1 "$json" first_test >"$frag"
+      # A test that fails in one kind of copy is a finding, not a reason to stop.
+      if measure "first test, $method${variant:+ ($variant)}" "$step" 0 "$json" 1; then
+        result "$method" "$variant" 1 "$json" first_test >"$frag"
+      else
+        failed_result "$method" "$variant" "$step" "$json" >"$frag"
+      fi
       frags+=("$frag")
     done
   fi
@@ -543,11 +589,14 @@ $(env_prefix "$venv")$test_cmd"
       lane_base_setup: $base[0], results: $r}' >"$dir/out/repo.json"
   repo_results+=("$dir/out/repo.json")
 
-  # Done: remove the first lane and `_base` too, and wait until the disk has its space back, so
-  # the next repo starts on a quiet disk.
+  # Done: remove the first lane and `_base` too, and give the deletes time, so the next repo
+  # starts on a quiet disk. No floor here: after many thousands of files made and deleted, a
+  # filesystem can keep some of the space for good (ReFS did).
+  unset BENCH_WARNINGS
+  say "$repo: removing the lanes, then letting the disk settle"
   rm -rf "$dir/lanes" "$dir/wt"
   git -C "$dir/main" worktree prune
-  settled_free "$dir" "$((before - 2 * 1048576))" >/dev/null
+  settled_free "$dir" "" $((BENCH_SETTLE * 10)) >/dev/null
 }
 
 # --- Main -----------------------------------------------------------------------------------
@@ -565,7 +614,7 @@ main() {
   esac
 
   runs=$std_runs warmup=$std_warmup copies=$std_copies
-  work="$HOME/lanes-bench" lane_arg=lane machine="" out="" first_test=1 smoke=""
+  work="$HOME/lanes-bench" lane_arg=lane machine="" out="" first_test=1 copies_on=1 smoke=""
   BENCH_SETTLE=5
   local wanted=()
   while [[ $# -gt 0 ]]; do
@@ -580,6 +629,7 @@ main() {
       --out) out=${2:?--out needs a file}; shift ;;
       --settle) BENCH_SETTLE=${2:?--settle needs seconds}; shift ;;
       --no-first-test) first_test=0 ;;
+      --no-copies) copies_on=0 ;;
       --smoke) smoke=1 ;;
       -h | --help) usage; exit 0 ;;
       *) die "unknown option \`$1\`" "Run bench/run.sh --help to see the options." ;;
@@ -674,16 +724,18 @@ main() {
   mkdir -p "$(dirname "$out")"
   local copies_json
   copies_json=$(printf '%s\n' "${copy_counts[@]}" | jq -s .)
+  [[ $copies_on == 1 ]] || copies_json='[]'
   jq -n --argjson machine "$(machine_json)" --slurpfile repos <(cat "${repo_results[@]}") \
     --arg started "$started" --arg finished "$(date -u +%FT%TZ)" --arg reason "$reason" \
     --argjson runs "$runs" --argjson warmup "$warmup" --argjson copies "$copies_json" \
+    --argjson first_test "$([[ $first_test == 1 ]] && echo true || echo false)" \
     --argjson std_runs "$std_runs" --argjson std_warmup "$std_warmup" \
     --argjson std_copies "$(tr ' ' '\n' <<<"$std_copies" | jq -s .)" --arg script "bench/run.sh" \
     --arg bench_commit "$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || true)" \
     '{schema: 1, benchmark: "new-copy", script: $script, bench_commit: $bench_commit,
       smoke: ($reason != ""), smoke_reason: (if $reason == "" then null else $reason end),
       started: $started, finished: $finished,
-      settings: {runs: $runs, warmup: $warmup, copies: $copies},
+      settings: {runs: $runs, warmup: $warmup, copies: $copies, first_test: $first_test},
       protocol: {runs: $std_runs, warmup: $std_warmup, copies: $std_copies},
       stats: "median, and p95 by linear interpolation between the closest ranks; never the best run",
       disk: "disk added is the drop in the volume'"'"'s free space (df), never du",
@@ -692,8 +744,8 @@ main() {
   say "Results: $out"
   jq -r '.repos[] | .name as $r | .results[]
     | [$r, .measure, .method + (if .variant then " (" + .variant + ")" else "" end), (.copies | tostring),
-       (.wall_seconds.median * 100 | round / 100 | tostring) + " s",
-       (.wall_seconds.p95 * 100 | round / 100 | tostring) + " s",
+       (if .wall_seconds then (.wall_seconds.median * 100 | round / 100 | tostring) + " s" else "failed" end),
+       (if .wall_seconds then (.wall_seconds.p95 * 100 | round / 100 | tostring) + " s" else "-" end),
        (if .disk_added_bytes then (.disk_added_bytes.median / 1048576 | round | tostring) + " MiB" else "-" end)]
     | @tsv' "$out" |
     { printf 'repo\tmeasure\tmethod\tcopies\tmedian\tp95\tdisk (median)\n'; cat; } |

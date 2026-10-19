@@ -23,14 +23,16 @@ The full matrix on a Dev Drive.
 [CmdletBinding()]
 param(
     # Only these repos. Default: every repo in bench/repos.ini that runs on Windows, except
-    # `lanes` (this repo, the quick target).
+    # `lanes` (this repo, the quick target). Lists are split at commas here, because
+    # `powershell -File` passes `-Repo astro,ruff` as one string.
     [string[]]$Repo = @(),
     # Timed runs per measurement (fewer than 10 marks a smoke run).
     [int]$Runs = 10,
     # Warmup runs, not counted.
     [int]$Warmup = 1,
-    # How many copies to make at once.
-    [int[]]$Copies = @(1, 5, 10),
+    # How many copies to make at once. Strings, split at commas here: `powershell -File` passes
+    # `-Copies 1,5` as "1,5", which as a number is 15.
+    [string[]]$Copies = @('1', '5', '10'),
     # Where the clones and copies go: on the disk you want to measure. Default: <drive>:\lanes-bench
     # on the first ReFS volume (a Dev Drive), else %USERPROFILE%\lanes-bench.
     [string]$Work = '',
@@ -46,6 +48,8 @@ param(
     [int]$Settle = 15,
     # Skip the time to the first passing test.
     [switch]$NoFirstTest,
+    # Skip the copies measurements: to check a repo's test subset, or to measure only that.
+    [switch]$NoCopies,
     # Mark the results as a smoke run whatever the settings.
     [switch]$Smoke,
     # Internal: what hyperfine's --prepare and --cleanup run.
@@ -454,8 +458,8 @@ function Get-ResetCommand([string]$SamplesFile, [switch]$IsFinal) {
 }
 
 # Time STEP with hyperfine, removing the copies before every run. Free-space samples land in
-# JSON.disk.
-function Invoke-Measure([string]$Label, [string]$StepFile, [bool]$Disk, [string]$Json) {
+# JSON.disk. Returns whether it worked; a failure stops the bench, unless MayFail.
+function Invoke-Measure([string]$Label, [string]$StepFile, [bool]$Disk, [string]$Json, [bool]$MayFail = $false) {
     $samplesFile = 'none'
     Remove-Item -LiteralPath (Join-Path $script:Dir 'free.before') -ErrorAction SilentlyContinue
     $env:BENCH_WARNINGS = "$Json.warnings"
@@ -478,7 +482,33 @@ function Invoke-Measure([string]$Label, [string]$StepFile, [bool]$Disk, [string]
         $log = Join-Path $script:Logs (([IO.Path]::GetFileNameWithoutExtension($StepFile)) + '.log')
         [Console]::Error.WriteLine("The last lines of ${log}:")
         if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Tail 40 | ForEach-Object { [Console]::Error.WriteLine($_) } }
+        if ($MayFail) {
+            Write-Step "$($script:RepoName): $Label failed; the results say so, and the bench goes on."
+            return $false
+        }
         Stop-Bench "$($script:RepoName): $Label failed" "Fix the command in bench/repos.ini, or run $StepFile by hand to see why."
+    }
+    $true
+}
+
+# A first test that didn't pass in a fresh copy, for the results: no time, and the end of its
+# log (lines cut to 300 characters: some tools print whole scripts in their errors).
+function Get-FailedResult([string]$Method, [string]$Variant, [string]$StepFile, [string]$Json) {
+    $log = Join-Path $script:Logs (([IO.Path]::GetFileNameWithoutExtension($StepFile)) + '.log')
+    $tail = @(Get-Content -LiteralPath $log -Tail 25 -ErrorAction SilentlyContinue | Where-Object { $_ -match '\S' } |
+            ForEach-Object { $l = [string]$_; if ($l.Length -gt 300) { $l.Substring(0, 300) + '...' } else { $l } })
+    [ordered]@{
+        measure          = 'first_test'
+        method           = $Method
+        variant          = if ($Variant) { $Variant } else { $null }
+        copies           = 1
+        failed           = $true
+        error            = $tail
+        wall_seconds     = $null
+        disk_added_bytes = $null
+        warnings         = @(Get-Content -LiteralPath "$Json.warnings" -Encoding UTF8 -ErrorAction SilentlyContinue |
+                Where-Object { $_ -match '\S' } | ForEach-Object { [string]$_ })
+        hyperfine        = $null
     }
 }
 
@@ -503,7 +533,10 @@ function Get-Result([string]$Method, [string]$Variant, [int]$N, [string]$Json, [
         copies           = $N
         wall_seconds     = Get-Stats (Get-WallTimes $export)
         disk_added_bytes = $disk
-        warnings         = @(Get-Content -LiteralPath "$Json.warnings" -Encoding UTF8 -ErrorAction SilentlyContinue | Where-Object { $_ -match '\S' })
+        # Plain strings: Get-Content's lines carry PSDrive and PSProvider, which ConvertTo-Json would
+        # follow for ever.
+        warnings         = @(Get-Content -LiteralPath "$Json.warnings" -Encoding UTF8 -ErrorAction SilentlyContinue |
+                Where-Object { $_ -match '\S' } | ForEach-Object { [string]$_ })
         hyperfine        = $export.results[0]
     }
 }
@@ -607,20 +640,40 @@ function Invoke-Repo([string]$Name) {
         Remove-Tree (Join-Path $dir 'lanes')
         Remove-Tree (Join-Path $dir 'wt')
         Invoke-Quiet 'git' @('-C', $main, 'worktree', 'prune') | Out-Null
-        Get-SettledFree $dir $null ($Settle * 10) | Out-Null
+        # Their size is unknown, so no floor: a long quiet spell instead. A Dev Drive gave back a
+        # deleted Astro lane well after 50 quiet seconds.
+        Get-SettledFree $dir $null ([math]::Max(120, $Settle * 10)) | Out-Null
     }
     New-Item -ItemType Directory -Force -Path (Join-Path $dir 'wt') | Out-Null
 
-    # Warm package caches: what a careful user has today. Every variant's install runs once.
+    # Warm package caches: what a careful user has today. Every variant's install runs once: the
+    # first in the clone, the others each in a worktree of their own, as the baseline installs, so
+    # the clone never switches layouts (pnpm won't remove node_modules without a terminal).
+    $firstVariant = $true
     foreach ($v in $variants) {
         Write-Step "${Name}: warming the package cache ($v): $($script:Install)"
         $warm = Join-Path $steps "warm-$v.cmd"
         $log = Join-Path $script:Logs "warm-$v.log"
-        New-StepFile $warm $log @(ConvertTo-CmdText $script:Install) (Get-Conf $Name "env.$v")
-        if ((Invoke-Program 'cmd.exe' @('/D', '/C', $warm)) -ne 0) {
+        $body = @()
+        $warmDir = $null
+        if (-not $firstVariant) {
+            $warmDir = Join-Path (Join-Path $dir 'wt') "warm-$v"
+            $body += "git worktree add --detach --quiet `"$warmDir`" $($script:Commit)"
+            $body += ":cd /d `"$warmDir`""
+        }
+        $body += ConvertTo-CmdText $script:Install
+        New-StepFile $warm $log $body (Get-Conf $Name "env.$v")
+        $code = Invoke-Program 'cmd.exe' @('/D', '/C', $warm)
+        if ($warmDir) {
+            Invoke-Quiet 'git' @('-C', $main, 'worktree', 'remove', '--force', '--force', $warmDir) | Out-Null
+            Remove-Tree $warmDir
+            Invoke-Quiet 'git' @('-C', $main, 'worktree', 'prune') | Out-Null
+        }
+        if ($code -ne 0) {
             if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Tail 40 | ForEach-Object { [Console]::Error.WriteLine($_) } }
             Stop-Bench "${Name}: ``$($script:Install)`` failed in a plain checkout" 'Fix the install in bench/repos.ini.'
         }
+        $firstVariant = $false
     }
 
     $results = New-Object Collections.Generic.List[object]
@@ -651,7 +704,9 @@ function Invoke-Repo([string]$Name) {
     }
 
     # Wall time and disk added for N copies at once.
-    foreach ($n in $Copies) {
+    $counts = $CopyCounts
+    if ($NoCopies) { $counts = @() }
+    foreach ($n in $counts) {
         foreach ($v in @($variants + 'lane')) {
             $method = 'worktree'; $variant = $v; $venv = ''
             if ($v -eq 'lane') { $method = 'lane'; $variant = '' } else { $venv = Get-Conf $Name "env.$v" }
@@ -662,7 +717,7 @@ function Invoke-Repo([string]$Name) {
             $json = Join-Path $outDir "copies-$v-$n.json"
             $label = "$n x $method"
             if ($variant) { $label += " ($variant)" }
-            Invoke-Measure $label $stepFile $true $json
+            $null = Invoke-Measure $label $stepFile $true $json
             $results.Add((Get-Result $method $variant $n $json 'copies'))
         }
     }
@@ -679,8 +734,12 @@ function Invoke-Repo([string]$Name) {
             $json = Join-Path $outDir "first-test-$v.json"
             $label = "first test, $method"
             if ($variant) { $label += " ($variant)" }
-            Invoke-Measure $label $stepFile $false $json
-            $results.Add((Get-Result $method $variant 1 $json 'first_test'))
+            # A test that fails in one kind of copy is a finding, not a reason to stop.
+            if (Invoke-Measure $label $stepFile $false $json $true) {
+                $results.Add((Get-Result $method $variant 1 $json 'first_test'))
+            } else {
+                $results.Add((Get-FailedResult $method $variant $stepFile $json))
+            }
         }
     }
 
@@ -697,12 +756,15 @@ function Invoke-Repo([string]$Name) {
         results         = $results.ToArray()
     }
 
-    # Done: remove the first lane and `_base` too, and wait until the disk has its space back, so
-    # the next repo starts on a quiet disk.
+    # Done: remove the first lane and `_base` too, and give the deletes time, so the next repo
+    # starts on a quiet disk. No floor here: after many thousands of files made and deleted, ReFS
+    # kept some of the space for good.
+    $env:BENCH_WARNINGS = $null
+    Write-Step "${Name}: removing the lanes, then letting the disk settle"
     Remove-Tree (Join-Path $dir 'lanes')
     Remove-Tree (Join-Path $dir 'wt')
     Invoke-Quiet 'git' @('-C', $main, 'worktree', 'prune') | Out-Null
-    Get-SettledFree $dir ($before - 2MB) | Out-Null
+    Get-SettledFree $dir $null ($Settle * 10) | Out-Null
     $repoResult
 }
 
@@ -711,9 +773,12 @@ function Invoke-Repo([string]$Name) {
 if ($Runs -lt 1) { Stop-Bench '-Runs must be 1 or more' }
 if ($Warmup -lt 0) { Stop-Bench '-Warmup must be 0 or more' }
 if ($Settle -lt 0) { Stop-Bench '-Settle must be 0 or more seconds' }
-if ($Copies.Count -eq 0 -or @($Copies | Where-Object { $_ -lt 1 }).Count -gt 0) {
+$Repo = @($Repo | ForEach-Object { $_ -split '[,\s]+' } | Where-Object { $_ -ne '' })
+$counts = @($Copies | ForEach-Object { $_ -split '[,\s]+' } | Where-Object { $_ -ne '' })
+if ($counts.Count -eq 0 -or @($counts | Where-Object { $_ -notmatch '^[1-9][0-9]*$' }).Count -gt 0) {
     Stop-Bench '-Copies takes whole numbers, 1 or more, like 1,5,10'
 }
+$CopyCounts = [int[]]@($counts | ForEach-Object { [int]$_ })
 $env:BENCH_SETTLE = [string]$Settle
 
 foreach ($tool in @('hyperfine', 'git')) {
@@ -778,7 +843,7 @@ if ($Repo.Count -eq 0) {
 $reasons = @()
 if ($Runs -lt $StdRuns) { $reasons += "runs $Runs < $StdRuns" }
 if ($Warmup -lt $StdWarmup) { $reasons += "warmup $Warmup < $StdWarmup" }
-if (($Copies -join ' ') -ne ($StdCopies -join ' ')) { $reasons += "copies `"$($Copies -join ' ')`" instead of `"$($StdCopies -join ' ')`"" }
+if (($CopyCounts -join ' ') -ne ($StdCopies -join ' ')) { $reasons += "copies `"$($CopyCounts -join ' ')`" instead of `"$($StdCopies -join ' ')`"" }
 if ($Smoke) { $reasons += '-Smoke' }
 $reason = $reasons -join '; '
 
@@ -809,7 +874,7 @@ $doc = [ordered]@{
     smoke_reason = if ($reason) { $reason } else { $null }
     started      = $started
     finished     = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-    settings     = [ordered]@{ runs = $Runs; warmup = $Warmup; copies = $Copies }
+    settings     = [ordered]@{ runs = $Runs; warmup = $Warmup; copies = @(if (-not $NoCopies) { $CopyCounts }); first_test = (-not $NoFirstTest) }
     protocol     = [ordered]@{ runs = $StdRuns; warmup = $StdWarmup; copies = $StdCopies }
     stats        = 'median, and p95 by linear interpolation between the closest ranks; never the best run'
     disk         = "disk added is the drop in the volume's free space (Get-Volume), never a sum of file sizes"
@@ -827,13 +892,19 @@ $rows = foreach ($rr in $repoResults) {
         if ($x.variant) { $m += " ($($x.variant))" }
         $diskText = '-'
         if ($x.disk_added_bytes) { $diskText = '{0:N0} MiB' -f ($x.disk_added_bytes.median / 1MB) }
+        $median = 'failed'
+        $p95 = '-'
+        if ($x.wall_seconds) {
+            $median = '{0:N2} s' -f $x.wall_seconds.median
+            $p95 = '{0:N2} s' -f $x.wall_seconds.p95
+        }
         [pscustomobject]@{
             repo            = $rr.name
             measure         = $x.measure
             method          = $m
             copies          = $x.copies
-            median          = '{0:N2} s' -f $x.wall_seconds.median
-            p95             = '{0:N2} s' -f $x.wall_seconds.p95
+            median          = $median
+            p95             = $p95
             'disk (median)' = $diskText
         }
     }

@@ -82,7 +82,8 @@ bench/run.sh --work /Volumes/Work/lanes-bench    # the full matrix, on the disk 
 ```
 
 If PowerShell refuses to run the script, run it with
-`powershell -ExecutionPolicy Bypass -File .\bench\run.ps1 ...`.
+`powershell -ExecutionPolicy Bypass -File .\bench\run.ps1 ...`. Lists like `-Repo astro,ruff`
+and `-Copies 1,5` work that way too.
 
 | `run.sh` | `run.ps1` | Default | What |
 | --- | --- | --- | --- |
@@ -96,6 +97,7 @@ If PowerShell refuses to run the script, run it with
 | `--out FILE` | `-Out FILE` | `results/<date>-<machine>.json` | where the results go |
 | `--settle SECS` | `-Settle SECS` | 5; 15 on Windows | how long free space must hold still before it's read |
 | `--no-first-test` | `-NoFirstTest` | | skip the time to the first passing test |
+| `--no-copies` | `-NoCopies` | | skip the copies measurements: to check a repo's test subset, or measure only that |
 | `--smoke` | `-Smoke` | | mark the results as a smoke run |
 
 Fewer than 10 runs, no warmup, or copies other than 1, 5 and 10 make it a smoke run, named
@@ -200,7 +202,10 @@ database 1 after every example: use a Redis you don't mind losing.
   and `results`: one entry per measurement, method, variant and number of copies, with
   `wall_seconds` and `disk_added_bytes` as `{n, median, p95, runs}`, any `warnings` from
   reading free space, and hyperfine's own result for that measurement. A measurement with
-  warnings needs a closer look before anyone quotes its disk number.
+  warnings needs a closer look before anyone quotes its disk number. A first test that doesn't
+  pass in a fresh copy has `"failed": true`, no time, and the end of its log in `error`; the
+  bench goes on with the rest, because a test that fails in one kind of copy is itself a
+  finding.
 
 p95 is by linear interpolation between the closest ranks (numpy's default), so with 10 runs it
 lies between the two slowest. Both scripts compute it the same way, and write the same format.
@@ -214,9 +219,9 @@ then for real.
 
 ## Limits
 
-- So far only the quick target (`lanes`) has been run, in smoke runs of `run.ps1` on a Windows
-  Dev Drive. The other four repos' install and test commands come from reading their CI at the
-  pinned commits, so their first run may need a fix in `repos.ini`. `run.sh` is
+- So far: smoke runs of `run.ps1` against `lanes`, Ruff and Astro, on one Windows Dev Drive.
+  Saleor and Mastodon haven't run; their install and test commands come from reading their CI
+  at the pinned commits, so their first run may need a fix in `repos.ini`. `run.sh` is
   syntax-checked and passes shellcheck, but hasn't run on macOS or Linux yet.
 - The clone is shallow. `git worktree add` doesn't read history, so it makes no difference to
   either method.
