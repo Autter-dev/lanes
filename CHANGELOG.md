@@ -16,7 +16,7 @@ Lanes uses [semantic versioning](https://semver.org), and 0.0.x versions are pre
   - The release workflow and `cargo test` turn down a version that isn't a release (0.1.0) or a release candidate (0.1.0-rc.1).
   - Release notes come from the version's own `CHANGELOG.md` section: 0.1.0's notes never pick up 0.1.0-rc.1's section.
   - The Installers workflow takes a version: every channel installs it on every system and checks that `lane --version` says it. After a release candidate's release, it checks that candidate; Homebrew and Scoop, which only have the latest release, skip it and say why.
-  - The README and this changelog say how versions work: before 1.0, a minor version can make breaking changes to commands, `lane.toml` or `--json` output, a patch only fixes things, and exit codes and documented `--json` fields don't change. The website leaves release candidates off its releases page and says "preview" only for 0.0.x.
+  - The README and this changelog say how versions work: before 1.0, a minor version can make breaking changes to commands, `lane.toml` or `--json` output, a patch only fixes things, and exit codes and documented `--json` fields don't change. The website leaves release candidates off its releases page and says "preview" only for 0.0.x. (`27cf99a`)
 - `09:18` **Changed**: the website offers 0.0.9, and the guide says to run `lane setup --yes` once on Windows after updating from 0.0.8, so Copilot's hooks are written again (`7282628`).
 
 ## 0.0.9 (2026-10-18)
