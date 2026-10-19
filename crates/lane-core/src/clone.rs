@@ -382,25 +382,186 @@ fn copy_link(src: &Path, dst: &Path, src_root: &Path, dst_root: &Path) -> Result
 
 #[cfg(windows)]
 fn copy_link(src: &Path, dst: &Path, src_root: &Path, dst_root: &Path) -> Result<()> {
-    use std::os::windows::fs::{symlink_dir, symlink_file};
+    use std::os::windows::fs::{FileTypeExt, symlink_dir, symlink_file};
+    // Windows hands back a junction's target as `\\?\D:\...`: plain spelling, so a target inside
+    // the source is still seen as inside it.
     let target = rebase(
-        fs::read_link(src).map_err(|e| io_error("read", src, e))?,
-        src_root,
+        junction::plain(&fs::read_link(src).map_err(|e| io_error("read", src, e))?),
+        &junction::plain(src_root),
         dst_root,
     );
-    let is_dir = fs::metadata(src).map(|m| m.is_dir()).unwrap_or(false);
-    let made = if is_dir {
-        symlink_dir(&target, dst)
+    // From the link itself, so a link whose target has gone still counts as a folder link.
+    let is_dir = fs::symlink_metadata(src).is_ok_and(|m| m.file_type().is_symlink_dir());
+    if !is_dir {
+        return match symlink_file(&target, dst) {
+            Ok(()) => Ok(()),
+            // Without Developer Mode, Windows won't make symlinks: copy what a file link points to.
+            Err(_) => fs::copy(src, dst)
+                .map(|_| ())
+                .map_err(|e| io_error("copy", src, e)),
+        };
+    }
+    // A folder junction stays a junction: pnpm links every package with one on Windows. A folder
+    // symlink stays a symlink, or becomes a junction when Windows won't make symlinks (no
+    // Developer Mode). Junctions need no privilege; they point by absolute path.
+    let made = if junction::is_junction(src) {
+        junction::make(&junction::absolute(dst, &target), dst)
     } else {
-        symlink_file(&target, dst)
+        match symlink_dir(&target, dst) {
+            Err(e) if e.raw_os_error() == Some(junction::ERROR_PRIVILEGE_NOT_HELD) => {
+                junction::make(&junction::absolute(dst, &target), dst)
+            }
+            made => made,
+        }
     };
-    match made {
-        Ok(()) => Ok(()),
-        // Without Developer Mode, Windows won't make symlinks: copy what a file link points to.
-        Err(_) if !is_dir => fs::copy(src, dst).map(|_| ()).map_err(|e| io_error("copy", src, e)),
-        Err(e) => Err(io_error("create the link", dst, e).hint(
-            "Turn on Developer Mode in Windows settings so Lanes can make symlinks, then try again.",
-        )),
+    made.map_err(|e| io_error("create the link", dst, e))
+}
+
+/// Windows folder junctions: reading what a link is, and making one, without Developer Mode.
+#[cfg(windows)]
+mod junction {
+    use std::fs::{self, File, OpenOptions};
+    use std::io;
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
+    use std::path::{Component, Path, PathBuf};
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+        FileAttributeTagInfo, GetFileInformationByHandleEx,
+    };
+    use windows_sys::Win32::System::IO::DeviceIoControl;
+
+    pub const ERROR_PRIVILEGE_NOT_HELD: i32 = 1314;
+    const IO_REPARSE_TAG_MOUNT_POINT: u32 = 0xA000_0003;
+    const FSCTL_SET_REPARSE_POINT: u32 = 0x0009_00A4;
+    const FILE_READ_ATTRIBUTES: u32 = 0x0080;
+    const GENERIC_WRITE: u32 = 0x4000_0000;
+
+    /// `path` itself, not what it points to.
+    fn open_link(path: &Path, access: u32) -> io::Result<File> {
+        OpenOptions::new()
+            .access_mode(access)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS)
+            .open(path)
+    }
+
+    /// Whether `path` is a folder junction (a mount point), not a symlink.
+    pub fn is_junction(path: &Path) -> bool {
+        let Ok(file) = open_link(path, FILE_READ_ATTRIBUTES) else {
+            return false;
+        };
+        let mut info = FILE_ATTRIBUTE_TAG_INFO {
+            FileAttributes: 0,
+            ReparseTag: 0,
+        };
+        // SAFETY: the handle is open for the call; `info` is a FILE_ATTRIBUTE_TAG_INFO of the
+        // size passed, which is what FileAttributeTagInfo writes.
+        let ok = unsafe {
+            GetFileInformationByHandleEx(
+                file.as_raw_handle(),
+                FileAttributeTagInfo,
+                (&mut info as *mut FILE_ATTRIBUTE_TAG_INFO).cast(),
+                size_of::<FILE_ATTRIBUTE_TAG_INFO>() as u32,
+            )
+        };
+        ok != 0 && info.ReparseTag == IO_REPARSE_TAG_MOUNT_POINT
+    }
+
+    /// `\\?\D:\x` as `D:\x` and `\\?\UNC\host\share` as `\\host\share`, with backslashes and an
+    /// upper-case drive letter, so paths compare by what they name.
+    pub fn plain(p: &Path) -> PathBuf {
+        let s = p.to_string_lossy().replace('/', "\\");
+        let mut s = if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+            format!(r"\\{rest}")
+        } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+            rest.to_string()
+        } else {
+            s
+        };
+        if s.len() >= 2 && s.as_bytes()[1] == b':' {
+            s[..1].make_ascii_uppercase();
+        }
+        PathBuf::from(s)
+    }
+
+    /// Where `target` points from the link at `link`, as an absolute path without `.` or `..`:
+    /// a junction can only hold that.
+    pub fn absolute(link: &Path, target: &Path) -> PathBuf {
+        let joined = match target.is_absolute() {
+            true => target.to_path_buf(),
+            false => link.parent().unwrap_or(link).join(target),
+        };
+        let mut out = PathBuf::new();
+        for c in plain(&joined).components() {
+            match c {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    out.pop();
+                }
+                other => out.push(other.as_os_str()),
+            }
+        }
+        out
+    }
+
+    /// Make `link` a junction to the folder `target` (absolute).
+    pub fn make(target: &Path, link: &Path) -> io::Result<()> {
+        fs::create_dir(link)?;
+        let made = set_mount_point(target, link);
+        if made.is_err() {
+            let _ = fs::remove_dir(link);
+        }
+        made
+    }
+
+    fn set_mount_point(target: &Path, link: &Path) -> io::Result<()> {
+        let wide = |s: &std::ffi::OsStr| s.encode_wide().collect::<Vec<u16>>();
+        // The NT form, `\??\D:\x`, is what the filesystem follows; the plain form is for display.
+        let plain = plain(target);
+        let substitute = wide(format!(r"\??\{}", plain.display()).as_ref());
+        let print = wide(plain.as_os_str());
+        let (sub_len, print_len) = (substitute.len() * 2, print.len() * 2);
+        // REPARSE_DATA_BUFFER's mount point form: the tag, the data length, a reserved word, then
+        // offsets and lengths of the two names, then both names, each followed by a NUL.
+        let data_len = 8 + sub_len + 2 + print_len + 2;
+        if data_len > 16 * 1024 - 8 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "the junction's target path is too long",
+            ));
+        }
+        let mut buf: Vec<u8> = Vec::with_capacity(8 + data_len);
+        buf.extend(IO_REPARSE_TAG_MOUNT_POINT.to_le_bytes());
+        buf.extend((data_len as u16).to_le_bytes());
+        buf.extend(0u16.to_le_bytes());
+        buf.extend(0u16.to_le_bytes());
+        buf.extend((sub_len as u16).to_le_bytes());
+        buf.extend(((sub_len + 2) as u16).to_le_bytes());
+        buf.extend((print_len as u16).to_le_bytes());
+        for unit in substitute.iter().chain([&0]).chain(&print).chain([&0]) {
+            buf.extend(unit.to_le_bytes());
+        }
+        let file = open_link(link, GENERIC_WRITE)?;
+        let mut returned = 0u32;
+        // SAFETY: the handle is open for writing; `buf` is a complete REPARSE_DATA_BUFFER of the
+        // length passed, and no output buffer is used.
+        let ok = unsafe {
+            DeviceIoControl(
+                file.as_raw_handle(),
+                FSCTL_SET_REPARSE_POINT,
+                buf.as_ptr().cast(),
+                buf.len() as u32,
+                std::ptr::null_mut(),
+                0,
+                &mut returned,
+                std::ptr::null_mut(),
+            )
+        };
+        match ok {
+            0 => Err(io::Error::last_os_error()),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -659,5 +820,90 @@ mod tests {
             0o755
         );
         unlock(&dir);
+    }
+
+    /// pnpm on Windows links every package with a folder junction, by absolute path. A lane gets
+    /// junctions of its own, without Developer Mode, pointing into the lane, never back at `_base`.
+    #[cfg(windows)]
+    #[test]
+    fn junctions_stay_junctions_and_point_into_the_copy() {
+        let dir = temp("junctions");
+        let src = dir.join("src");
+        let pkg = src.join("node_modules/.pnpm/left-pad@1.3.0/node_modules/left-pad");
+        fs::create_dir_all(&pkg).unwrap();
+        fs::write(pkg.join("index.js"), "module.exports = x => x;\n").unwrap();
+        let outside = dir.join("store");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("shared.txt"), "shared\n").unwrap();
+        // Made the way pnpm makes them, with `mklink /J`, which needs no privilege.
+        let mklink = |link: &Path, target: &Path| {
+            let ok = std::process::Command::new("cmd")
+                .args(["/d", "/c", "mklink", "/J"])
+                .arg(junction::plain(link))
+                .arg(junction::plain(target))
+                .output()
+                .unwrap()
+                .status
+                .success();
+            assert!(ok, "mklink /J {}", link.display());
+        };
+        mklink(&src.join("node_modules/left-pad"), &pkg);
+        mklink(&src.join("node_modules/store"), &outside);
+
+        let dst = dir.join("dst");
+        let report = clone_tree(&src, &dst, &PlainCopy, &Options::default()).unwrap();
+        assert_eq!(report.symlinks, 2);
+        let inside = dst.join("node_modules/left-pad");
+        assert!(
+            junction::is_junction(&inside),
+            "a junction stays a junction"
+        );
+        assert_eq!(
+            junction::plain(&fs::read_link(&inside).unwrap()),
+            junction::plain(&dst.join("node_modules/.pnpm/left-pad@1.3.0/node_modules/left-pad")),
+            "a link into the tree points into the copy"
+        );
+        // Writing through the lane's link changes the lane, not the source.
+        fs::write(inside.join("index.js"), "changed\n").unwrap();
+        assert_eq!(
+            fs::read_to_string(pkg.join("index.js")).unwrap(),
+            "module.exports = x => x;\n"
+        );
+        let store = dst.join("node_modules/store");
+        assert!(junction::is_junction(&store));
+        assert_eq!(
+            junction::plain(&fs::read_link(&store).unwrap()),
+            junction::plain(&outside),
+            "a link out of the tree still points where it did"
+        );
+        assert_eq!(
+            fs::read_to_string(store.join("shared.txt")).unwrap(),
+            "shared\n"
+        );
+        // Removing the copy removes its links, never what they point to.
+        fs::remove_dir_all(&dst).unwrap();
+        assert!(outside.join("shared.txt").exists() && pkg.join("index.js").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_paths_compare_by_what_they_name() {
+        assert_eq!(
+            junction::plain(Path::new(r"\\?\d:\a\b")),
+            PathBuf::from(r"D:\a\b")
+        );
+        assert_eq!(
+            junction::plain(Path::new(r"\\?\UNC\host\share\x")),
+            PathBuf::from(r"\\host\share\x")
+        );
+        assert_eq!(
+            junction::plain(Path::new("D:/a/b")),
+            PathBuf::from(r"D:\a\b")
+        );
+        assert_eq!(
+            junction::absolute(Path::new(r"D:\l\node_modules\x"), Path::new(r"..\.pnpm\x")),
+            PathBuf::from(r"D:\l\.pnpm\x")
+        );
     }
 }
