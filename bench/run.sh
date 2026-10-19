@@ -18,6 +18,7 @@ repos_file="$bench_dir/repos.ini"
 std_runs=10
 std_warmup=1
 std_copies="1 5 10"
+std_disk_runs=3
 
 usage() {
   cat <<'EOF'
@@ -31,7 +32,8 @@ with hyperfine. Writes bench/results/<date>-<machine>.json.
 Options:
   --repo NAME       Only this repo (repeat for more). Default: every repo in bench/repos.ini
                     that runs on this OS, except `lanes` (this repo, the quick target)
-  --runs N          Timed runs per measurement (default 10; fewer marks a smoke run)
+  --runs N          Timed runs per measurement in the time pass (default 10; fewer marks a
+                    smoke run)
   --warmup N        Warmup runs, not counted (default 1)
   --copies "LIST"   How many copies to make at once (default "1 5 10")
   --work DIR        Where the clones and copies go: on the disk you want to measure
@@ -45,6 +47,10 @@ Options:
   --no-first-test   Skip the time to the first passing test
   --no-copies       Skip the copies measurements: to check a repo's test subset, or to
                     measure only that
+  --pass PASS       time (wall time, runs back to back), disk (disk added, each run on a
+                    settled disk) or both (default)
+  --disk-runs N     Runs per copies measurement in the disk pass (default 3; fewer marks a
+                    smoke run)
   --smoke           Mark the results as a smoke run whatever the settings
   -h, --help        Show this help
 EOF
@@ -138,16 +144,17 @@ settled_free() {
 # --- Removing copies (hyperfine's --prepare and --cleanup) ------------------------------------
 
 # reset_copies DIR SAMPLES [final]: remove every copy the bench made in DIR (hyperfine's
-# --prepare, before every run, and --cleanup). With a SAMPLES file, free.before holds the free
-# space read before the last run made its copies: record how much they took (the drop since
-# then), remove them, and wait until the free space is back there, less a little slack, so their
-# deletes never land in the next run; then, unless this is the last run, keep that as the next
-# run's free.before. With SAMPLES `none` (the first-test runs), just remove them and let the
-# disk settle.
+# --prepare, before every run, and --cleanup). With a SAMPLES file (the disk pass), free.before
+# holds the free space read before the last run made its copies: record how much they took (the
+# drop since then), remove them, and wait until the free space is back there, less a little
+# slack, so their deletes never land in the next run; then, unless this is the last run, keep
+# that as the next run's free.before. With SAMPLES `none`, just remove them and let the disk
+# settle; with `fast` (the time pass), just remove them.
 reset_copies() {
-  local dir=$1 samples=${2:-none} final=${3:-} before="" after now d
+  local dir=$1 samples=${2:-none} final=${3:-} before="" after now d measuring=1
   local used=0
-  if [[ $samples != none && -f $dir/free.before ]]; then
+  [[ $samples != none && $samples != fast ]] || measuring=0
+  if [[ $measuring == 1 && -f $dir/free.before ]]; then
     before=$(cat "$dir/free.before")
     after=$(settled_free "$dir")
     used=$((before - after))
@@ -177,10 +184,10 @@ reset_copies() {
   if [[ -n $before ]]; then
     ((used > 0)) || used=0
     now=$(settled_free "$dir" "$((before - 2 * 1048576 - used / 100))")
-  elif [[ -z $final ]]; then
+  elif [[ -z $final && $samples != fast ]]; then
     now=$(settled_free "$dir")
   fi
-  if [[ $samples != none && -z $final ]]; then echo "$now" >"$dir/free.before"; fi
+  if [[ $measuring == 1 && -z $final ]]; then echo "$now" >"$dir/free.before"; fi
 }
 
 # --- Machine details ----------------------------------------------------------------------
@@ -331,22 +338,26 @@ shell_cmd() {
   if [[ $os == windows ]]; then printf '"%s"' "$1"; else printf '%s' "$1"; fi
 }
 
-# measure LABEL STEP DISK(0|1) JSON [MAY_FAIL]: time STEP with hyperfine, removing the copies
-# before every run. Free-space samples land in JSON.disk. A failure stops the bench, unless
-# MAY_FAIL is 1: then it returns 1.
+# measure LABEL STEP MODE JSON [MAY_FAIL]: run STEP with hyperfine, removing the copies before
+# every run. MODE time: $warmup and $runs runs back to back, for wall time. MODE disk:
+# $disk_runs runs, each on a settled disk, for disk added; the free-space samples land in
+# JSON.disk. A failure stops the bench, unless MAY_FAIL is 1: then it returns 1.
 measure() {
-  local label=$1 step=$2 disk=$3 json=$4 may_fail=${5:-0} samples=none
+  local label=$1 step=$2 mode=$3 json=$4 may_fail=${5:-0} samples=fast
+  local warmup_runs=$warmup timed_runs=$runs
   rm -f "$dir/free.before"
   export BENCH_WARNINGS="$json.warnings"
   : >"$BENCH_WARNINGS"
-  if [[ $disk == 1 ]]; then
+  if [[ $mode == disk ]]; then
     samples="$json.disk"
     : >"$samples"
+    warmup_runs=0
+    timed_runs=$disk_runs
   fi
   # Start on a quiet disk: a longer quiet spell than between runs.
   settled_free "$dir" "" $((BENCH_SETTLE * 4)) >/dev/null
   say "$repo: $label"
-  if ! hyperfine -N --warmup "$warmup" --runs "$runs" --export-json "$json" \
+  if ! hyperfine -N --warmup "$warmup_runs" --runs "$timed_runs" --export-json "$json" \
     --command-name "$label" \
     --prepare "$(shell_cmd "\"$bash_bin\" \"$self\" __reset \"$dir\" \"$samples\"")" \
     --cleanup "$(shell_cmd "\"$bash_bin\" \"$self\" __reset \"$dir\" \"$samples\" final")" \
@@ -377,22 +388,25 @@ failed_result() {
       warnings: ($warn | split("\n") | map(select(length > 0))), hyperfine: null}'
 }
 
-# result METHOD VARIANT COPIES JSON KIND: one entry of the results file.
+# result METHOD VARIANT COPIES KIND TIME_JSON DISK_JSON: one entry of the results file, with
+# wall time from the time pass and disk added from the disk pass ("" for a pass that didn't run).
 result() {
-  local disk_file="$4.disk" warn_file="$4.warnings"
-  [[ -f $disk_file ]] || disk_file=/dev/null
-  [[ -f $warn_file ]] || warn_file=/dev/null
-  jq -n --slurpfile hf "$4" --rawfile disk "$disk_file" --rawfile warn "$warn_file" --argjson keep "$runs"     --arg step "steps/$(basename "$4" .json).sh" \
-    --arg method "$1" --arg variant "$2" --argjson copies "$3" --arg kind "$5" \
+  local time_json=${5:-} disk_json=${6:-} hf=/dev/null disk=/dev/null warn
+  [[ -n $time_json ]] && hf=$time_json
+  [[ -n $disk_json && -f $disk_json.disk ]] && disk="$disk_json.disk"
+  warn=$(cat ${time_json:+"$time_json.warnings"} ${disk_json:+"$disk_json.warnings"} 2>/dev/null || true)
+  jq -n --slurpfile hf "$hf" --rawfile disk "$disk" --arg warn "$warn" \
+    --arg step "steps/$(basename "${time_json:-none}" .json).sh" \
+    --arg method "$1" --arg variant "$2" --argjson copies "$3" --arg kind "$4" \
     "$jq_stats"'
     ($disk | split("\n") | map(select(length > 0) | tonumber)) as $d
     | {measure: $kind, method: $method,
        variant: (if $variant == "" then null else $variant end), copies: $copies,
-       wall_seconds: ($hf[0] | wall_times | stats),
-       disk_added_bytes: (if ($d | length) == 0 then null
-         else ($d | .[([length - $keep, 0] | max):] | stats) end),
+       wall_seconds: (if ($hf | length) == 0 then null
+         else ($hf[0] | wall_times | stats) + {pass: "time"} end),
+       disk_added_bytes: (if ($d | length) == 0 then null else ($d | stats) + {pass: "disk"} end),
        warnings: ($warn | split("\n") | map(select(length > 0))),
-       hyperfine: ($hf[0].results[0] | .command = $step)}'
+       hyperfine: (if ($hf | length) == 0 then null else ($hf[0].results[0] | .command = $step) end)}'
 }
 
 # --- One repo -------------------------------------------------------------------------------
@@ -535,26 +549,45 @@ run_repo() {
      note: "One run: the first lane new in the repo makes _base, installs there, then makes the lane. Its disk is both."}' \
     >"$dir/out/base-result.json"
 
-  # Wall time and disk added for N copies at once.
-  local counts=("${copy_counts[@]}")
+  # Disk added and wall time for N copies at once. The disk pass goes first: the time pass
+  # doesn't wait for its deletes to settle, and they'd land in a disk run's numbers.
+  local counts=("${copy_counts[@]}") plan=() item
   [[ $copies_on == 1 ]] || counts=()
   for n in ${counts[@]+"${counts[@]}"}; do
     for v in $variants lane; do
       local method=worktree variant=$v venv=""
       if [[ $v == lane ]]; then method=lane variant=""; else venv=$(conf "$repo" "env.$v"); fi
-      step="$dir/steps/copies-$v-$n.sh"
-      write_step "$step" "$logs/copies-$v-$n.log" "$(make_copies "$method" "$n" "$venv")"
-      json="$dir/out/copies-$v-$n.json"
-      measure "$n x $method${variant:+ ($variant)}" "$step" 1 "$json"
-      frag="$dir/out/copies-$v-$n.result.json"
-      result "$method" "$variant" "$n" "$json" copies >"$frag"
-      frags+=("$frag")
+      write_step "$dir/steps/copies-$v-$n.sh" "$logs/copies-$v-$n.log" "$(make_copies "$method" "$n" "$venv")"
+      plan+=("$n|$v|$method|$variant")
     done
+  done
+  if [[ $pass != time ]]; then
+    for item in ${plan[@]+"${plan[@]}"}; do
+      IFS='|' read -r n v method variant <<<"$item"
+      measure "$n x $method${variant:+ ($variant)}, disk pass" "$dir/steps/copies-$v-$n.sh" disk \
+        "$dir/out/copies-$v-$n-disk.json"
+    done
+  fi
+  if [[ $pass != disk ]]; then
+    for item in ${plan[@]+"${plan[@]}"}; do
+      IFS='|' read -r n v method variant <<<"$item"
+      measure "$n x $method${variant:+ ($variant)}" "$dir/steps/copies-$v-$n.sh" time \
+        "$dir/out/copies-$v-$n.json"
+    done
+  fi
+  for item in ${plan[@]+"${plan[@]}"}; do
+    IFS='|' read -r n v method variant <<<"$item"
+    local tj="" dj=""
+    [[ $pass == disk ]] || tj="$dir/out/copies-$v-$n.json"
+    [[ $pass == time ]] || dj="$dir/out/copies-$v-$n-disk.json"
+    frag="$dir/out/copies-$v-$n.result.json"
+    result "$method" "$variant" "$n" copies "$tj" "$dj" >"$frag"
+    frags+=("$frag")
   done
 
   # Time to the first passing test in a fresh copy: make one copy, then run the test there.
-  # Last, because removing a copy with build output frees its space so late.
-  if [[ $first_test == 1 ]]; then
+  # Part of the time pass, and last, because a copy with build output frees its space so late.
+  if [[ $first_test == 1 && $pass != disk ]]; then
     for v in $variants lane; do
       local method=worktree variant=$v venv=""
       if [[ $v == lane ]]; then method=lane variant=""; else venv=$(conf "$repo" "env.$v"); fi
@@ -565,8 +598,8 @@ $(env_prefix "$venv")$test_cmd"
       json="$dir/out/first-test-$v.json"
       frag="$dir/out/first-test-$v.result.json"
       # A test that fails in one kind of copy is a finding, not a reason to stop.
-      if measure "first test, $method${variant:+ ($variant)}" "$step" 0 "$json" 1; then
-        result "$method" "$variant" 1 "$json" first_test >"$frag"
+      if measure "first test, $method${variant:+ ($variant)}" "$step" time "$json" 1; then
+        result "$method" "$variant" 1 first_test "$json" "" >"$frag"
       else
         failed_result "$method" "$variant" "$step" "$json" >"$frag"
       fi
@@ -615,6 +648,7 @@ main() {
 
   runs=$std_runs warmup=$std_warmup copies=$std_copies
   work="$HOME/lanes-bench" lane_arg=lane machine="" out="" first_test=1 copies_on=1 smoke=""
+  pass=both disk_runs=$std_disk_runs
   BENCH_SETTLE=5
   local wanted=()
   while [[ $# -gt 0 ]]; do
@@ -630,6 +664,8 @@ main() {
       --settle) BENCH_SETTLE=${2:?--settle needs seconds}; shift ;;
       --no-first-test) first_test=0 ;;
       --no-copies) copies_on=0 ;;
+      --pass) pass=${2:?--pass needs time, disk or both}; shift ;;
+      --disk-runs) disk_runs=${2:?--disk-runs needs a number}; shift ;;
       --smoke) smoke=1 ;;
       -h | --help) usage; exit 0 ;;
       *) die "unknown option \`$1\`" "Run bench/run.sh --help to see the options." ;;
@@ -639,6 +675,8 @@ main() {
   [[ $runs =~ ^[0-9]+$ && $runs -ge 1 ]] || die "--runs must be a whole number, 1 or more"
   [[ $warmup =~ ^[0-9]+$ ]] || die "--warmup must be a whole number"
   [[ $BENCH_SETTLE =~ ^[0-9]+$ ]] || die "--settle must be a whole number of seconds"
+  [[ $pass == time || $pass == disk || $pass == both ]] || die "--pass takes time, disk or both"
+  [[ $disk_runs =~ ^[0-9]+$ && $disk_runs -ge 1 ]] || die "--disk-runs must be a whole number, 1 or more"
   read -r -a copy_counts <<<"$copies"
   [[ ${#copy_counts[@]} -ge 1 ]] || die "--copies needs at least one number, like \"1 5 10\""
   for n in "${copy_counts[@]}"; do
@@ -704,6 +742,7 @@ main() {
   [[ $runs -ge $std_runs ]] || reason+="runs $runs < $std_runs; "
   [[ $warmup -ge $std_warmup ]] || reason+="warmup $warmup < $std_warmup; "
   [[ ${copy_counts[*]} == "$std_copies" ]] || reason+="copies \"${copy_counts[*]}\" instead of \"$std_copies\"; "
+  [[ $pass == time || $disk_runs -ge $std_disk_runs ]] || reason+="disk runs $disk_runs < $std_disk_runs; "
   [[ -z $smoke ]] || reason+="--smoke; "
   reason=${reason%; }
 
@@ -729,14 +768,18 @@ main() {
     --arg started "$started" --arg finished "$(date -u +%FT%TZ)" --arg reason "$reason" \
     --argjson runs "$runs" --argjson warmup "$warmup" --argjson copies "$copies_json" \
     --argjson first_test "$([[ $first_test == 1 ]] && echo true || echo false)" \
+    --arg pass "$pass" --argjson disk_runs "$disk_runs" --argjson std_disk_runs "$std_disk_runs" \
     --argjson std_runs "$std_runs" --argjson std_warmup "$std_warmup" \
     --argjson std_copies "$(tr ' ' '\n' <<<"$std_copies" | jq -s .)" --arg script "bench/run.sh" \
     --arg bench_commit "$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || true)" \
     '{schema: 1, benchmark: "new-copy", script: $script, bench_commit: $bench_commit,
       smoke: ($reason != ""), smoke_reason: (if $reason == "" then null else $reason end),
       started: $started, finished: $finished,
-      settings: {runs: $runs, warmup: $warmup, copies: $copies, first_test: $first_test},
-      protocol: {runs: $std_runs, warmup: $std_warmup, copies: $std_copies},
+      settings: {runs: $runs, warmup: $warmup, copies: $copies, first_test: $first_test,
+                 pass: $pass, disk_runs: $disk_runs},
+      protocol: {runs: $std_runs, warmup: $std_warmup, copies: $std_copies,
+                 disk_runs: $std_disk_runs},
+      passes: "wall_seconds come from the time pass (runs back to back, copies removed between runs); disk_added_bytes from the disk pass (each run starts and ends on a settled disk)",
       stats: "median, and p95 by linear interpolation between the closest ranks; never the best run",
       disk: "disk added is the drop in the volume'"'"'s free space (df), never du",
       machine: $machine, repos: $repos}' >"$out"

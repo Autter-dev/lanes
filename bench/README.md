@@ -27,9 +27,16 @@ Three measurements:
 
 | | What | How |
 | --- | --- | --- |
-| Wall time | making N copies, one after another | hyperfine, `--warmup 1 --runs 10`; median and p95 |
-| Disk added | what N copies take | the drop in the volume's free space: `df` on macOS and Linux, `Get-Volume` on Windows. Never `du`, which counts a cloned file at full size |
-| Time to the first passing test | making one fresh copy and running a fixed test subset in it, until it passes | hyperfine, as above |
+| Wall time | making N copies, one after another | the time pass: hyperfine, `--warmup 1 --runs 10`, runs back to back; median and p95 |
+| Disk added | what N copies take | the disk pass: 3 runs, each starting and ending on a settled disk. The drop in the volume's free space: `df` on macOS and Linux, `Get-Volume` on Windows. Never `du`, which counts a cloned file at full size |
+| Time to the first passing test | making one fresh copy and running a fixed test subset in it, until it passes | the time pass, as for wall time |
+
+The two passes are separate because reading free space honestly is slow: a filesystem gives
+deleted space back late (on a Windows Dev Drive, a minute or more later), so every disk run
+waits for the disk to settle before and after. Doing that around every timed run would make a
+full run take days. So the time pass runs back to back, removing the copies between runs and
+not waiting, and the disk pass waits, for fewer runs. The results file says which pass each
+number comes from.
 
 The first `lane new` in a repo also sets up `_base`, the clean copy that Lanes clones from, and
 runs the install there once. That one-off cost is measured separately, in one run, and
@@ -88,7 +95,7 @@ and `-Copies 1,5` work that way too.
 | `run.sh` | `run.ps1` | Default | What |
 | --- | --- | --- | --- |
 | `--repo NAME` | `-Repo NAME` | every repo for this OS except `lanes` | which repos (repeat, or a list) |
-| `--runs N` | `-Runs N` | 10 | timed runs per measurement |
+| `--runs N` | `-Runs N` | 10 | timed runs per measurement in the time pass |
 | `--warmup N` | `-Warmup N` | 1 | warmup runs, not counted |
 | `--copies "1 5 10"` | `-Copies 1,5,10` | 1, 5 and 10 | how many copies at once |
 | `--work DIR` | `-Work DIR` | `~/lanes-bench`; on Windows the first ReFS volume (a Dev Drive), else `%USERPROFILE%\lanes-bench` | where clones and copies go: the disk you're measuring |
@@ -98,10 +105,13 @@ and `-Copies 1,5` work that way too.
 | `--settle SECS` | `-Settle SECS` | 5; 15 on Windows | how long free space must hold still before it's read |
 | `--no-first-test` | `-NoFirstTest` | | skip the time to the first passing test |
 | `--no-copies` | `-NoCopies` | | skip the copies measurements: to check a repo's test subset, or measure only that |
+| `--pass both` | `-Pass both` | both | `time` (wall time and the first test), `disk` (disk added), or both |
+| `--disk-runs N` | `-DiskRuns N` | 3 | runs per copies measurement in the disk pass |
 | `--smoke` | `-Smoke` | | mark the results as a smoke run |
 
-Fewer than 10 runs, no warmup, or copies other than 1, 5 and 10 make it a smoke run, named
-`-smoke` and marked `"smoke": true`, whatever you meant.
+Fewer than 10 runs, fewer than 3 disk runs, no warmup, or copies other than 1, 5 and 10 make it
+a smoke run, named `-smoke` and marked `"smoke": true`, whatever you meant. Running one pass, or
+leaving out the copies or the first test, doesn't: what does run is measured as usual.
 
 ### What it does
 
@@ -114,15 +124,18 @@ For each repo:
    warm.
 3. Makes the first lane, timing it and the disk it takes: that's `_base`'s one-off setup. The
    lane stays until the end, so no delete is still settling while disk is measured.
-4. Times making 1, 5 and 10 copies, each way, and records the disk they took in every run.
-5. Times the first passing test in a fresh copy, for each way of making copies. It comes last
+4. The disk pass: makes 1, 5 and 10 copies, each way, 3 times each, reading the disk they took
+   once the disk has settled. It goes before the time pass, whose deletes it would otherwise
+   pick up.
+5. The time pass: times making 1, 5 and 10 copies, each way, 1 warmup and 10 runs each.
+6. Times the first passing test in a fresh copy, for each way of making copies. It comes last
    because a copy with build output in it gives its space back slowly once removed.
-6. Removes everything but the clone, and waits until the disk has the space back.
+7. Removes everything but the clone, and waits until the disk has the space back.
 
-hyperfine times a small generated script (in `<work>/<repo>/steps/`), so you can read exactly what
-was timed, or run it by hand. Before every run, its `--prepare` step removes the last run's copies;
-that's also when the free space is read, once the disk has settled, so removing copies is never
-timed. Each step's output goes to `<work>/<repo>/logs/`.
+hyperfine runs a small generated script (in `<work>/<repo>/steps/`), the same in both passes, so
+you can read exactly what was timed, or run it by hand. Before every run, its `--prepare` step
+removes the last run's copies, so removing copies is never timed; in the disk pass, that's also
+when the free space is read. Each step's output goes to `<work>/<repo>/logs/`.
 
 The bench keeps its lanes apart from yours (`LANE_STATE_DIR` and `LANE_CONFIG_DIR` point into the
 work folder), turns the install count off for its runs, and only ever deletes inside a work folder
@@ -158,7 +171,7 @@ would for an agent.
 - **Disk added needs a quiet disk.** Filesystems allocate written blocks, and free deleted ones,
   seconds later. On a Windows Dev Drive, deleting ten worktrees of this repo gave nothing back
   for 40 seconds to well over a minute, then all of it at once, so no fixed wait is safe. So the
-  bench:
+  disk pass:
   - reads free space only once it has held still, within 1 MiB, for `--settle` seconds (5, or
     15 on Windows), after a flush;
   - after removing a run's copies, waits until the free space is back where it was before they
@@ -167,10 +180,13 @@ would for an agent.
   - starts each measurement after a longer quiet spell (four settle windows).
 
   If free space doesn't come back within 15 minutes, or never holds still, the bench says so, and
-  the warning is kept with that measurement in the results file. All this waiting makes a run
-  slow, Windows most of all; don't shorten it for numbers you'll publish. Anything else writing
-  to the disk still shows up as noise of a few MiB, which matters for a small repo like this one
-  and hardly for a big one.
+  the warning is kept with that measurement in the results file. All this waiting makes the disk
+  pass slow, Windows most of all; don't shorten it for numbers you'll publish. Anything else
+  writing to the disk still shows up as noise of a few MiB, which matters for a small repo like
+  this one and hardly for a big one.
+- **The time pass doesn't wait.** Each timed run starts with no copies, but the disk may still be
+  giving back the last run's deletes in the background. That happens to both methods alike, and
+  it's what an agent asking for copy after copy gets too.
 - **Postgres and Redis run on the same machine** as the copies for Saleor and Mastodon, and the
   same for both methods. Their test databases live outside the copies, so the time to the first
   test doesn't include making a database: Saleor's warmup run migrates its test database once,
@@ -200,9 +216,10 @@ database 1 after every example: use a Redis you don't mind losing.
 - `settings` (what this run used) and `protocol` (what a publishable run uses), and `smoke`;
 - for each repo, the commit, install and test commands and tool versions, `lane_base_setup`,
   and `results`: one entry per measurement, method, variant and number of copies, with
-  `wall_seconds` and `disk_added_bytes` as `{n, median, p95, runs}`, any `warnings` from
-  reading free space, and hyperfine's own result for that measurement. A measurement with
-  warnings needs a closer look before anyone quotes its disk number. A first test that doesn't
+  `wall_seconds` (from the time pass) and `disk_added_bytes` (from the disk pass) as
+  `{n, median, p95, runs, pass}`, any `warnings` from reading free space, and hyperfine's own
+  result for the time pass. A measurement with warnings needs a closer look before anyone
+  quotes its disk number. A first test that doesn't
   pass in a fresh copy has `"failed": true`, no time, and the end of its log in `error`; the
   bench goes on with the rest, because a test that fails in one kind of copy is itself a
   finding.

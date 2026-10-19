@@ -26,7 +26,7 @@ param(
     # `lanes` (this repo, the quick target). Lists are split at commas here, because
     # `powershell -File` passes `-Repo astro,ruff` as one string.
     [string[]]$Repo = @(),
-    # Timed runs per measurement (fewer than 10 marks a smoke run).
+    # Timed runs per measurement in the time pass (fewer than 10 marks a smoke run).
     [int]$Runs = 10,
     # Warmup runs, not counted.
     [int]$Warmup = 1,
@@ -50,6 +50,12 @@ param(
     [switch]$NoFirstTest,
     # Skip the copies measurements: to check a repo's test subset, or to measure only that.
     [switch]$NoCopies,
+    # Which pass to run: `time` (wall time, runs back to back), `disk` (disk added, each run on a
+    # settled disk), or `both`.
+    [ValidateSet('time', 'disk', 'both')]
+    [string]$Pass = 'both',
+    # Runs per copies measurement in the disk pass (fewer than 3 marks a smoke run).
+    [int]$DiskRuns = 3,
     # Mark the results as a smoke run whatever the settings.
     [switch]$Smoke,
     # Internal: what hyperfine's --prepare and --cleanup run.
@@ -72,6 +78,7 @@ $PsExe = (Get-Process -Id $PID).Path
 $StdRuns = 10
 $StdWarmup = 1
 $StdCopies = @(1, 5, 10)
+$StdDiskRuns = 3
 
 function Stop-Bench([string]$Message, [string]$Hint = '') {
     [Console]::Error.WriteLine("run.ps1: $Message")
@@ -243,16 +250,18 @@ function Get-SettledFree([string]$Path, $Floor = $null, [int]$Window = -1) {
 # --- Removing copies (hyperfine's --prepare and --cleanup) ------------------------------------
 
 # Remove every copy the bench made in $Dir (hyperfine's --prepare, before every run, and
-# --cleanup). With a samples file, free.before holds the free space read before the last run made
-# its copies: record how much they took (the drop since then), remove them, and wait until the
-# free space is back there, less a little slack, so their deletes never land in the next run;
-# then, unless this is the last run, keep that as the next run's free.before. With samples
-# `none` (the first-test runs), just remove them and let the disk settle.
+# --cleanup). With a samples file (the disk pass), free.before holds the free space read before
+# the last run made its copies: record how much they took (the drop since then), remove them, and
+# wait until the free space is back there, less a little slack, so their deletes never land in
+# the next run; then, unless this is the last run, keep that as the next run's free.before. With
+# samples `none`, just remove them and let the disk settle; with `fast` (the time pass), just
+# remove them.
 function Reset-Copies([string]$Dir, [string]$SamplesFile = 'none', [switch]$IsFinal) {
     $beforeFile = Join-Path $Dir 'free.before'
     $used = [long]0
     $before = $null
-    if ($SamplesFile -ne 'none' -and (Test-Path -LiteralPath $beforeFile)) {
+    $measuring = $SamplesFile -notin @('none', 'fast')
+    if ($measuring -and (Test-Path -LiteralPath $beforeFile)) {
         $before = [long](Get-Content -LiteralPath $beforeFile)
         $after = Get-SettledFree $Dir
         $used = $before - $after
@@ -288,10 +297,10 @@ function Reset-Copies([string]$Dir, [string]$SamplesFile = 'none', [switch]$IsFi
     if ($null -ne $before) {
         if ($used -lt 0) { $used = 0 }
         $now = Get-SettledFree $Dir ($before - 2MB - [long]($used / 100))
-    } elseif (-not $IsFinal) {
+    } elseif (-not $IsFinal -and $SamplesFile -ne 'fast') {
         $now = Get-SettledFree $Dir
     }
-    if ($SamplesFile -ne 'none' -and -not $IsFinal) { Set-Content -LiteralPath $beforeFile -Value $now -Encoding ascii }
+    if ($measuring -and -not $IsFinal) { Set-Content -LiteralPath $beforeFile -Value $now -Encoding ascii }
 }
 
 if ($Step -eq 'reset') {
@@ -457,22 +466,28 @@ function Get-ResetCommand([string]$SamplesFile, [switch]$IsFinal) {
     "`"$c`""
 }
 
-# Time STEP with hyperfine, removing the copies before every run. Free-space samples land in
-# JSON.disk. Returns whether it worked; a failure stops the bench, unless MayFail.
-function Invoke-Measure([string]$Label, [string]$StepFile, [bool]$Disk, [string]$Json, [bool]$MayFail = $false) {
-    $samplesFile = 'none'
+# Run STEP with hyperfine, removing the copies before every run. Mode `time`: $Warmup and $Runs
+# runs back to back, for wall time. Mode `disk`: $DiskRuns runs, each on a settled disk, for disk
+# added; the free-space samples land in JSON.disk. Returns whether it worked; a failure stops
+# the bench, unless MayFail.
+function Invoke-Measure([string]$Label, [string]$StepFile, [string]$Mode, [string]$Json, [bool]$MayFail = $false) {
+    $samplesFile = 'fast'
+    $warmupRuns = $Warmup
+    $timedRuns = $Runs
     Remove-Item -LiteralPath (Join-Path $script:Dir 'free.before') -ErrorAction SilentlyContinue
     $env:BENCH_WARNINGS = "$Json.warnings"
     [IO.File]::WriteAllText($env:BENCH_WARNINGS, '')
-    if ($Disk) {
+    if ($Mode -eq 'disk') {
         $samplesFile = "$Json.disk"
         Set-Content -LiteralPath $samplesFile -Value $null -Encoding ascii
+        $warmupRuns = 0
+        $timedRuns = $DiskRuns
     }
     # Start on a quiet disk: a longer quiet spell than between runs.
     Get-SettledFree $script:Dir $null ($Settle * 4) | Out-Null
     Write-Step "$($script:RepoName): $Label"
     $code = Invoke-Program $script:Hyperfine @(
-        '-N', '--warmup', "$Warmup", '--runs', "$Runs", '--export-json', $Json,
+        '-N', '--warmup', "$warmupRuns", '--runs', "$timedRuns", '--export-json', $Json,
         '--command-name', $Label,
         '--prepare', (Get-ResetCommand $samplesFile),
         '--cleanup', (Get-ResetCommand $samplesFile -IsFinal),
@@ -512,32 +527,42 @@ function Get-FailedResult([string]$Method, [string]$Variant, [string]$StepFile, 
     }
 }
 
-function Get-Result([string]$Method, [string]$Variant, [int]$N, [string]$Json, [string]$Kind) {
-    $export = Read-Json $Json
-    # The step's path relative to the work folder, so no user name lands in the results.
-    $export.results[0].command = 'steps/' + [IO.Path]::GetFileNameWithoutExtension($Json) + '.cmd'
+function Get-Result([string]$Method, [string]$Variant, [int]$N, [string]$Kind, [string]$TimeJson = '', [string]$DiskJson = '') {
+    $wall = $null
+    $raw = $null
+    if ($TimeJson) {
+        $export = Read-Json $TimeJson
+        # The step's path relative to the work folder, so no user name lands in the results.
+        $export.results[0].command = 'steps/' + [IO.Path]::GetFileNameWithoutExtension($TimeJson) + '.cmd'
+        $wall = Get-Stats (Get-WallTimes $export)
+        $wall.pass = 'time'
+        $raw = $export.results[0]
+    }
     $disk = $null
-    $diskFile = "$Json.disk"
-    if (Test-Path -LiteralPath $diskFile) {
-        $d = [double[]]@(Get-Content -LiteralPath $diskFile | Where-Object { $_ -match '\S' } | ForEach-Object { [double]$_ })
+    if ($DiskJson -and (Test-Path -LiteralPath "$DiskJson.disk")) {
+        $d = [double[]]@(Get-Content -LiteralPath "$DiskJson.disk" | Where-Object { $_ -match '\S' } | ForEach-Object { [double]$_ })
         if ($d.Count -gt 0) {
-            # The first samples are the warmup runs'.
-            $keep = [math]::Min($Runs, $d.Count)
-            $disk = Get-Stats ([double[]]@($d[($d.Count - $keep)..($d.Count - 1)]))
+            $disk = Get-Stats $d
+            $disk.pass = 'disk'
         }
     }
+    # Plain strings: Get-Content's lines carry PSDrive and PSProvider, which ConvertTo-Json would
+    # follow for ever.
+    $warnings = @(foreach ($j in @($TimeJson, $DiskJson)) {
+            if ($j) {
+                Get-Content -LiteralPath "$j.warnings" -Encoding UTF8 -ErrorAction SilentlyContinue |
+                    Where-Object { $_ -match '\S' } | ForEach-Object { [string]$_ }
+            }
+        })
     [ordered]@{
         measure          = $Kind
         method           = $Method
         variant          = if ($Variant) { $Variant } else { $null }
         copies           = $N
-        wall_seconds     = Get-Stats (Get-WallTimes $export)
+        wall_seconds     = $wall
         disk_added_bytes = $disk
-        # Plain strings: Get-Content's lines carry PSDrive and PSProvider, which ConvertTo-Json would
-        # follow for ever.
-        warnings         = @(Get-Content -LiteralPath "$Json.warnings" -Encoding UTF8 -ErrorAction SilentlyContinue |
-                Where-Object { $_ -match '\S' } | ForEach-Object { [string]$_ })
-        hyperfine        = $export.results[0]
+        warnings         = $warnings
+        hyperfine        = $raw
     }
 }
 
@@ -703,28 +728,42 @@ function Invoke-Repo([string]$Name) {
         note             = 'One run: the first lane new in the repo makes _base, installs there, then makes the lane. Its disk is both.'
     }
 
-    # Wall time and disk added for N copies at once.
+    # Disk added and wall time for N copies at once. The disk pass goes first: the time pass
+    # doesn't wait for its deletes to settle, and they'd land in a disk run's numbers.
     $counts = $CopyCounts
     if ($NoCopies) { $counts = @() }
-    foreach ($n in $counts) {
-        foreach ($v in @($variants + 'lane')) {
-            $method = 'worktree'; $variant = $v; $venv = ''
-            if ($v -eq 'lane') { $method = 'lane'; $variant = '' } else { $venv = Get-Conf $Name "env.$v" }
-            $stepFile = Join-Path $steps "copies-$v-$n.cmd"
-            $body = @()
-            for ($i = 1; $i -le $n; $i++) { $body += Get-CopyLines $method "bench-$i" }
-            New-StepFile $stepFile (Join-Path $script:Logs "copies-$v-$n.log") $body $venv
-            $json = Join-Path $outDir "copies-$v-$n.json"
-            $label = "$n x $method"
-            if ($variant) { $label += " ($variant)" }
-            $null = Invoke-Measure $label $stepFile $true $json
-            $results.Add((Get-Result $method $variant $n $json 'copies'))
-        }
+    $plan = @(foreach ($n in $counts) {
+            foreach ($v in @($variants + 'lane')) {
+                $method = 'worktree'; $variant = $v; $venv = ''
+                if ($v -eq 'lane') { $method = 'lane'; $variant = '' } else { $venv = Get-Conf $Name "env.$v" }
+                $stepFile = Join-Path $steps "copies-$v-$n.cmd"
+                $body = @()
+                for ($i = 1; $i -le $n; $i++) { $body += Get-CopyLines $method "bench-$i" }
+                New-StepFile $stepFile (Join-Path $script:Logs "copies-$v-$n.log") $body $venv
+                $label = "$n x $method"
+                if ($variant) { $label += " ($variant)" }
+                [pscustomobject]@{
+                    n = $n; method = $method; variant = $variant; step = $stepFile; label = $label
+                    time = Join-Path $outDir "copies-$v-$n.json"; disk = Join-Path $outDir "copies-$v-$n-disk.json"
+                }
+            }
+        })
+    if ($Pass -ne 'time') {
+        foreach ($c in $plan) { $null = Invoke-Measure "$($c.label), disk pass" $c.step 'disk' $c.disk }
+    }
+    if ($Pass -ne 'disk') {
+        foreach ($c in $plan) { $null = Invoke-Measure $c.label $c.step 'time' $c.time }
+    }
+    foreach ($c in $plan) {
+        $t = ''; $k = ''
+        if ($Pass -ne 'disk') { $t = $c.time }
+        if ($Pass -ne 'time') { $k = $c.disk }
+        $results.Add((Get-Result $c.method $c.variant $c.n 'copies' $t $k))
     }
 
     # Time to the first passing test in a fresh copy: make one copy, then run the test there.
-    # Last, because removing a copy with build output frees its space so late.
-    if (-not $NoFirstTest) {
+    # Part of the time pass, and last, because a copy with build output frees its space so late.
+    if (-not $NoFirstTest -and $Pass -ne 'disk') {
         foreach ($v in @($variants + 'lane')) {
             $method = 'worktree'; $variant = $v; $venv = ''
             if ($v -eq 'lane') { $method = 'lane'; $variant = '' } else { $venv = Get-Conf $Name "env.$v" }
@@ -735,8 +774,8 @@ function Invoke-Repo([string]$Name) {
             $label = "first test, $method"
             if ($variant) { $label += " ($variant)" }
             # A test that fails in one kind of copy is a finding, not a reason to stop.
-            if (Invoke-Measure $label $stepFile $false $json $true) {
-                $results.Add((Get-Result $method $variant 1 $json 'first_test'))
+            if (Invoke-Measure $label $stepFile 'time' $json $true) {
+                $results.Add((Get-Result $method $variant 1 'first_test' $json))
             } else {
                 $results.Add((Get-FailedResult $method $variant $stepFile $json))
             }
@@ -773,6 +812,7 @@ function Invoke-Repo([string]$Name) {
 if ($Runs -lt 1) { Stop-Bench '-Runs must be 1 or more' }
 if ($Warmup -lt 0) { Stop-Bench '-Warmup must be 0 or more' }
 if ($Settle -lt 0) { Stop-Bench '-Settle must be 0 or more seconds' }
+if ($DiskRuns -lt 1) { Stop-Bench '-DiskRuns must be 1 or more' }
 $Repo = @($Repo | ForEach-Object { $_ -split '[,\s]+' } | Where-Object { $_ -ne '' })
 $counts = @($Copies | ForEach-Object { $_ -split '[,\s]+' } | Where-Object { $_ -ne '' })
 if ($counts.Count -eq 0 -or @($counts | Where-Object { $_ -notmatch '^[1-9][0-9]*$' }).Count -gt 0) {
@@ -844,6 +884,7 @@ $reasons = @()
 if ($Runs -lt $StdRuns) { $reasons += "runs $Runs < $StdRuns" }
 if ($Warmup -lt $StdWarmup) { $reasons += "warmup $Warmup < $StdWarmup" }
 if (($CopyCounts -join ' ') -ne ($StdCopies -join ' ')) { $reasons += "copies `"$($CopyCounts -join ' ')`" instead of `"$($StdCopies -join ' ')`"" }
+if ($Pass -ne 'time' -and $DiskRuns -lt $StdDiskRuns) { $reasons += "disk runs $DiskRuns < $StdDiskRuns" }
 if ($Smoke) { $reasons += '-Smoke' }
 $reason = $reasons -join '; '
 
@@ -874,9 +915,10 @@ $doc = [ordered]@{
     smoke_reason = if ($reason) { $reason } else { $null }
     started      = $started
     finished     = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-    settings     = [ordered]@{ runs = $Runs; warmup = $Warmup; copies = @(if (-not $NoCopies) { $CopyCounts }); first_test = (-not $NoFirstTest) }
-    protocol     = [ordered]@{ runs = $StdRuns; warmup = $StdWarmup; copies = $StdCopies }
+    settings     = [ordered]@{ runs = $Runs; warmup = $Warmup; copies = @(if (-not $NoCopies) { $CopyCounts }); first_test = (-not $NoFirstTest); pass = $Pass; disk_runs = $DiskRuns }
+    protocol     = [ordered]@{ runs = $StdRuns; warmup = $StdWarmup; copies = $StdCopies; disk_runs = $StdDiskRuns }
     stats        = 'median, and p95 by linear interpolation between the closest ranks; never the best run'
+    passes       = 'wall_seconds come from the time pass (runs back to back, copies removed between runs); disk_added_bytes from the disk pass (each run starts and ends on a settled disk)'
     disk         = "disk added is the drop in the volume's free space (Get-Volume), never a sum of file sizes"
     machine      = Get-MachineInfo $WorkDir $Machine
     repos        = $repoResults
