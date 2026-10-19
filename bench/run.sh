@@ -1,0 +1,709 @@
+#!/usr/bin/env bash
+# Benchmark 1 for Lanes: ready-to-run copies of a repo, made with `git worktree add` plus the
+# repo's install, against `lane new`. macOS and Linux; bench/run.ps1 is the Windows version.
+# What it measures and how to run it fairly: bench/README.md.
+#
+#   bench/run.sh --repo lanes --runs 2    # a quick smoke run against this repo
+#   bench/run.sh                          # the full matrix: every repo in bench/repos.ini
+#
+# Works with the bash 3.2 that macOS ships, so no associative arrays here.
+set -euo pipefail
+
+bench_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+self="$bench_dir/run.sh"
+repo_root=$(cd "$bench_dir/.." && pwd)
+repos_file="$bench_dir/repos.ini"
+
+# The protocol every published number uses. Anything else is a smoke run.
+std_runs=10
+std_warmup=1
+std_copies="1 5 10"
+
+usage() {
+  cat <<'EOF'
+Usage: bench/run.sh [options]
+
+Makes 1, 5 and 10 copies of each repo in bench/repos.ini, two ways: `git worktree add` plus the
+repo's install (with a warm package cache), and `lane new`. Measures wall time, disk added
+(the drop in the volume's free space) and the time to the first passing test in a fresh copy,
+with hyperfine. Writes bench/results/<date>-<machine>.json.
+
+Options:
+  --repo NAME       Only this repo (repeat for more). Default: every repo in bench/repos.ini
+                    that runs on this OS, except `lanes` (this repo, the quick target)
+  --runs N          Timed runs per measurement (default 10; fewer marks a smoke run)
+  --warmup N        Warmup runs, not counted (default 1)
+  --copies "LIST"   How many copies to make at once (default "1 5 10")
+  --work DIR        Where the clones and copies go: on the disk you want to measure
+                    (default ~/lanes-bench)
+  --lane PATH       The lane binary (default: `lane` on PATH)
+  --machine NAME    The machine's name in the results file (default: from the OS, CPU and
+                    filesystem; never the hostname)
+  --out FILE        Write the results here instead of bench/results/
+  --settle SECS     Read free space once it has held still this long, within 1 MiB
+                    (default 5; whole seconds)
+  --no-first-test   Skip the time to the first passing test
+  --smoke           Mark the results as a smoke run whatever the settings
+  -h, --help        Show this help
+EOF
+}
+
+die() {
+  echo "run.sh: $1" >&2
+  [[ -n ${2:-} ]] && echo "  $2" >&2
+  exit 1
+}
+
+say() { echo "==> $*" >&2; }
+
+# warn MESSAGE: to stderr, and to the measurement's warnings file, which goes in the results
+# (hyperfine hides what its --prepare step prints).
+warn() {
+  echo "Warning: $1" >&2
+  if [[ -n ${BENCH_WARNINGS:-} ]]; then echo "$1" >>"$BENCH_WARNINGS"; fi
+}
+
+# --- bench/repos.ini -------------------------------------------------------------------------
+
+# conf SECTION KEY: the value, preferring KEY.<os> (like `test.macos`) over KEY.
+conf() {
+  local v
+  v=$(ini_get "$1" "$2.$os")
+  [[ -n $v ]] || v=$(ini_get "$1" "$2")
+  printf '%s' "$v"
+}
+
+ini_get() {
+  awk -v s="$1" -v k="$2" '
+    { sub(/\r$/, "") }
+    /^[ \t]*([#;]|$)/ { next }
+    /^\[.*\][ \t]*$/ { sub(/[ \t]*$/, ""); sec = substr($0, 2, length($0) - 2); next }
+    sec == s {
+      i = index($0, "="); if (i == 0) next
+      key = substr($0, 1, i - 1); val = substr($0, i + 1)
+      gsub(/^[ \t]+|[ \t]+$/, "", key); gsub(/^[ \t]+|[ \t]+$/, "", val)
+      if (key == k) { print val; exit }
+    }' "$repos_file"
+}
+
+ini_sections() {
+  awk '{ sub(/\r$/, "") } /^\[.*\][ \t]*$/ { sub(/[ \t]*$/, ""); print substr($0, 2, length($0) - 2) }' "$repos_file"
+}
+
+# --- Free space -----------------------------------------------------------------------------
+
+# Free bytes on the volume holding $1. `df`, never `du`: `du` counts a cloned file at full size.
+free_bytes() {
+  local kb
+  kb=$(df -Pk "$1" | awk 'NR == 2 { print $4 }')
+  echo $((kb * 1024))
+}
+
+# settled_free DIR [FLOOR] [WINDOW]: flush, then wait until the free space holds still (within
+# 1 MiB for WINDOW seconds, default $BENCH_SETTLE) and, given a FLOOR, is back up to it; print
+# it. Filesystems allocate written blocks, and free deleted ones, seconds later: on a Windows Dev
+# Drive, deleting a few thousand files gave nothing back for 40 quiet seconds and then all of it
+# at once. So a quiet spell alone can't tell that a delete is done; getting back to the free
+# space from before the copies can.
+settled_free() {
+  local floor=${2:-} window=${3:-${BENCH_SETTLE:-5}} tol=1048576 anchor now
+  local start=$SECONDS since=$SECONDS cap=$((window * 4 > 120 ? window * 4 : 120))
+  [[ -z $floor ]] || cap=900
+  sync
+  anchor=$(free_bytes "$1")
+  now=$anchor
+  while :; do
+    sync
+    now=$(free_bytes "$1")
+    if ((now - anchor > tol || anchor - now > tol)); then
+      anchor=$now
+      since=$SECONDS
+    fi
+    if ((SECONDS - since >= window)) && { [[ -z $floor ]] || ((now >= floor)); }; then break; fi
+    if ((SECONDS - start >= cap)); then
+      if [[ -n $floor ]] && ((now < floor)); then
+        warn "free space on $1 stayed $(((floor - now) / 1048576)) MiB short of where it was before the copies for $((cap / 60)) minutes; something else wrote to this disk."
+      else
+        warn "free space on $1 didn't hold still for $window s in $cap s; something else is writing to this disk."
+      fi
+      break
+    fi
+    sleep 0.5
+  done
+  echo "$now"
+}
+
+# --- Removing copies (hyperfine's --prepare and --cleanup) ------------------------------------
+
+# reset_copies DIR SAMPLES [final]: remove every copy the bench made in DIR (hyperfine's
+# --prepare, before every run, and --cleanup). With a SAMPLES file, free.before holds the free
+# space read before the last run made its copies: record how much they took (the drop since
+# then), remove them, and wait until the free space is back there, less a little slack, so their
+# deletes never land in the next run; then, unless this is the last run, keep that as the next
+# run's free.before. With SAMPLES `none` (the first-test runs), just remove them and let the
+# disk settle.
+reset_copies() {
+  local dir=$1 samples=${2:-none} final=${3:-} before="" after now d
+  local used=0
+  if [[ $samples != none && -f $dir/free.before ]]; then
+    before=$(cat "$dir/free.before")
+    after=$(settled_free "$dir")
+    used=$((before - after))
+    echo "$used" >>"$samples"
+  fi
+  rm -f "$dir/free.before"
+  if [[ -d $dir/lanes ]]; then
+    for d in "$dir"/lanes/bench-*; do
+      [[ -e $d ]] || continue
+      (cd "$dir/main" && "$BENCH_LANE" rm "$(basename "$d")" >/dev/null 2>&1) || rm -rf "$d"
+    done
+  fi
+  if [[ -d $dir/wt ]]; then
+    for d in "$dir"/wt/*; do
+      [[ -e $d ]] || continue
+      git -C "$dir/main" worktree remove --force --force "$d" >/dev/null 2>&1 || rm -rf "$d"
+    done
+  fi
+  git -C "$dir/main" worktree prune
+  if [[ -z $final ]]; then
+    # The timed steps' logs start empty every run, so they don't grow from run to run. (Not
+    # after the last run: a failure's log is read then.)
+    for d in "$dir"/logs/copies-*.log "$dir"/logs/first-test-*.log; do
+      if [[ -e $d ]]; then : >"$d"; fi
+    done
+  fi
+  if [[ -n $before ]]; then
+    ((used > 0)) || used=0
+    now=$(settled_free "$dir" "$((before - 2 * 1048576 - used / 100))")
+  elif [[ -z $final ]]; then
+    now=$(settled_free "$dir")
+  fi
+  if [[ $samples != none && -z $final ]]; then echo "$now" >"$dir/free.before"; fi
+}
+
+# --- Machine details ----------------------------------------------------------------------
+
+first_line() { "$@" 2>&1 | head -n 1 || true; }
+
+machine_json() {
+  local cpu cores mem os_name kernel fs device disk_model solid mount total
+  mount=$(df -Pk "$work" | awk 'NR == 2 { print $6 }')
+  total=$(($(df -Pk "$work" | awk 'NR == 2 { print $2 }') * 1024))
+  kernel=$(uname -sr)
+  if [[ $os == macos ]]; then
+    cpu=$(sysctl -n machdep.cpu.brand_string)
+    cores=$(sysctl -n hw.ncpu)
+    mem=$(sysctl -n hw.memsize)
+    os_name="$(sw_vers -productName) $(sw_vers -productVersion) ($(sw_vers -buildVersion))"
+    local info
+    info=$(diskutil info "$mount" 2>/dev/null || true)
+    fs=$(awk -F': *' '/File System Personality/ { print $2; exit }' <<<"$info")
+    device=$(awk -F': *' '/Device Node/ { print $2; exit }' <<<"$info")
+    disk_model=$(awk -F': *' '/Device \/ Media Name/ { print $2; exit }' <<<"$info")
+    solid=$(awk -F': *' '/Solid State/ { print $2; exit }' <<<"$info")
+  else
+    cpu=$(awk -F': *' '/^model name/ { print $2; exit }' /proc/cpuinfo)
+    [[ -n $cpu ]] || cpu=$(lscpu 2>/dev/null | awk -F': *' '/^Model name/ { print $2; exit }')
+    cores=$(nproc)
+    mem=$(($(awk '/^MemTotal/ { print $2 }' /proc/meminfo) * 1024))
+    os_name=$(awk -F= '/^PRETTY_NAME=/ { gsub(/"/, "", $2); print $2 }' /etc/os-release 2>/dev/null || true)
+    [[ -n $os_name ]] || os_name=Linux
+    fs=$(findmnt -no FSTYPE -T "$work" 2>/dev/null || stat -f -c %T "$work")
+    device=$(findmnt -no SOURCE -T "$work" 2>/dev/null || true)
+    local parent=""
+    [[ -n $device ]] && parent=$(lsblk -no PKNAME "$device" 2>/dev/null | head -n 1 || true)
+    [[ -n $parent ]] || parent=$(basename "${device:-none}")
+    disk_model=$(tr -s ' ' <"/sys/block/$parent/device/model" 2>/dev/null || true)
+    solid=""
+    if [[ -r /sys/block/$parent/queue/rotational ]]; then
+      [[ $(cat "/sys/block/$parent/queue/rotational") == 0 ]] && solid=Yes || solid=No
+    fi
+  fi
+  jq -n --arg os "$os_name" --arg kernel "$kernel" --arg arch "$(uname -m)" \
+    --arg cpu "$cpu" --argjson cores "$cores" --argjson mem "$mem" \
+    --arg fs "$fs" --arg mount "$mount" --argjson total "$total" --arg device "$device" \
+    --arg model "$disk_model" --arg solid "$solid" \
+    --arg lane "$(first_line "$BENCH_LANE" --version)" \
+    --arg git "$(first_line git --version)" --arg hyperfine "$(first_line hyperfine --version)" \
+    --arg name "$machine" \
+    '{name: $name, os: $os, kernel: $kernel, arch: $arch,
+      cpu: {model: $cpu, logical_cores: $cores}, memory_bytes: $mem,
+      disk: {filesystem: $fs, mount: $mount, size_bytes: $total, device: $device,
+             model: $model, solid_state: $solid},
+      lanes_version: $lane, git_version: $git, hyperfine_version: $hyperfine}'
+}
+
+# A name for the results file from the OS, CPU and filesystem: never the hostname.
+machine_slug() {
+  local cpu fs
+  if [[ $os == macos ]]; then
+    cpu=$(sysctl -n machdep.cpu.brand_string)
+    fs=$(diskutil info "$(df -Pk "$work" | awk 'NR == 2 { print $6 }')" 2>/dev/null |
+      awk -F': *' '/Type \(Bundle\)/ { print $2; exit }')
+  else
+    cpu=$(awk -F': *' '/^model name/ { print $2; exit }' /proc/cpuinfo)
+    [[ -n $cpu ]] || cpu=$(lscpu 2>/dev/null | awk -F': *' '/^Model name/ { print $2; exit }')
+    fs=$(findmnt -no FSTYPE -T "$work" 2>/dev/null || stat -f -c %T "$work")
+  fi
+  printf '%s-%s-%s' "$os" "$cpu" "${fs:-unknown}" |
+    tr '[:upper:]' '[:lower:]' | sed -E 's/\((r|tm)\)//g; s/(cpu|processor|with radeon graphics)//g;
+      s/[^a-z0-9]+/-/g; s/^-+|-+$//g' | cut -c 1-60 | sed -E 's/-+$//'
+}
+
+# --- Statistics -----------------------------------------------------------------------------
+
+# Median, and p95 by linear interpolation between the closest ranks (numpy's default). Never
+# the best run. run.ps1 computes the same.
+# shellcheck disable=SC2016 # jq code, not shell
+jq_stats='def stats: sort as $s | length as $n |
+  if $n == 0 then null else
+  { n: $n,
+    median: (if $n % 2 == 1 then $s[($n - 1) / 2 | floor] else ($s[$n / 2 - 1] + $s[$n / 2]) / 2 end),
+    p95: ((0.95 * ($n - 1)) as $r | ($r | floor) as $lo | ($r | ceil) as $hi
+          | $s[$lo] + ($s[$hi] - $s[$lo]) * ($r - $lo)),
+    runs: . } end;
+def wall_times: .results[0] | (.times // (.measurements | map(.time_wall_clock.value)));'
+
+# --- Step scripts: exactly what hyperfine times ---------------------------------------------
+
+# env_lines "K=V K2=V2": export lines for a step script. These are a repo's defaults: a variable
+# already set in your shell wins (a database URL with your own password, say).
+env_lines() {
+  local kv
+  for kv in $1; do
+    # shellcheck disable=SC2016 # ${K-default} is for the step script to expand
+    printf 'export %s=${%s-%q}\n' "${kv%%=*}" "${kv%%=*}" "${kv#*=}"
+  done
+}
+
+# write_step FILE LOG BODY: a step script that runs BODY in the repo's main checkout.
+write_step() {
+  {
+    echo '#!/usr/bin/env bash'
+    echo "# Made by bench/run.sh. hyperfine times this script."
+    echo 'set -eu'
+    printf 'exec >>%q 2>&1\n' "$2"
+    printf 'export LANE_STATE_DIR=%q LANE_CONFIG_DIR=%q LANE_TELEMETRY=0 DO_NOT_TRACK=1\n' \
+      "$LANE_STATE_DIR" "$LANE_CONFIG_DIR"
+    env_lines "$repo_env"
+    printf 'cd %q\n' "$dir/main"
+    printf '%s\n' "$3"
+  } >"$1"
+}
+
+# make_copies METHOD N [VARIANT_ENV]: shell lines that make N copies named bench-1..N.
+make_copies() {
+  local method=$1 n=$2 i lines=""
+  for ((i = 1; i <= n; i++)); do
+    lines+=$(copy_lines "$method" "bench-$i" "${3:-}")$'\n'
+  done
+  printf '%s' "$lines"
+}
+
+# copy_lines METHOD NAME [VARIANT_ENV]: make one copy, ready to run.
+copy_lines() {
+  if [[ $1 == worktree ]]; then
+    printf 'git worktree add --detach --quiet %q %s\n' "$dir/wt/$2" "$commit"
+    printf '(cd %q && %s%s)\n' "$dir/wt/$2" "$(env_prefix "${3:-}")" "$install"
+  else
+    printf '%q new %q --json\n' "$BENCH_LANE" "$2"
+  fi
+}
+
+# env_prefix "K=V ...": a variant's settings, which always apply.
+env_prefix() {
+  local kv out=""
+  for kv in $1; do out+="export ${kv%%=*}=$(printf '%q' "${kv#*=}") && "; done
+  printf '%s' "$out"
+}
+
+copy_path() {
+  if [[ $1 == worktree ]]; then echo "$dir/wt/$2"; else echo "$dir/lanes/$2"; fi
+}
+
+# --- Measuring ------------------------------------------------------------------------------
+
+# shell_cmd CMD: CMD for hyperfine's --prepare and --cleanup, which run in sh (cmd.exe under Git
+# Bash, where a line starting with a quote loses its first and last quote: so add a pair).
+shell_cmd() {
+  if [[ $os == windows ]]; then printf '"%s"' "$1"; else printf '%s' "$1"; fi
+}
+
+# measure LABEL STEP DISK(0|1) JSON: time STEP with hyperfine, removing the copies before every
+# run. Free-space samples land in JSON.disk.
+measure() {
+  local label=$1 step=$2 disk=$3 json=$4 samples=none
+  rm -f "$dir/free.before"
+  export BENCH_WARNINGS="$json.warnings"
+  : >"$BENCH_WARNINGS"
+  if [[ $disk == 1 ]]; then
+    samples="$json.disk"
+    : >"$samples"
+  fi
+  # Start on a quiet disk: a longer quiet spell than between runs.
+  settled_free "$dir" "" $((BENCH_SETTLE * 4)) >/dev/null
+  say "$repo: $label"
+  if ! hyperfine -N --warmup "$warmup" --runs "$runs" --export-json "$json" \
+    --command-name "$label" \
+    --prepare "$(shell_cmd "\"$bash_bin\" \"$self\" __reset \"$dir\" \"$samples\"")" \
+    --cleanup "$(shell_cmd "\"$bash_bin\" \"$self\" __reset \"$dir\" \"$samples\" final")" \
+    "\"$bash_bin\" \"$step\""; then
+    reset_copies "$dir" none final || true
+    echo "The last lines of $logs/$(basename "$step" .sh).log:" >&2
+    tail -n 40 "$logs/$(basename "$step" .sh).log" >&2 || true
+    die "$repo: $label failed" "Fix the command in bench/repos.ini, or run $step by hand to see why."
+  fi
+}
+
+# result METHOD VARIANT COPIES JSON KIND: one entry of the results file.
+result() {
+  local disk_file="$4.disk" warn_file="$4.warnings"
+  [[ -f $disk_file ]] || disk_file=/dev/null
+  [[ -f $warn_file ]] || warn_file=/dev/null
+  jq -n --slurpfile hf "$4" --rawfile disk "$disk_file" --rawfile warn "$warn_file" --argjson keep "$runs"     --arg step "steps/$(basename "$4" .json).sh" \
+    --arg method "$1" --arg variant "$2" --argjson copies "$3" --arg kind "$5" \
+    "$jq_stats"'
+    ($disk | split("\n") | map(select(length > 0) | tonumber)) as $d
+    | {measure: $kind, method: $method,
+       variant: (if $variant == "" then null else $variant end), copies: $copies,
+       wall_seconds: ($hf[0] | wall_times | stats),
+       disk_added_bytes: (if ($d | length) == 0 then null
+         else ($d | .[([length - $keep, 0] | max):] | stats) end),
+       warnings: ($warn | split("\n") | map(select(length > 0))),
+       hyperfine: ($hf[0].results[0] | .command = $step)}'
+}
+
+# --- One repo -------------------------------------------------------------------------------
+
+check_services() {
+  local s port
+  for s in $1; do
+    case $s in
+      postgres) port=${PGPORT:-5432} ;;
+      redis) port=6379 ;;
+      *) die "bench/repos.ini names an unknown service \`$s\`" "Use postgres or redis." ;;
+    esac
+    if ! (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+      die "$repo needs $s on localhost:$port, and nothing answers there" \
+        "Start $s (bench/README.md says how), or leave $repo out with --repo."
+    fi
+  done
+}
+
+run_repo() {
+  unset BENCH_WARNINGS
+  repo=$1
+  dir="$work/$repo"
+  logs="$dir/logs"
+  local url tool variants v n step json frag tools_json
+  url=$(conf "$repo" url)
+  commit=$(conf "$repo" commit)
+  install=$(conf "$repo" install)
+  test_cmd=$(conf "$repo" test)
+  repo_env=$(conf "$repo" env)
+  variants=$(conf "$repo" variants)
+  [[ -n $variants ]] || variants=stock
+  [[ -n $url && -n $commit && -n $install && -n $test_cmd ]] ||
+    die "bench/repos.ini: [$repo] needs url, commit, install and test"
+  [[ $url == . ]] && url=$repo_root
+
+  for tool in $(conf "$repo" requires); do
+    command -v "$tool" >/dev/null || die "$repo needs \`$tool\`, which isn't on PATH" \
+      "Install it (bench/README.md lists what each repo needs), or leave $repo out with --repo."
+  done
+  check_services "$(conf "$repo" services)"
+
+  mkdir -p "$dir" "$logs" "$dir/steps" "$dir/out"
+  rm -f "$logs"/*.log "$dir"/out/*
+
+  # The clone: shallow, at the pinned commit, kept between runs.
+  if [[ ! -d $dir/main/.git ]]; then
+    say "$repo: cloning $url at ${commit:0:12}"
+    rm -rf "$dir/main"
+    git init --quiet "$dir/main"
+    git -C "$dir/main" remote add origin "$url"
+  fi
+  if [[ $(git -C "$dir/main" rev-parse -q --verify HEAD 2>/dev/null || true) != "$commit" ]]; then
+    git -C "$dir/main" fetch --quiet --depth 1 origin "$commit"
+    git -C "$dir/main" checkout --quiet --detach --force "$commit"
+  fi
+  # Lanes follows the pinned commit, with the same install as the worktrees. Kept out of
+  # `git status`.
+  {
+    echo "# Written by bench/run.sh."
+    echo "version = 1"
+    echo "[lanes]"
+    echo 'dir = "../lanes"'
+    echo "base = \"$commit\""
+    echo "[setup]"
+    printf 'install = ["%s"]\n' "$(sed 's/\\/\\\\/g; s/"/\\"/g' <<<"$install")"
+  } >"$dir/main/lane.toml"
+  # Versions as the repo sees them (corepack and rustup pick theirs from files in it).
+  tools_json='{}'
+  for tool in $(conf "$repo" requires); do
+    tools_json=$(jq --arg t "$tool" --arg v "$(cd "$dir/main" && first_line "$tool" --version)" \
+      '. + {($t): $v}' <<<"$tools_json")
+  done
+  grep -qx lane.toml "$dir/main/.git/info/exclude" 2>/dev/null ||
+    echo lane.toml >>"$dir/main/.git/info/exclude"
+
+  # A clean start: no copies, no `_base`, so the first `lane new` pays for `_base` again. A
+  # finished run leaves none; a stopped one may, and their deletes need time to finish.
+  rm -f "$dir/free.before"
+  if [[ -n $(find "$dir/lanes" "$dir/wt" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1) ]]; then
+    say "$repo: removing what a stopped run left, then letting the disk settle"
+    reset_copies "$dir" none final
+    rm -rf "$dir/lanes" "$dir/wt"
+    git -C "$dir/main" worktree prune
+    settled_free "$dir" "" $((BENCH_SETTLE * 10)) >/dev/null
+  fi
+  mkdir -p "$dir/wt"
+
+  # Warm package caches: what a careful user has today. Every variant's install runs once.
+  for v in $variants; do
+    say "$repo: warming the package cache ($v): $install"
+    (
+      eval "$(env_lines "$repo_env")"
+      cd "$dir/main"
+      eval "$(env_prefix "$(conf "$repo" "env.$v")")$install"
+    ) >"$logs/warm-$v.log" 2>&1 || {
+      tail -n 40 "$logs/warm-$v.log" >&2
+      die "$repo: \`$install\` failed in a plain checkout" "Fix the install in bench/repos.ini."
+    }
+  done
+
+  local frags=()
+
+  # `_base`: the one-off cost of the first `lane new` in a repo (it installs there once). That
+  # first lane stays until the end, so no delete is pending while disk is measured.
+  step="$dir/steps/base.sh"
+  write_step "$step" "$logs/base.log" "$(printf '%q new first --json >%q' "$BENCH_LANE" "$dir/out/base-made.json")"
+  local before after
+  before=$(settled_free "$dir" "" $((BENCH_SETTLE * 4)))
+  say "$repo: the first lane new, which sets up _base"
+  hyperfine -N --runs 1 --export-json "$dir/out/base.json" --command-name "first lane new" \
+    "\"$bash_bin\" \"$step\"" || {
+    tail -n 40 "$logs/base.log" >&2
+    die "$repo: the first \`lane new\` failed" "Run $step by hand to see why."
+  }
+  after=$(settled_free "$dir")
+  jq -n --slurpfile hf "$dir/out/base.json" --slurpfile made "$dir/out/base-made.json" \
+    --argjson disk "$((before - after))" "$jq_stats"'
+    {seconds: ($hf[0] | wall_times | .[0]), disk_added_bytes: $disk,
+     clone_method: $made[0].clone.method, filesystem: $made[0].clone.filesystem,
+     installed: $made[0].base.installed,
+     note: "One run: the first lane new in the repo makes _base, installs there, then makes the lane. Its disk is both."}' \
+    >"$dir/out/base-result.json"
+
+  # Wall time and disk added for N copies at once.
+  for n in "${copy_counts[@]}"; do
+    for v in $variants lane; do
+      local method=worktree variant=$v venv=""
+      if [[ $v == lane ]]; then method=lane variant=""; else venv=$(conf "$repo" "env.$v"); fi
+      step="$dir/steps/copies-$v-$n.sh"
+      write_step "$step" "$logs/copies-$v-$n.log" "$(make_copies "$method" "$n" "$venv")"
+      json="$dir/out/copies-$v-$n.json"
+      measure "$n x $method${variant:+ ($variant)}" "$step" 1 "$json"
+      frag="$dir/out/copies-$v-$n.result.json"
+      result "$method" "$variant" "$n" "$json" copies >"$frag"
+      frags+=("$frag")
+    done
+  done
+
+  # Time to the first passing test in a fresh copy: make one copy, then run the test there.
+  # Last, because removing a copy with build output frees its space so late.
+  if [[ $first_test == 1 ]]; then
+    for v in $variants lane; do
+      local method=worktree variant=$v venv=""
+      if [[ $v == lane ]]; then method=lane variant=""; else venv=$(conf "$repo" "env.$v"); fi
+      step="$dir/steps/first-test-$v.sh"
+      write_step "$step" "$logs/first-test-$v.log" "$(copy_lines "$method" bench-t "$venv")
+cd $(printf '%q' "$(copy_path "$method" bench-t)")
+$(env_prefix "$venv")$test_cmd"
+      json="$dir/out/first-test-$v.json"
+      measure "first test, $method${variant:+ ($variant)}" "$step" 0 "$json"
+      frag="$dir/out/first-test-$v.result.json"
+      result "$method" "$variant" 1 "$json" first_test >"$frag"
+      frags+=("$frag")
+    done
+  fi
+
+  local variants_json='[]'
+  for v in $variants; do
+    variants_json=$(jq --arg v "$v" --arg env "$(conf "$repo" "env.$v")" \
+      '. + [{name: $v, env: ($env | split(" ") | map(select(length > 0)))}]' <<<"$variants_json")
+  done
+  jq -n --arg name "$repo" --arg url "$(conf "$repo" url)" --arg commit "$commit" \
+    --arg install "$install" --arg test "$test_cmd" --arg env "$repo_env" \
+    --argjson variants "$variants_json" --argjson tools "$tools_json" \
+    --slurpfile base "$dir/out/base-result.json" --slurpfile r <(cat "${frags[@]}") \
+    '{name: $name, url: $url, commit: $commit, install: $install, test: $test,
+      env: ($env | split(" ") | map(select(length > 0))),
+      variants: $variants, tools: $tools,
+      lane_base_setup: $base[0], results: $r}' >"$dir/out/repo.json"
+  repo_results+=("$dir/out/repo.json")
+
+  # Done: remove the first lane and `_base` too, and wait until the disk has its space back, so
+  # the next repo starts on a quiet disk.
+  rm -rf "$dir/lanes" "$dir/wt"
+  git -C "$dir/main" worktree prune
+  settled_free "$dir" "$((before - 2 * 1048576))" >/dev/null
+}
+
+# --- Main -----------------------------------------------------------------------------------
+
+main() {
+  case $(uname -s) in
+    Darwin) os=macos ;;
+    Linux) os=linux ;;
+    *)
+      # Git Bash on Windows works well enough to test this script; real runs use run.ps1.
+      [[ -n ${LANES_BENCH_ALLOW_ANY_OS:-} ]] || die "run.sh is for macOS and Linux" \
+        "On Windows, run bench/run.ps1 in PowerShell."
+      os=windows
+      ;;
+  esac
+
+  runs=$std_runs warmup=$std_warmup copies=$std_copies
+  work="$HOME/lanes-bench" lane_arg=lane machine="" out="" first_test=1 smoke=""
+  BENCH_SETTLE=5
+  local wanted=()
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --repo) wanted+=("${2:?--repo needs a name}"); shift ;;
+      --runs) runs=${2:?--runs needs a number}; shift ;;
+      --warmup) warmup=${2:?--warmup needs a number}; shift ;;
+      --copies) copies=${2:?--copies needs a list, like \"1 5 10\"}; shift ;;
+      --work) work=${2:?--work needs a folder}; shift ;;
+      --lane) lane_arg=${2:?--lane needs a path}; shift ;;
+      --machine) machine=${2:?--machine needs a name}; shift ;;
+      --out) out=${2:?--out needs a file}; shift ;;
+      --settle) BENCH_SETTLE=${2:?--settle needs seconds}; shift ;;
+      --no-first-test) first_test=0 ;;
+      --smoke) smoke=1 ;;
+      -h | --help) usage; exit 0 ;;
+      *) die "unknown option \`$1\`" "Run bench/run.sh --help to see the options." ;;
+    esac
+    shift
+  done
+  [[ $runs =~ ^[0-9]+$ && $runs -ge 1 ]] || die "--runs must be a whole number, 1 or more"
+  [[ $warmup =~ ^[0-9]+$ ]] || die "--warmup must be a whole number"
+  [[ $BENCH_SETTLE =~ ^[0-9]+$ ]] || die "--settle must be a whole number of seconds"
+  read -r -a copy_counts <<<"$copies"
+  [[ ${#copy_counts[@]} -ge 1 ]] || die "--copies needs at least one number, like \"1 5 10\""
+  for n in "${copy_counts[@]}"; do
+    [[ $n =~ ^[0-9]+$ && $n -ge 1 ]] || die "--copies takes whole numbers, like \"1 5 10\""
+  done
+  export BENCH_SETTLE
+
+  local tool
+  for tool in hyperfine jq git; do
+    command -v "$tool" >/dev/null || die "\`$tool\` isn't on PATH" \
+      "Install it: brew install $tool (macOS), or your distribution's package (Linux)."
+  done
+  BENCH_LANE=$(command -v "$lane_arg" || true)
+  [[ -n $BENCH_LANE ]] || die "can't find the lane binary \`$lane_arg\`" \
+    "Install Lanes, or pass --lane with the path to a lane binary (cargo build --release puts one in target/release)."
+  export BENCH_LANE
+
+  mkdir -p "$work"
+  work=$(cd "$work" && pwd)
+  [[ $work != *[\"\$\`\\]* ]] || die "the work folder's path can't contain \", \$, \` or \\" "Pick another with --work."
+  # The bash running this script runs the steps too, by a path hyperfine can start.
+  bash_bin=$BASH
+  if [[ $os == windows ]]; then bash_bin=$(cygpath -m "$BASH"); fi
+  # The bench only ever deletes inside a work folder it made.
+  if [[ ! -f $work/.lanes-bench ]]; then
+    [[ -z $(ls -A "$work") ]] || die "$work isn't empty and wasn't made by the bench" \
+      "Pick an empty or new folder with --work."
+    echo "Made by bench/run.sh; everything here can be deleted." >"$work/.lanes-bench"
+  fi
+
+  # Lanes keeps the bench's lanes apart from yours, and sends nothing.
+  export LANE_STATE_DIR="$work/.lane-state" LANE_CONFIG_DIR="$work/.lane-config"
+  export LANE_TELEMETRY=0 DO_NOT_TRACK=1
+  rm -rf "$LANE_STATE_DIR"
+  mkdir -p "$LANE_STATE_DIR" "$LANE_CONFIG_DIR"
+  if [[ -n ${CARGO_TARGET_DIR:-} ]]; then
+    echo "Note: unsetting CARGO_TARGET_DIR, so each copy builds in its own target folder." >&2
+    unset CARGO_TARGET_DIR
+  fi
+  if [[ $os == macos ]] && tmutil listlocalsnapshots / 2>/dev/null | grep -q com.apple; then
+    echo "Warning: Time Machine has local snapshots, which keep deleted copies' blocks and skew" >&2
+    echo "  disk added. bench/README.md says how to turn them off." >&2
+  fi
+
+  local all=() r
+  while IFS= read -r r; do all+=("$r"); done < <(ini_sections)
+  local selected=()
+  if [[ ${#wanted[@]} -eq 0 ]]; then
+    for r in "${all[@]}"; do
+      [[ $r == lanes ]] && continue
+      [[ " $(conf "$r" platforms) " == *" $os "* ]] && selected+=("$r")
+    done
+  else
+    for r in "${wanted[@]}"; do
+      [[ " ${all[*]} " == *" $r "* ]] || die "bench/repos.ini has no repo \`$r\`" "Pick one of: ${all[*]}."
+      [[ " $(conf "$r" platforms) " == *" $os "* ]] ||
+        die "$r doesn't run on $os in this benchmark" "bench/repos.ini lists where it runs."
+      selected+=("$r")
+    done
+  fi
+
+  local reason=""
+  [[ $runs -ge $std_runs ]] || reason+="runs $runs < $std_runs; "
+  [[ $warmup -ge $std_warmup ]] || reason+="warmup $warmup < $std_warmup; "
+  [[ ${copy_counts[*]} == "$std_copies" ]] || reason+="copies \"${copy_counts[*]}\" instead of \"$std_copies\"; "
+  [[ -z $smoke ]] || reason+="--smoke; "
+  reason=${reason%; }
+
+  [[ -n $machine ]] || machine=$(machine_slug)
+  if [[ -z $out ]]; then
+    out="$bench_dir/results/$(date -u +%F)-$machine${reason:+-smoke}.json"
+    local i=2 stem=${out%.json}
+    while [[ -e $out ]]; do out="$stem-$i.json"; i=$((i + 1)); done
+  fi
+
+  say "Measuring in $work, ${#selected[@]} repo(s): ${selected[*]}"
+  [[ -z $reason ]] || say "A smoke run ($reason): never publish these numbers."
+  local started
+  started=$(date -u +%FT%TZ)
+  repo_results=()
+  for r in "${selected[@]}"; do run_repo "$r"; done
+
+  mkdir -p "$(dirname "$out")"
+  local copies_json
+  copies_json=$(printf '%s\n' "${copy_counts[@]}" | jq -s .)
+  jq -n --argjson machine "$(machine_json)" --slurpfile repos <(cat "${repo_results[@]}") \
+    --arg started "$started" --arg finished "$(date -u +%FT%TZ)" --arg reason "$reason" \
+    --argjson runs "$runs" --argjson warmup "$warmup" --argjson copies "$copies_json" \
+    --argjson std_runs "$std_runs" --argjson std_warmup "$std_warmup" \
+    --argjson std_copies "$(tr ' ' '\n' <<<"$std_copies" | jq -s .)" --arg script "bench/run.sh" \
+    --arg bench_commit "$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || true)" \
+    '{schema: 1, benchmark: "new-copy", script: $script, bench_commit: $bench_commit,
+      smoke: ($reason != ""), smoke_reason: (if $reason == "" then null else $reason end),
+      started: $started, finished: $finished,
+      settings: {runs: $runs, warmup: $warmup, copies: $copies},
+      protocol: {runs: $std_runs, warmup: $std_warmup, copies: $std_copies},
+      stats: "median, and p95 by linear interpolation between the closest ranks; never the best run",
+      disk: "disk added is the drop in the volume'"'"'s free space (df), never du",
+      machine: $machine, repos: $repos}' >"$out"
+
+  say "Results: $out"
+  jq -r '.repos[] | .name as $r | .results[]
+    | [$r, .measure, .method + (if .variant then " (" + .variant + ")" else "" end), (.copies | tostring),
+       (.wall_seconds.median * 100 | round / 100 | tostring) + " s",
+       (.wall_seconds.p95 * 100 | round / 100 | tostring) + " s",
+       (if .disk_added_bytes then (.disk_added_bytes.median / 1048576 | round | tostring) + " MiB" else "-" end)]
+    | @tsv' "$out" |
+    { printf 'repo\tmeasure\tmethod\tcopies\tmedian\tp95\tdisk (median)\n'; cat; } |
+    if command -v column >/dev/null; then column -t -s $'\t'; else cat; fi >&2
+  [[ -z $reason ]] || say "A smoke run: never publish these numbers."
+}
+
+if [[ ${1:-} == __reset ]]; then
+  shift
+  reset_copies "$@"
+  exit 0
+fi
+main "$@"
