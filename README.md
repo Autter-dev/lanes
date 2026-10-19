@@ -32,7 +32,7 @@
 
 <br>
 
-Every agent gets its own instant copy of your project, with dependencies ready and its own ports, URL and database. You keep your Git repo, your GitHub and your agents. Nothing to migrate.
+Every agent gets its own ready-to-run copy of your project, with dependencies installed and its own ports, URL and database. You keep your Git repo, your GitHub and your agents. Nothing to migrate.
 
 > [!NOTE]
 > Lanes is early and in active development. We're building it in public: star or watch this repo for releases, and follow along at [@sagnik_ghosh_11](https://x.com/sagnik_ghosh_11).
@@ -64,8 +64,8 @@ Lanes gives each agent a **lane** instead.
 
 ## 03 / Features
 
-**Instant lanes**<br>
-A ready-to-run copy of your project for each agent, dependencies included, using almost no extra disk space. A lane is a normal folder, so your editor, compiler and test runner all just work.
+**Ready-to-run lanes**<br>
+A copy of your project for each agent, dependencies included. On a disk that can clone files (APFS on a Mac, Btrfs or XFS on Linux, a Windows Dev Drive), a lane is cloned, so it shares your files' data instead of copying it. A lane is a normal folder, so your editor, compiler and test runner all just work.
 
 **Every lane is a live app**<br>
 Its own ports and URL, like `fix-auth.localhost`. Its own `.env`, its own database copy (Postgres, SQLite) and its own Docker Compose project. Open five versions of your app side by side.
@@ -161,7 +161,7 @@ The gateway arrives in December. Over time, it turns Lanes and Autter into one l
 
 | Feature | When |
 | --- | --- |
-| Instant lanes, `lane init`, ports and env per lane | ● Now |
+| Lanes, `lane init`, ports and env per lane | ● Now |
 | Terminal app | ● Now |
 | Claude Code, Codex, Cursor, Gemini CLI and GitHub Copilot put their work in lanes on their own | ● Now |
 | The MCP server (`lane mcp`), so agents read the repo and make lanes through tools | ● Now |

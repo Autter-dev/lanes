@@ -75,7 +75,7 @@ const EXPLAINED: [Explained; 4] = [
     },
     Explained {
         title: "A lane per agent",
-        text: "Each agent gets an instant, ready-to-run copy with its own URL, ports and database. When an agent makes a Git worktree, it becomes a lane on its own.",
+        text: "Each agent gets a ready-to-run copy with its own URL, ports and database. When an agent makes a Git worktree, it becomes a lane on its own.",
         cmd: "lane new fix-auth",
     },
     Explained {
@@ -725,7 +725,7 @@ impl Onboarding {
         lines.push(Line::from(otter_lane));
         lines.push(Line::default());
         lines.extend(self.para(
-            "Lanes gives each coding agent an instant copy of your project, with its own ports, URL and database, so they never get in each other's way. When one gets it right, its work becomes one clean pull request.",
+            "Lanes gives each coding agent its own copy of your project, with its own ports, URL and database, so they never get in each other's way. When one gets it right, its work becomes one clean pull request.",
             width,
             0,
         ));
@@ -1145,7 +1145,7 @@ fn fit(s: &str, n: usize) -> String {
 fn label_for(id: &str) -> &'static str {
     match id {
         "os" => "System",
-        "copies" => "Instant lanes",
+        "copies" => "Cloned lanes",
         "git" => "Git",
         "repo" => "This folder",
         "stack" => "Your stack",

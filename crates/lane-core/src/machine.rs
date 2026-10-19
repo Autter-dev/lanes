@@ -1,4 +1,4 @@
-//! Read-only checks of this machine and folder: OS, whether instant copies work here, Git, the repo,
+//! Read-only checks of this machine and folder: OS, whether files can be cloned here, Git, the repo,
 //! the stack and the agents on `PATH`. Used by the onboarding, `lane setup --json` and later
 //! `lane doctor` and `lane init`. Nothing here writes a file or touches the network.
 
@@ -202,7 +202,7 @@ fn os_check() -> Check {
     }
 }
 
-// ---------- instant copies ----------
+// ---------- cloned or copied lanes ----------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CopySupport {
@@ -215,13 +215,10 @@ pub enum CopySupport {
 /// What Lanes can do on a filesystem, with the reason in words.
 pub fn classify_filesystem(name: &str) -> (CopySupport, &'static str) {
     match name.to_ascii_lowercase().as_str() {
-        "apfs" => (CopySupport::Instant, "APFS clones files instantly"),
-        "btrfs" => (CopySupport::Instant, "Btrfs clones files instantly"),
-        "xfs" => (CopySupport::Instant, "XFS clones files instantly"),
-        "refs" => (
-            CopySupport::Instant,
-            "ReFS (Dev Drive) clones files instantly",
-        ),
+        "apfs" => (CopySupport::Instant, "APFS can clone files"),
+        "btrfs" => (CopySupport::Instant, "Btrfs can clone files"),
+        "xfs" => (CopySupport::Instant, "XFS can clone files"),
+        "refs" => (CopySupport::Instant, "ReFS (Dev Drive) can clone files"),
         "ntfs" => (
             CopySupport::Fallback,
             "NTFS can't clone files, so lanes are copied",
@@ -251,9 +248,13 @@ pub fn classify_filesystem(name: &str) -> (CopySupport, &'static str) {
 
 fn copies_hint(name: &str) -> &'static str {
     match name.to_ascii_lowercase().as_str() {
-        "ntfs" => "Lanes still works. For instant lanes, keep the repo on a Windows 11 Dev Drive.",
+        "ntfs" => {
+            "Lanes still works, by copying. On a Windows 11 Dev Drive, lanes are cloned instead."
+        }
         "9p" | "drvfs" => "Keep the repo inside the WSL filesystem (under ~), not on /mnt/c.",
-        "ext4" | "ext3" | "ext2" => "Lanes still works. A Btrfs or XFS disk makes lanes instant.",
+        "ext4" | "ext3" | "ext2" => {
+            "Lanes still works, by copying. On a Btrfs or XFS disk, lanes are cloned instead."
+        }
         _ => "Lanes still works, using plain copies.",
     }
 }
@@ -307,7 +308,7 @@ pub fn copies_fix(
                 let dest = format!("{drive}src\\{name}");
                 Fix::new("Move this repo to your Dev Drive")
                     .step(format!(
-                        "You already have a Dev Drive at {drive}, where lanes are instant."
+                        "You already have a Dev Drive at {drive}, where lanes are cloned instead of copied."
                     ))
                     .step(match place {
                         Some(p) if p.origin.is_some() => {
@@ -336,8 +337,8 @@ pub fn copies_fix(
                             .to_string()
                     }
                 };
-                Fix::new("Make lanes instant with a Dev Drive")
-                    .step("Optional: Lanes already works here. A Dev Drive makes new lanes instant and nearly free on disk. It needs Windows 11 22H2 or later.")
+                Fix::new("Clone lanes on a Dev Drive")
+                    .step("Optional: Lanes already works here. On a Dev Drive, new lanes are cloned instead of copied, so they share your files' data. It needs Windows 11 22H2 or later.")
                     .step("Open Settings › System › Storage › Disks & volumes.")
                     .step(room)
                     .step(format!(
@@ -363,7 +364,7 @@ pub fn copies_fix(
             Some(mount) => {
                 let dest = format!("{}/src/{name}", mount.trim_end_matches('/'));
                 Fix::new(format!("Keep repos on {mount}"))
-                    .step(format!("{mount} can clone files, so lanes there are instant."))
+                    .step(format!("{mount} can clone files, so lanes there are cloned instead of copied."))
                     .step(match place {
                         Some(_) => "Put the repo there. The copy here stays as it is:",
                         None => "Clone your repos there.",
@@ -371,9 +372,9 @@ pub fn copies_fix(
                     .command(place.map(|p| move_command(p, &dest, false)))
                     .step(format!("Then `cd {dest}` and run `lane` from there."))
             }
-            None => Fix::new("Instant lanes on Linux")
+            None => Fix::new("Cloned lanes on Linux")
                 .step("Optional: Lanes works here with plain copies.")
-                .step("Lanes is instant on a Btrfs or XFS disk. If you add one, keep your repos there and check again."),
+                .step("On a Btrfs or XFS disk, lanes are cloned instead of copied. If you add one, keep your repos there and check again."),
         }),
         _ => None,
     }
@@ -385,7 +386,7 @@ fn copies_check(dir: &Path) -> Check {
             let (support, why) = classify_filesystem(&name);
             match support {
                 CopySupport::Instant => {
-                    Check::new("copies", "Instant lanes", Status::Ok, why.to_string())
+                    Check::new("copies", "Cloned lanes", Status::Ok, why.to_string())
                 }
                 CopySupport::Fallback => {
                     let fix = copies_fix(
@@ -394,7 +395,7 @@ fn copies_check(dir: &Path) -> Check {
                         &instant_volumes(),
                         free_bytes(dir),
                     );
-                    Check::new("copies", "Instant lanes", Status::Warn, why.to_string())
+                    Check::new("copies", "Cloned lanes", Status::Warn, why.to_string())
                         .hint(copies_hint(&name))
                         .fix(fix)
                 }
@@ -402,7 +403,7 @@ fn copies_check(dir: &Path) -> Check {
         }
         None => Check::new(
             "copies",
-            "Instant lanes",
+            "Cloned lanes",
             Status::Info,
             "couldn't tell which filesystem this folder is on",
         )
@@ -420,7 +421,7 @@ pub fn free_bytes(dir: &Path) -> Option<u64> {
     platform::free_bytes(dir)
 }
 
-/// Volumes on this machine where lanes are instant: Dev Drives (`D:\`) on Windows, Btrfs and XFS
+/// Volumes on this machine where lanes are cloned: Dev Drives (`D:\`) on Windows, Btrfs and XFS
 /// mount points on Linux.
 pub fn instant_volumes() -> Vec<String> {
     platform::instant_volumes()
@@ -1029,7 +1030,7 @@ mod tests {
     #[test]
     fn ntfs_fix_without_a_dev_drive_opens_settings() {
         let fix = copies_fix("ntfs", None, &[], Some(225_000_000_000)).unwrap();
-        assert_eq!(fix.title, "Make lanes instant with a Dev Drive");
+        assert_eq!(fix.title, "Clone lanes on a Dev Drive");
         assert_eq!(fix.open.unwrap().uri, "ms-settings:disksandvolumes");
         assert!(fix.steps.iter().any(|s| s.contains("225 GB free")));
         let tight = copies_fix("ntfs", None, &[], Some(30_000_000_000)).unwrap();

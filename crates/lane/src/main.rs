@@ -83,7 +83,7 @@ Options:
 ";
 
 const NEW_HELP: &str = "\
-lane new: make a lane, an instant, ready-to-run copy of this repo
+lane new: make a lane, a ready-to-run copy of this repo
 
 Usage: lane new <name> [--agent NAME] [--print-path] [--json] [--request-id ID]
 
@@ -525,7 +525,7 @@ fn copied_note(made: &Made) {
             None => "This disk",
         };
         eprintln!(
-            "lane new: {fs} can't clone files, so {} files were copied ({:.1} s, {} MB). On a disk that clones, lanes are instant and nearly free; `lane setup` shows how.",
+            "lane new: {fs} can't clone files, so {} files were copied ({:.1} s, {} MB). On a disk that can clone files, lanes are cloned instead; `lane setup` shows how.",
             thousands(made.clone.copied),
             made.clone.millis as f64 / 1000.0,
             made.clone.bytes / 1_000_000,
@@ -1929,7 +1929,7 @@ fn agents_json(done: Option<&[(agents::user::Agent, Vec<agents::Change>)]>) -> s
 }
 
 /// What's left after the welcome: set up the repo you're in (or go to one), trust Codex's hooks
-/// once, and get instant lanes where this disk copies them.
+/// once, and get lanes cloned where this disk copies them.
 fn after_welcome(done: &[(agents::user::Agent, Vec<agents::Change>)], on: bool) -> Vec<next::Step> {
     let mut steps = Vec::new();
     let codex_now = done
@@ -1954,9 +1954,8 @@ fn after_welcome(done: &[(agents::user::Agent, Vec<agents::Change>)], on: bool) 
     if machine::run_check("copies", &here()).status == machine::Status::Warn {
         steps.push(next::Step {
             run: "lane doctor".into(),
-            why:
-                "this disk copies lanes instead of cloning them; it shows how to get instant lanes"
-                    .into(),
+            why: "this disk copies lanes instead of cloning them; it shows how to get them cloned"
+                .into(),
         });
     }
     steps

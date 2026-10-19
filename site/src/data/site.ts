@@ -8,7 +8,7 @@ export const site = {
   tagline: 'Lighter agents',
   url: 'https://lanes.autter.dev',
   description:
-    'Lanes gives every coding agent its own instant, ready-to-run copy of your repo, with its own ports, URL and database. Free and open source.',
+    'Lanes gives every coding agent its own ready-to-run copy of your repo, with its own ports, URL and database. Free and open source.',
   repo: 'https://github.com/autter-dev/lanes',
   readme: 'https://github.com/autter-dev/lanes#readme',
   changelog: 'https://github.com/autter-dev/lanes/blob/main/CHANGELOG.md',
@@ -161,7 +161,7 @@ export const race = [
 ];
 
 export const helps = [
-  { today: 'A full copy of your repo for every agent', lanes: 'An instant lane that uses almost no extra disk space' },
+  { today: 'A full copy of your repo for every agent', lanes: 'A lane cloned from your repo, dependencies included, on disks that can clone' },
   { today: 'A fresh npm install (or cargo build, or pip install) for every copy', lanes: 'Dependencies ready in every lane, from the start' },
   { today: 'Five dev servers fighting over port 3000', lanes: 'Its own ports and URL, like fix-auth.localhost' },
   { today: "Agents breaking each other's database with their migrations", lanes: 'Its own database copy (Postgres, SQLite) and Docker Compose project' },
@@ -178,7 +178,7 @@ export const extras = [
 // How it works: four chapters of one scroll-driven diagram (src/components/HowItWorks.astro).
 export const steps = [
   { title: 'Your repo', text: 'Keep your Git repo, your GitHub and your agents as they are. Nothing to migrate.', cmd: 'lane init' },
-  { title: 'A lane per agent', text: 'Each agent gets an instant, ready-to-run lane with its own URL, ports and database. Any Git worktree an agent makes becomes a lane on its own.', cmd: 'lane new fix-auth' },
+  { title: 'A lane per agent', text: 'Each agent gets a ready-to-run lane with its own URL, ports and database. Any Git worktree an agent makes becomes a lane on its own.', cmd: 'lane new fix-auth' },
   { title: 'A warning, not a merge conflict', text: 'The moment two agents open the same function, you see it on both lanes. They can keep going, or you can step in.', cmd: 'lane list' },
   { title: 'One clean PR', text: 'Keep the best lane and turn it into one pull request, with who (and which agent) wrote what. The rest stay out of your branch.', cmd: 'lane promote fix-auth' },
 ];
@@ -273,8 +273,8 @@ export const platforms = [
     title: 'Your laptop',
     note: 'macOS, Linux and Windows at launch',
     items: [
-      { name: 'macOS', text: 'instant copies on APFS' },
-      { name: 'Linux', text: 'instant on Btrfs and XFS; ext4 copies, with a warning and the time it took' },
+      { name: 'macOS', text: 'lanes cloned on APFS' },
+      { name: 'Linux', text: 'cloned on Btrfs and XFS; ext4 copies, with a warning and the time it took' },
       { name: 'Windows', text: 'fastest on a Windows 11 Dev Drive; regular NTFS drives work too' },
       { name: 'WSL2', text: 'uses the Linux build' },
     ],
@@ -303,7 +303,7 @@ export const platforms = [
 
 // Public status, mirroring the README's Status table.
 export const status = [
-  { when: 'Building now', items: ['Instant lanes, lane init, ports and env per lane', 'The terminal app', 'Claude Code integration and the MCP server'] },
+  { when: 'Building now', items: ['Lanes, lane init, ports and env per lane', 'The terminal app', 'Claude Code integration and the MCP server'] },
   { when: 'Next', items: ['Cursor, Codex, Gemini CLI, Copilot and other agents', 'Databases and Docker Compose per lane, *.localhost URLs', 'Undo, conflict warnings, lane race and lane promote', 'Guardrails: approval codes for protected files', 'Windows: Dev Drive and NTFS', 'Cloud agent setup lines, the GitHub Action', 'Sign-in to Autter (lane login)'] },
   { when: 'December', items: ['The Lanes gateway on Autter', 'Autter reviews on lanes'] },
   { when: 'After the gateway', items: ['Lanes your team can open', 'Agents with their own access', 'Merging after checks'] },

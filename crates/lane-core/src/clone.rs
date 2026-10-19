@@ -2,7 +2,8 @@
 //!
 //! Every file is a copy-on-write clone where the filesystem supports one (APFS `clonefile`,
 //! Btrfs and XFS `FICLONE`, ReFS block cloning on a Windows Dev Drive): the copy shares disk
-//! blocks with the original until one side writes, so it's near-instant and nearly free on disk.
+//! blocks with the original until one side writes, so its data costs almost nothing. Each file still
+//! costs the disk its own record, which on ReFS is several KB, so a tree of many small files saves less.
 //! Elsewhere (NTFS, ext4 and the rest) the same walk does a plain parallel copy: slower, but
 //! correct everywhere.
 //!
@@ -24,7 +25,7 @@ use std::time::{Duration, Instant, SystemTime};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Method {
-    /// Copy-on-write clones: instant, sharing disk blocks.
+    /// Copy-on-write clones, sharing disk blocks.
     Clone,
     /// Plain copies: every byte written again.
     Copy,

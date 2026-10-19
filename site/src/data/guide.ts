@@ -122,9 +122,9 @@ export const steps: Step[] = [
     text: 'Run `lane` on its own. The first time, it checks Git, your disk and your agents, and puts the agents it finds in lanes: Claude Code, Codex, Cursor, Gemini CLI and GitHub Copilot get Lanes\' hooks and a `lanes` skill in their own user settings. From then on, every repo gets lanes, with nothing more to set up. Nothing is sent while you look around.',
     blocks: [
       { kind: 'cmd', cmd: 'lane' },
-      { kind: 'note', text: 'Every Mac disk is APFS, so a lane is a copy-on-write clone: instant, and it takes almost no extra space.', only: ['macos'] },
-      { kind: 'note', text: 'On Btrfs or XFS, a lane is an instant copy-on-write clone. On ext4 it\'s a plain copy, which works but takes longer and uses more space; `lane setup` says which one you have.', only: ['linux'] },
-      { kind: 'note', text: 'On a Dev Drive, a lane is an instant copy-on-write clone. On a regular NTFS drive it\'s a plain copy, which works but takes longer and uses more space. Keep your repos on a Dev Drive if you have one; `lane setup` shows how to make one, and the `git clone` command to move a repo there.', only: win },
+      { kind: 'note', text: "Every Mac disk is APFS, so a lane is a copy-on-write clone: it shares your files' data instead of copying it.", only: ['macos'] },
+      { kind: 'note', text: 'On Btrfs or XFS, a lane is a copy-on-write clone. On ext4 it\'s a plain copy, which works but takes longer and uses more space; `lane setup` says which one you have.', only: ['linux'] },
+      { kind: 'note', text: 'On a Dev Drive, a lane is a copy-on-write clone, though every file still costs the drive a few KB, so folders of many small files, like node_modules, save less. On a regular NTFS drive it\'s a plain copy, which works but takes longer and uses more space. Keep your repos on a Dev Drive if you have one; `lane setup` shows how to make one, and the `git clone` command to move a repo there.', only: win },
       { kind: 'cmd', cmd: 'lane setup --yes', label: 'Or without the welcome, for a script or a new machine' },
       ...perSystem(setupOut),
       { kind: 'note', text: 'Set up Lanes before 0.0.5? Run `lane setup` once more; the home screen says when an agent isn\'t in lanes yet. Changed your mind? `lane setup --yes --agents off` takes back exactly what was added, and nothing else in those files changes.' },
