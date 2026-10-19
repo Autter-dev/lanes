@@ -360,8 +360,18 @@ impl Store {
         let conn = Connection::open(path).map_err(db_err)?;
         conn.busy_timeout(std::time::Duration::from_secs(10))
             .map_err(db_err)?;
-        conn.pragma_update(None, "journal_mode", "WAL")
+        // Switching to WAL takes a lock SQLite doesn't wait for, so several processes opening a
+        // brand-new store at once (agents asking for lanes on a new machine) could be told
+        // "database is locked". The mode is kept in the file: only the first open switches it,
+        // under Lanes' own write lock.
+        let mode: String = conn
+            .pragma_query_value(None, "journal_mode", |r| r.get(0))
             .map_err(db_err)?;
+        if !mode.eq_ignore_ascii_case("wal") {
+            let _lock = WriteLock::acquire(&path.with_extension("lock"))?;
+            conn.pragma_update(None, "journal_mode", "WAL")
+                .map_err(db_err)?;
+        }
         conn.pragma_update(None, "synchronous", "NORMAL")
             .map_err(db_err)?;
         conn.pragma_update(None, "foreign_keys", "ON")
@@ -1229,6 +1239,41 @@ mod tests {
             .write(None, |tx| tx.set_outcome("ln_nope", None))
             .unwrap_err();
         assert_eq!(e.kind, ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn a_brand_new_store_opened_by_many_at_once_never_says_locked() {
+        // Five agents asking for lanes at once on a new machine, with no daemon: every one opens
+        // the store before it exists.
+        for round in 0..25 {
+            let db = temp_db(&format!("fresh-{round}"));
+            let threads: Vec<_> = (0..8)
+                .map(|t| {
+                    let db = db.clone();
+                    std::thread::spawn(move || -> Result<()> {
+                        let mut store = Store::open_at(&db)?;
+                        let name = format!("t{t}");
+                        store.write(None, |tx| {
+                            let ports = tx.allocate_ports(4100, 10)?;
+                            tx.insert_lane(new_lane(
+                                Path::new("/work/acme"),
+                                &name,
+                                Path::new("/l"),
+                                ports,
+                            ))
+                        })?;
+                        Ok(())
+                    })
+                })
+                .collect();
+            for t in threads {
+                if let Err(e) = t.join().unwrap() {
+                    panic!("round {round}: {e}");
+                }
+            }
+            assert_eq!(Store::open_at(&db).unwrap().lanes(None).unwrap().len(), 8);
+            let _ = fs::remove_dir_all(db.parent().unwrap());
+        }
     }
 
     #[test]

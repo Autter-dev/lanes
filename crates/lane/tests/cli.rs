@@ -398,6 +398,36 @@ fn new_list_and_rm_work_end_to_end() {
 }
 
 #[test]
+fn five_lanes_at_once_on_a_new_machine_all_get_made() {
+    // Five agents asking for lanes at once, before Lanes has any state and with no daemon: each
+    // `lane new` opens a store that doesn't exist yet.
+    let _quiet = timing();
+    for round in 0..3 {
+        let dir = config_dir(&format!("five-at-once-{round}"));
+        let repo = repo_with_commit(&format!("five-at-once-{round}"));
+        let made: Vec<Output> = std::thread::scope(|s| {
+            let runs: Vec<_> = (1..=5)
+                .map(|n| {
+                    let (dir, repo) = (&dir, &repo);
+                    s.spawn(move || lane_in(dir, repo, &["new", &format!("gate-{n}"), "--json"]))
+                })
+                .collect();
+            runs.into_iter().map(|r| r.join().unwrap()).collect()
+        });
+        for out in &made {
+            assert_eq!(
+                out.status.code(),
+                Some(0),
+                "round {round}: {}",
+                String::from_utf8_lossy(&out.stdout)
+            );
+        }
+        let listed = json(&lane_in(&dir, &repo, &["list", "--json"]));
+        assert_eq!(listed["lanes"].as_array().unwrap().len(), 5, "{listed}");
+    }
+}
+
+#[test]
 fn savings_count_lanes_after_they_are_removed() {
     let dir = config_dir("savings");
     let repo = repo_with_commit("savings");

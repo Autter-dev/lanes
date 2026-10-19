@@ -10,6 +10,7 @@ Lanes uses [semantic versioning](https://semver.org), and 0.0.x versions are pre
 
 ### 2026-10-19
 
+- `10:26` **Fixed**: several `lane new` at once on a machine where Lanes had no state yet (agents asking for lanes the first time, with `laned` not running) could fail with "database is locked". The first one to open the new state store now sets it up while the others wait.
 - `09:46` **Added**: release candidates, like 0.1.0-rc.1, so a version can be tried on every channel before it ships.
   - A tag like `v0.1.0-rc.1` makes a GitHub pre-release titled "Lanes 0.1.0-rc.1 (release candidate)". GitHub never makes a pre-release the latest release, so the install scripts, Homebrew and Scoop stay on the last release, and the candidate's release notes give the commands that install it. 0.0.x releases are still titled "(preview)"; from 0.1.0 on, none are.
   - npm gets a release candidate under the dist-tag `next`, so `npm install -g @autter/lanes@next` installs it and `npm install -g @autter/lanes` stays on the latest release.
