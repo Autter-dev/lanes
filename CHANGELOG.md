@@ -8,7 +8,7 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-19
 
-- `10:12` **Added**: the P1 gate, `bench/gate.ps1` (Windows) and `bench/gate.sh` (macOS and Linux). Each starts five `claude -w gate-N` sessions at once on a repo you name, each editing a different file. It checks that the five lanes are ready with port blocks that don't overlap, that each edit stayed in its own lane and the main checkout is untouched, that Git has no worktree outside the lanes folder, that `git worktree add` is turned down, and that `lane savings` counts the lanes before and after they're removed through Claude Code's WorktreeRemove hook. `--no-agents` makes the lanes with `lane new` instead, to test the gate without Claude Code. `bench/GATE.md` says how to run it and what each check means.
+- `10:12` **Added**: the P1 gate, `bench/gate.ps1` (Windows) and `bench/gate.sh` (macOS and Linux). Each starts five `claude -w gate-N` sessions at once on a repo you name, each editing a different file. It checks that the five lanes are ready with port blocks that don't overlap, that each edit stayed in its own lane and the main checkout is untouched, that Git has no worktree outside the lanes folder, that `git worktree add` is turned down, and that `lane savings` counts the lanes before and after they're removed through Claude Code's WorktreeRemove hook. `--no-agents` makes the lanes with `lane new` instead, to test the gate without Claude Code. `bench/GATE.md` says how to run it and what each check means (`8f62acd`).
 - `09:18` **Changed**: the website offers 0.0.9, and the guide says to run `lane setup --yes` once on Windows after updating from 0.0.8, so Copilot's hooks are written again (`7282628`).
 
 ## 0.0.9 (2026-10-18)
