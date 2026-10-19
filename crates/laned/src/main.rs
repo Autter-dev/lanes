@@ -3,27 +3,37 @@
 //!
 //! It's the one writer: `lane new`, `rm` and `adopt` (and the hooks and terminal app that make
 //! and remove lanes) send their changes here when it's running, and it makes them one at a time
-//! per repo, sending install output back as it happens. It also serves status, the lanes, and
-//! live snapshots for the terminal app, built once per repo however many apps watch, and sent
-//! only when something changed. It keeps nothing of its own. Everything it knows is in Lanes'
-//! state, so killing it loses nothing. See `lane_core::daemon` for the messages.
+//! per repo, sending install output back as it happens.
+//!
+//! Each lane it knows has an actor: a thread with a mailbox that owns the lane's folder, ports,
+//! environment and the processes `lane exec` runs in it, and does one thing at a time. Writes to
+//! one lane (`rm`, ready) go through its actor, which stops the lane's processes before `rm`
+//! removes the folder. `new` and `adopt` start one, so does a lane's first message, and `rm`
+//! ends it.
+//!
+//! It also serves status, the lanes, and live snapshots for the terminal app, built once per
+//! repo however many apps watch, and sent only when something changed. It keeps nothing of its
+//! own. Everything it knows is in Lanes' state (what runs in each lane included), so killing it
+//! loses nothing. See `lane_core::daemon` for the messages.
 
 use interprocess::local_socket::prelude::*;
 use interprocess::local_socket::{ListenerOptions, Stream};
 use interprocess::local_socket::{RecvHalf, SendHalf};
-use lane_core::daemon::{self, Endpoint, PROTOCOL, Reply, Request, Status};
+use lane_core::daemon::{self, Endpoint, LaneView, PROTOCOL, Reply, Request, Status};
 use lane_core::engine::{self, Context, Sink};
+use lane_core::error::{Error, ErrorKind};
+use lane_core::running::{Running, Runs};
 use lane_core::snapshot::{self, Snapshot, Source};
-use lane_core::state::Store;
-use lane_core::writes::{self, Write};
-use lane_core::{VERSION, exit, log};
+use lane_core::state::{Lane, Store};
+use lane_core::writes::{self, Done, Write};
+use lane_core::{VERSION, exit, lane_env, log, process};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SendError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -73,12 +83,31 @@ struct Daemon {
     feeds: Mutex<HashMap<Option<PathBuf>, Arc<Feed>>>,
     /// One write at a time per repo: Git and the lanes folder see a single writer.
     writers: Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>,
+    /// Each lane's actor's mailbox, by lane id.
+    actors: Mutex<HashMap<String, Sender<Msg>>>,
 }
 
 /// One repo's snapshots, refreshed by one thread for every app watching it.
 struct Feed {
     last: Mutex<Option<Snapshot>>,
     watchers: Mutex<Vec<(u64, Sender<Snapshot>)>>,
+}
+
+/// What a lane's actor is asked to do.
+enum Msg {
+    /// A write to the lane (`rm`, ready), answered on `reply`.
+    Write {
+        write: Write,
+        env: Vec<(String, String)>,
+        send: Arc<Mutex<SendHalf>>,
+        reply: Sender<Reply>,
+    },
+    /// `lane exec` started a process in the lane.
+    Started(Running),
+    /// That process ended.
+    Exited(u32),
+    /// What the actor holds.
+    Show(Sender<LaneView>),
 }
 
 static NEXT_WATCHER: AtomicU64 = AtomicU64::new(1);
@@ -115,6 +144,7 @@ fn serve() -> Result<(), String> {
         last_seen: Mutex::new(Instant::now()),
         feeds: Mutex::new(HashMap::new()),
         writers: Mutex::new(HashMap::new()),
+        actors: Mutex::new(HashMap::new()),
     });
     let idle = Duration::from_secs(
         std::env::var("LANED_IDLE_SECS")
@@ -154,6 +184,9 @@ fn serve_one(conn: Stream, daemon: &Arc<Daemon>) {
     // Shared, so install output can be sent from the threads that read it.
     let send = Arc::new(Mutex::new(send));
     let mut reader = BufReader::new(recv);
+    // Processes this client started in lanes. Any it leaves without saying they ended are
+    // forgotten: their records are free then, so nothing may signal those process ids any more.
+    let mut started: Vec<(String, u32)> = Vec::new();
     loop {
         let mut line = String::new();
         match reader.read_line(&mut line) {
@@ -186,6 +219,7 @@ fn serve_one(conn: Stream, daemon: &Arc<Daemon>) {
                 clients: daemon.clients.load(Ordering::SeqCst),
                 watching: daemon.watching.load(Ordering::SeqCst),
                 writes: daemon.writes.load(Ordering::SeqCst),
+                lanes: daemon.actors.lock().unwrap().len(),
             }),
             Request::Lanes { repo } => match Store::open_existing() {
                 Ok(Some(store)) => match store.lanes(repo.as_deref()) {
@@ -204,7 +238,34 @@ fn serve_one(conn: Stream, daemon: &Arc<Daemon>) {
                 watch(daemon, repo, &mut *send.lock().unwrap(), reader);
                 break;
             }
-            Request::Write { write, env } => make(daemon, &write, env, &send),
+            Request::Write { write, env } => write_to(daemon, write, env, &send),
+            Request::Started { lane, process } => {
+                let pid = process.pid;
+                match tell(daemon, &lane, Msg::Started(process), || find(&lane)) {
+                    Ok(()) => {
+                        started.push((lane, pid));
+                        Reply::Ok
+                    }
+                    Err(message) => Reply::Error { message },
+                }
+            }
+            Request::Exited { lane, pid } => {
+                started.retain(|(l, p)| !(*l == lane && *p == pid));
+                tell_if_there(daemon, &lane, Msg::Exited(pid));
+                Reply::Ok
+            }
+            Request::Lane { id } => {
+                let (tx, rx) = mpsc::channel();
+                match tell(daemon, &id, Msg::Show(tx), || find(&id)) {
+                    Ok(()) => match rx.recv() {
+                        Ok(view) => Reply::Lane(Box::new(view)),
+                        Err(_) => Reply::Error {
+                            message: format!("no lane with id `{id}`"),
+                        },
+                    },
+                    Err(message) => Reply::Error { message },
+                }
+            }
             Request::Shutdown => {
                 let _ = daemon::write_line(&mut *send.lock().unwrap(), &Reply::Bye);
                 log::info("laned", "stopped on request").write();
@@ -215,8 +276,240 @@ fn serve_one(conn: Stream, daemon: &Arc<Daemon>) {
             break;
         }
     }
+    for (lane, pid) in started {
+        tell_if_there(daemon, &lane, Msg::Exited(pid));
+    }
     daemon.clients.fetch_sub(1, Ordering::SeqCst);
     touch(daemon);
+}
+
+/// A write for a client. One to a lane the state knows (`rm`, ready) goes through that lane's
+/// actor; a lane that's new (`new`, `adopt`) gets an actor.
+fn write_to(
+    daemon: &Arc<Daemon>,
+    write: Write,
+    env: Vec<(String, String)>,
+    send: &Arc<Mutex<SendHalf>>,
+) -> Reply {
+    let Some(lane) = lane_of(&write) else {
+        let reply = make(daemon, &write, env, send);
+        if let Reply::Done(done) = &reply {
+            let made = match &**done {
+                Done::Made(made) => Some(&made.lane),
+                Done::Adopted { lane } => Some(lane),
+                Done::Removed(_) | Done::Ready(_) => None,
+            };
+            if let Some(lane) = made {
+                let mut actors = daemon.actors.lock().unwrap();
+                if !actors.contains_key(&lane.id) {
+                    actors.insert(lane.id.clone(), start_actor(daemon, lane.clone()));
+                }
+            }
+        }
+        return reply;
+    };
+    let (tx, rx) = mpsc::channel();
+    let id = lane.id.clone();
+    let msg = Msg::Write {
+        write,
+        env,
+        send: send.clone(),
+        reply: tx,
+    };
+    // The lane is in hand, so this can't fail.
+    let _ = tell(daemon, &id, msg, || Ok(lane));
+    rx.recv().unwrap_or_else(|_| {
+        Reply::Failed(
+            Error::new(
+                ErrorKind::Failure,
+                "laned's actor for this lane stopped before it answered",
+            )
+            .hint("Run `lane list` to see where it got to, then try again. With `--request-id`, repeating it is safe."),
+        )
+    })
+}
+
+/// The lane a write changes, when the state knows it: the lane of `rm` and of ready.
+fn lane_of(write: &Write) -> Option<Lane> {
+    let store = Store::open_existing().ok()??;
+    match write {
+        Write::Remove { repo, name, .. } => store.lane(repo, name).ok()?,
+        Write::Ready { path, .. } => store.lane_at(path).ok()?,
+        Write::New { .. } | Write::Adopt { .. } => None,
+    }
+}
+
+/// The lane with id `id`, from the state.
+fn find(id: &str) -> Result<Lane, String> {
+    let missing = || format!("no lane with id `{id}`; run `lane list` to see the lanes");
+    let store = Store::open_existing()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(missing)?;
+    store
+        .lanes(None)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|l| l.id == id)
+        .ok_or_else(missing)
+}
+
+/// Send `msg` to the actor of the lane with id `id`. A lane without one (or whose actor died)
+/// gets a new one, for the lane `lane` finds.
+fn tell(
+    daemon: &Arc<Daemon>,
+    id: &str,
+    msg: Msg,
+    lane: impl FnOnce() -> Result<Lane, String>,
+) -> Result<(), String> {
+    let mut actors = daemon.actors.lock().unwrap();
+    // An actor leaves only after taking itself out of this map, under this lock, so a mailbox
+    // found here is open unless its actor panicked.
+    let msg = match actors.get(id) {
+        Some(mailbox) => match mailbox.send(msg) {
+            Ok(()) => return Ok(()),
+            Err(SendError(msg)) => msg,
+        },
+        None => msg,
+    };
+    let mailbox = start_actor(daemon, lane()?);
+    let _ = mailbox.send(msg);
+    actors.insert(id.to_string(), mailbox);
+    Ok(())
+}
+
+/// Send `msg` to the lane's actor, if it has one.
+fn tell_if_there(daemon: &Daemon, id: &str, msg: Msg) {
+    if let Some(mailbox) = daemon.actors.lock().unwrap().get(id) {
+        let _ = mailbox.send(msg);
+    }
+}
+
+fn start_actor(daemon: &Arc<Daemon>, lane: Lane) -> Sender<Msg> {
+    let (tx, rx) = mpsc::channel();
+    let daemon = daemon.clone();
+    std::thread::spawn(move || Actor::new(lane).run(&daemon, rx));
+    tx
+}
+
+/// A lane's actor: the lane's folder and ports, the environment its commands get, and the
+/// processes running in it. It does one thing at a time.
+struct Actor {
+    lane: Lane,
+    env: Vec<(String, String)>,
+    /// What a `lane exec` that's still connected said it started: safe to signal.
+    processes: Vec<Running>,
+    /// The records `lane exec` keeps, which also cover commands started while laned wasn't
+    /// running.
+    runs: Option<Runs>,
+    /// The lane has been removed: the actor answers what's left in its mailbox, then ends.
+    gone: bool,
+}
+
+impl Actor {
+    fn new(lane: Lane) -> Actor {
+        let env = lane_env::vars(&lane)
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect();
+        Actor {
+            lane,
+            env,
+            processes: Vec::new(),
+            runs: Runs::current().ok(),
+            gone: false,
+        }
+    }
+
+    fn run(mut self, daemon: &Arc<Daemon>, mailbox: Receiver<Msg>) {
+        while let Ok(msg) = mailbox.recv() {
+            self.handle(daemon, msg);
+            if self.gone {
+                // It left the map, under its lock, before answering the `rm`: nothing is sent
+                // here after that, and whatever was sent before is answered now.
+                while let Ok(msg) = mailbox.try_recv() {
+                    self.handle(daemon, msg);
+                }
+                return;
+            }
+        }
+    }
+
+    /// Do one thing.
+    fn handle(&mut self, daemon: &Arc<Daemon>, msg: Msg) {
+        match msg {
+            Msg::Started(process) => {
+                self.processes.retain(|p| p.pid != process.pid);
+                self.processes.push(process);
+            }
+            Msg::Exited(pid) => self.processes.retain(|p| p.pid != pid),
+            Msg::Show(reply) => {
+                let _ = reply.send(self.view());
+            }
+            Msg::Write {
+                write,
+                env,
+                send,
+                reply,
+            } => {
+                // The lane's processes stop before its folder goes.
+                let stopped = match write {
+                    Write::Remove { .. } => self.stop(),
+                    _ => Vec::new(),
+                };
+                let mut answer = make(daemon, &write, env, &send);
+                if let Reply::Done(done) = &mut answer
+                    && let Done::Removed(r) = &mut **done
+                {
+                    for p in stopped {
+                        if !r.stopped.iter().any(|q| q.pid == p.pid) {
+                            r.stopped.push(p);
+                        }
+                    }
+                    if !self.gone {
+                        // Out of the map before answering, so whoever asks next finds no actor.
+                        self.gone = true;
+                        daemon.actors.lock().unwrap().remove(&self.lane.id);
+                    }
+                }
+                let _ = reply.send(answer);
+            }
+        }
+    }
+
+    /// What runs in the lane: what `lane exec` said, and what its records say.
+    fn running(&self) -> Vec<Running> {
+        let mut all = self.processes.clone();
+        for p in self.runs.iter().flat_map(|r| r.list(&self.lane.id)) {
+            if !all.iter().any(|q| q.pid == p.pid) {
+                all.push(p);
+            }
+        }
+        all
+    }
+
+    fn view(&self) -> LaneView {
+        LaneView {
+            lane: self.lane.clone(),
+            env: self.env.clone(),
+            processes: self.running(),
+        }
+    }
+
+    /// Stop everything running in the lane: asked first, forced after a short wait. Returns
+    /// what was running.
+    fn stop(&mut self) -> Vec<Running> {
+        let all = self.running();
+        let told: Vec<u32> = self.processes.drain(..).map(|p| p.pid).collect();
+        match &self.runs {
+            Some(runs) => {
+                runs.stop(&self.lane.id, &told);
+            }
+            None => {
+                process::system().stop(&told, process::GRACE);
+            }
+        }
+        all
+    }
 }
 
 /// Make a write for a client: one at a time per repo, with the client's environment for installs,

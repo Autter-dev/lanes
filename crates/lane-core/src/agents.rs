@@ -366,7 +366,7 @@ pub fn remove_claude_hooks(settings: &mut Value) -> bool {
 /// Write Lanes' hooks into the repo's `.claude/settings.local.json`, and keep that file out of
 /// Git if nothing ignores it yet.
 pub fn setup_claude(repo: &Repo) -> Result<Change> {
-    let path = repo.root.join(CLAUDE_SETTINGS);
+    let path = in_repo(&repo.root, CLAUDE_SETTINGS);
     let mut settings = match fs::read_to_string(&path) {
         Ok(text) if text.trim().is_empty() => json!({}),
         Ok(text) => serde_json::from_str(&text).map_err(|e| {
@@ -798,7 +798,7 @@ pub(crate) fn find_on_path(file: &str) -> Option<PathBuf> {
 }
 
 /// A path in the repo from a `/`-separated one, spelled the system's way.
-fn in_repo(root: &Path, rel: &str) -> PathBuf {
+pub(crate) fn in_repo(root: &Path, rel: &str) -> PathBuf {
     rel.split('/')
         .filter(|c| !c.is_empty())
         .fold(root.to_path_buf(), |p, c| p.join(c))

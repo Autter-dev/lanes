@@ -13,6 +13,7 @@ use crate::VERSION;
 use crate::engine::Output;
 use crate::env::Env;
 use crate::error::Error;
+use crate::running::Running;
 use crate::snapshot::Snapshot;
 use crate::state::Lane;
 use crate::writes::{Done, Write as LaneWrite};
@@ -26,7 +27,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 /// The message format. Bump it when a message changes shape.
-pub const PROTOCOL: u32 = 2;
+pub const PROTOCOL: u32 = 3;
 
 /// What a client asks.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -59,6 +60,21 @@ pub enum Request {
         write: LaneWrite,
         env: Vec<(String, String)>,
     },
+    /// `lane exec` started `process` in the lane with id `lane`. The lane's actor knows of it
+    /// until `exited`, or until this connection closes.
+    Started {
+        lane: String,
+        process: Running,
+    },
+    /// That process ended.
+    Exited {
+        lane: String,
+        pid: u32,
+    },
+    /// What the actor for the lane with this id holds.
+    Lane {
+        id: String,
+    },
 }
 
 /// What the daemon answers.
@@ -89,6 +105,19 @@ pub enum Reply {
     Done(Box<Done>),
     /// A write failed, with the engine's own error.
     Failed(Error),
+    /// Noted.
+    Ok,
+    /// A lane as its actor holds it.
+    Lane(Box<LaneView>),
+}
+
+/// A lane as its actor in `laned` holds it: the lane (its folder and ports), the environment
+/// its commands get, and what `lane exec` runs in it now.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LaneView {
+    pub lane: Lane,
+    pub env: Vec<(String, String)>,
+    pub processes: Vec<Running>,
 }
 
 /// Why a write through the daemon didn't finish.
@@ -114,6 +143,10 @@ pub struct Status {
     /// Changes to the lanes it has made since it started.
     #[serde(default)]
     pub writes: usize,
+    /// Lanes with an actor now: each one it has made, changed or run something in since it
+    /// started, and not removed.
+    #[serde(default)]
+    pub lanes: usize,
 }
 
 /// Where a daemon for one state folder listens, and the lock that keeps it to one.
@@ -339,6 +372,39 @@ impl Client {
         }
     }
 
+    /// Tell the lane's actor that `process` runs in the lane with id `lane` now.
+    pub fn started(&mut self, lane: &str, process: &Running) -> io::Result<()> {
+        self.noted(&Request::Started {
+            lane: lane.into(),
+            process: process.clone(),
+        })
+    }
+
+    /// Tell the lane's actor that the process `pid` in the lane with id `lane` ended.
+    pub fn exited(&mut self, lane: &str, pid: u32) -> io::Result<()> {
+        self.noted(&Request::Exited {
+            lane: lane.into(),
+            pid,
+        })
+    }
+
+    fn noted(&mut self, request: &Request) -> io::Result<()> {
+        match self.request(request)? {
+            Reply::Ok => Ok(()),
+            Reply::Error { message } => Err(io::Error::other(message)),
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    /// The lane with id `id` as its actor holds it.
+    pub fn lane(&mut self, id: &str) -> io::Result<LaneView> {
+        match self.request(&Request::Lane { id: id.into() })? {
+            Reply::Lane(view) => Ok(*view),
+            Reply::Error { message } => Err(io::Error::new(io::ErrorKind::NotFound, message)),
+            other => Err(unexpected(&other)),
+        }
+    }
+
     /// Follow a repo's snapshots: one now, then one each time something changes. The iterator
     /// ends when the daemon goes away.
     pub fn watch(mut self, repo: Option<PathBuf>) -> io::Result<impl Iterator<Item = Snapshot>> {
@@ -377,6 +443,11 @@ pub fn laned_path() -> Option<PathBuf> {
                 .find(|p| p.is_file())
         })
     })
+}
+
+/// A connection to `laned` if it's running and is this Lanes version's. Never starts it.
+pub fn connect_if_running(at: &Endpoint) -> Option<Client> {
+    Client::connect(at).ok().filter(|c| c.version == VERSION)
 }
 
 /// Whether this process may start `laned` by itself. Never in CI, never from an agent's session
@@ -494,6 +565,7 @@ mod tests {
             clients: 1,
             watching: 0,
             writes: 0,
+            lanes: 0,
         });
         let text = serde_json::to_string(&status).unwrap();
         assert!(

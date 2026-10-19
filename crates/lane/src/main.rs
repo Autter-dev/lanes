@@ -23,6 +23,7 @@ use lane_core::error::ErrorKind;
 use lane_core::error::{Error, Result};
 use lane_core::machine::{self, Check};
 use lane_core::project::Project;
+use lane_core::running::Runs;
 use lane_core::state::{Lane, Status, Store};
 use lane_core::telemetry;
 use lane_core::writes::{self, Via};
@@ -103,11 +104,12 @@ lane rm: remove a lane
 
 Usage: lane rm <name> [--keep-files] [--json] [--request-id ID]
 
-Removes the lane's folder (changes and all) and its worktree record, and frees its ports.
+Stops what `lane exec` runs in the lane (asked first, forced after a few seconds), removes the
+lane's folder (changes and all) and its worktree record, and frees its ports.
 
 Options:
   --keep-files     Forget the lane but leave its folder where it is
-  --json           Print the lane that was removed
+  --json           Print the lane that was removed, and what was stopped
   --request-id ID  Make a retry safe
   -h, --help       Show this help
 ";
@@ -142,6 +144,9 @@ LANE_PORTS and LANE_PATH set, so two lanes can run the same dev server at once. 
 and %PORT% in the arguments are filled in too (likewise the other names), with no shell needed.
 Quote them, so your own shell leaves them for Lanes. Without <name>, the lane you're in. Exits
 with the command's own exit code.
+
+It runs in the foreground, with your terminal, in a process group (Windows: a job) of its own:
+`lane rm` stops it, and everything it started, before removing the lane.
 
 Examples:
   lane exec fix-auth -- npm run dev
@@ -660,7 +665,7 @@ fn rm(args: &[String]) -> Result<()> {
             .hint("Run `lane list` to see the lanes you can remove.")
     })?;
     let repo = Repo::open(&here())?;
-    let lane = writes::make(
+    let engine::Removed { lane, stopped } = writes::make(
         &writes::Write::Remove {
             repo: repo.root.clone(),
             name,
@@ -670,7 +675,7 @@ fn rm(args: &[String]) -> Result<()> {
         Via::for_env(&Env::current()),
         &mut writes::to_stderr_or_log,
     )?
-    .lane()?;
+    .removed()?;
     lane_core::log::info(
         "rm",
         match keep_files {
@@ -684,9 +689,15 @@ fn rm(args: &[String]) -> Result<()> {
     .lane(&lane.name)
     .repo(&repo.root)
     .write();
+    for p in &stopped {
+        lane_core::log::info("rm", format!("stopped `{}` (pid {})", p.command, p.pid))
+            .lane(&lane.name)
+            .repo(&repo.root)
+            .write();
+    }
     let steps = next::after_rm(&repo, Store::open()?.lanes(Some(&repo.root))?.len());
     if common.json {
-        print_json(&serde_json::json!({ "removed": lane, "next": steps }));
+        print_json(&serde_json::json!({ "removed": lane, "stopped": stopped, "next": steps }));
         return Ok(());
     }
     if keep_files {
@@ -702,6 +713,9 @@ fn rm(args: &[String]) -> Result<()> {
             lane.name,
             ports(&lane)
         );
+    }
+    for p in &stopped {
+        println!("  stopped `{}` (pid {}), which ran in it", p.command, p.pid);
     }
     print!("{}", next::render(&steps));
     Ok(())
@@ -865,12 +879,22 @@ fn exec_in(ours: &[String], command: &[String]) -> Result<u8> {
         cmd.stdout(std::process::Stdio::from(std::io::stderr()));
     }
     let started = std::time::Instant::now();
-    let status = cmd.status().map_err(|e| {
+    // In a group of its own, noted so `lane rm` stops it, and known to laned if it's running.
+    let run = Runs::current()?
+        .start(&lane, &mut cmd, &command.join(" "), true)
+        .map_err(|e| {
+            Error::new(
+                ErrorKind::Failure,
+                format!("couldn't start `{}`: {e}", command[0]),
+            )
+            .hint("Check that it's installed and on PATH.")
+        })?;
+    let status = run.wait().map_err(|e| {
         Error::new(
             ErrorKind::Failure,
-            format!("couldn't start `{}`: {e}", command[0]),
+            format!("lost track of `{}`: {e}", command[0]),
         )
-        .hint("Check that it's installed and on PATH.")
+        .hint("Check whether it's still running before you run it again.")
     })?;
     let code = exit_code(status);
     lane_core::log::info(
@@ -1414,6 +1438,7 @@ fn daemon_command(args: &[String]) -> Result<()> {
             out["clients"] = s.clients.saturating_sub(1).into();
             out["watching"] = s.watching.into();
             out["writes"] = s.writes.into();
+            out["lanes"] = s.lanes.into();
         }
         if let Some(was) = stopped {
             out["stopped"] = was.into();

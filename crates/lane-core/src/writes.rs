@@ -8,7 +8,7 @@
 //! caller goes away, so no lane is left half made.
 
 use crate::daemon::{self, Client, Endpoint, WriteError};
-use crate::engine::{self, Made, Output, Ready, Repo};
+use crate::engine::{self, Made, Output, Ready, Removed, Repo};
 use crate::env::Env;
 use crate::error::{Error, ErrorKind, Result};
 use crate::state::{Lane, Store};
@@ -60,7 +60,7 @@ impl Write {
 #[serde(tag = "done", rename_all = "snake_case")]
 pub enum Done {
     Made(Box<Made>),
-    Removed { lane: Lane },
+    Removed(Removed),
     Adopted { lane: Lane },
     Ready(Ready),
 }
@@ -74,7 +74,13 @@ impl Done {
     }
     pub fn lane(self) -> Result<Lane> {
         match self {
-            Done::Removed { lane } | Done::Adopted { lane } => Ok(lane),
+            Done::Removed(Removed { lane, .. }) | Done::Adopted { lane } => Ok(lane),
+            other => Err(mismatch(&other)),
+        }
+    }
+    pub fn removed(self) -> Result<Removed> {
+        match self {
+            Done::Removed(r) => Ok(r),
             other => Err(mismatch(&other)),
         }
     }
@@ -121,8 +127,9 @@ pub fn run(write: &Write) -> Result<Done> {
             request_id,
         } => {
             let repo = Repo::open(repo)?;
-            let lane = engine::remove(&mut store, &repo, name, *keep_files, request_id.as_deref())?;
-            Ok(Done::Removed { lane })
+            let removed =
+                engine::remove(&mut store, &repo, name, *keep_files, request_id.as_deref())?;
+            Ok(Done::Removed(removed))
         }
         Write::Adopt {
             repo,
@@ -203,9 +210,7 @@ fn connect(via: Via) -> Option<Client> {
     let at = Endpoint::current().ok()?;
     match via {
         Via::Here => None,
-        Via::DaemonIfRunning => Client::connect(&at)
-            .ok()
-            .filter(|c| c.version == crate::VERSION),
+        Via::DaemonIfRunning => daemon::connect_if_running(&at),
         Via::Daemon => match daemon::laned_path() {
             Some(laned) => daemon::connect_or_start(&at, &laned).ok(),
             None => Client::connect(&at).ok(),

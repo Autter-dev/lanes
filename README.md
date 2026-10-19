@@ -235,17 +235,17 @@ Prefer a Claude Code plugin? It carries the same hooks and skill:
 | `lane init` | Sets up a repo, asking Y/n before each step: `lane.toml` for your team, your agents in lanes, the Git hook, a note in `AGENTS.md`, and dependencies installed ahead of time (`--yes` takes every default) |
 | `lane new <name>` | Creates a lane |
 | `lane list` | Lists your lanes with their ports and folders |
-| `lane exec <name> -- <cmd>` | Runs a command inside a lane, with its own `PORT` and `LANE_URL` |
+| `lane exec <name> -- <cmd>` | Runs a command inside a lane, with its own `PORT` and `LANE_URL`, in a process group of its own that `lane rm` stops |
 | `lane env <name>` | Prints a lane's variables for sh, PowerShell, cmd or a `.env` file |
 | `lane adopt <path>` | Turns a worktree you already have into a lane (`--ready` gives it its dependencies and `.env` too) |
-| `lane rm <name>` | Removes a lane and frees its ports |
+| `lane rm <name>` | Stops what `lane exec` runs in a lane, removes the lane and frees its ports |
 | `lane doctor` | Checks what could stop lanes working (Git, clones, `lane` on PATH, agents' hooks, the Git hook, lanes whose folders have gone) and says how to fix each. `--fix` fixes what Lanes can, asking Y/n first |
 | `lane logs [<lane>]` | Shows what Lanes did: lanes made and removed, agents' hooks, dependency installs. Kept in a file, never in an agent's output |
 | `lane savings` | Shows what lanes saved compared with a worktree plus its own install for each: disk and waiting, for the lanes you have now and in total since the first, removed lanes included. Measured on your machine, never rounded up, and never sent anywhere (`--all` for every repo, `--json`) |
 | `lane mcp` | An MCP server over stdio, so agents read the repo and make lanes through tools: `repo.read`, `repo.outline`, `repo.grep`, `lane.new` and `lane.list`. Add it to Claude Code with `claude mcp add lanes -- lane mcp` |
 | `lane hook <agent> <event>` | What agents' hooks run, for Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot and Git (set up by `lane setup` and `lane init`) |
 | `lane telemetry` | Shows exactly what the anonymous install count sends from your machine; `lane telemetry off` turns it off (so do `LANE_TELEMETRY=0` and `DO_NOT_TRACK=1`) |
-| `lane daemon` | Shows whether `laned` is running; `start` and `stop` it. While it runs it makes every change to lanes, one at a time per repo, and keeps the terminal app live. Nothing needs it: stopping it loses nothing |
+| `lane daemon` | Shows whether `laned` is running; `start` and `stop` it. While it runs it makes every change to lanes, one at a time per repo, knows what runs in each lane, and keeps the terminal app live. Nothing needs it: stopping it loses nothing |
 
 Coming next:
 

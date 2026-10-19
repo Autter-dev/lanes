@@ -249,13 +249,8 @@ fn send(url: &str, body: &str) -> bool {
     .stdin(Stdio::piped())
     .stdout(Stdio::null())
     .stderr(Stdio::null());
-    #[cfg(windows)]
-    {
-        // No console window flashing up when an agent's hook runs `lane` from a GUI app.
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
+    // No console window flashing up when an agent's hook runs `lane` from a GUI app.
+    crate::process::system().no_window(&mut cmd);
     // Otherwise, on Windows, curl would hold `lane`'s output open for up to a second.
     crate::process::keep_std_handles_to_ourselves();
     let Ok(mut child) = cmd.spawn() else {

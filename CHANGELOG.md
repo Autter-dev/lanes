@@ -8,6 +8,10 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 ### 2026-10-19
 
+- `09:33` **Changed**: `lane rm` stops what `lane exec` runs in a lane before removing it, and `laned` keeps an actor for each lane.
+  - `lane exec` still runs its command in the foreground with your terminal, now in a process group of its own (a Job Object on Windows), noted in Lanes' state while it runs. `lane rm` asks the command and everything it started to stop (SIGTERM), stops whatever's left after 3 seconds (SIGKILL, or the whole job on Windows, where console programs can't be asked), and only then removes the folder. On Windows, files a stopped process held a moment longer are retried for a few seconds. `lane rm --json` lists what it stopped; `--keep-files` stops them too, as the lane's ports are free again.
+  - In `laned`, each lane has an actor that owns its folder, ports, environment and processes. `rm` and ready go through it, `new` and `adopt` start one, and `lane exec` tells it what it starts when `laned` is running (it never starts `laned`). The protocol is now 3, so an older `laned` is replaced. `lane daemon status --json` counts the lanes with an actor.
+  - Starting and stopping processes is behind one trait, `lane_core::process::ProcessControl`, with Unix and Windows versions; detaching `laned` and the install count's `curl` goes through it too. Paths Lanes builds use the system's separator (the Lanes skill files and `.claude/settings.local.json` were joined with `/`). (`0ffff91`)
 - `09:18` **Changed**: the website offers 0.0.9, and the guide says to run `lane setup --yes` once on Windows after updating from 0.0.8, so Copilot's hooks are written again (`7282628`).
 
 ### 2026-10-18
