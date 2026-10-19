@@ -12,6 +12,7 @@ mod args;
 mod guided;
 mod hook;
 mod mcp;
+mod savings;
 
 use lane_core::agents;
 use lane_core::config::Config;
@@ -50,6 +51,7 @@ Commands:
   adopt      Turn a worktree you already have into a lane
   doctor     Check what could stop lanes working, and say how to fix it
   logs       Show what Lanes did: lanes made and removed, agents' hooks, installs
+  savings    Show what lanes saved: disk and install time, now and since the first lane
   telemetry  Show or switch the anonymous install count (on, off, status)
   daemon     Show, start or stop laned, which keeps the terminal app live
   mcp        Let agents read this repo and make lanes, through MCP tools
@@ -328,6 +330,7 @@ fn main() -> ExitCode {
         Some("hook") => hook::hook(&args[1..]),
         Some("doctor") => doctor(&args[1..]),
         Some("logs") => run("logs", &args[1..], logs),
+        Some("savings") => run("savings", &args[1..], savings::savings),
         Some("telemetry") => run("telemetry", &args[1..], telemetry),
         Some("daemon") => run("daemon", &args[1..], daemon_command),
         Some("mcp") => run("mcp", &args[1..], mcp::mcp),
@@ -601,9 +604,36 @@ fn new(args: &[String]) -> Result<()> {
     if made.fixed_paths > 0 {
         println!("  fixed   {} files that pointed at _base", made.fixed_paths);
     }
+    if let Some(saved) = made.stats.as_ref().and_then(saved_line) {
+        println!("  saved   {saved}");
+    }
     print!("{}", next::render(&steps));
     copied_note(&made);
     Ok(())
+}
+
+/// What one new lane saved against a worktree plus its own install, never rounded up: its whole
+/// tree's disk when it was cloned, and the install it skipped less the time it took to make.
+fn saved_line(stats: &lane_core::state::LaneStats) -> Option<String> {
+    use lane_core::insight;
+    let mut parts = vec![];
+    if stats.method == "clone" && stats.bytes > 0 {
+        parts.push(format!(
+            "{} of disk a worktree would have written",
+            insight::bytes(stats.bytes)
+        ));
+    }
+    if let Some(install) = stats.install_ms {
+        let waiting = insight::waiting_saved(stats);
+        if waiting >= 1000 {
+            parts.push(format!(
+                "at least {} of waiting (no {} install)",
+                insight::duration(waiting),
+                insight::duration(install)
+            ));
+        }
+    }
+    (!parts.is_empty()).then(|| format!("{}. Totals: `lane savings`.", parts.join(", and ")))
 }
 
 /// `lane rm <name>`: remove a lane's folder, worktree record and ports.

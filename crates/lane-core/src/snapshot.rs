@@ -2,16 +2,21 @@
 //! and what lanes saved. `laned` builds these once per repo and sends them to every app that's
 //! watching; without it, the app reads them itself.
 
-use crate::insight::{self, Details, Savings};
-use crate::state::{Lane, LaneStats, Store};
+use crate::insight::{self, Details, Savings, Totals};
+use crate::state::{Lane, LaneRecord, LaneStats, Store};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
 
 /// Everything the home screen shows about lanes, at one moment.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
     pub rows: Vec<Row>,
+    /// What the lanes here now save.
     pub savings: Savings,
+    /// What lanes saved since the first, removed ones included.
+    #[serde(default)]
+    pub totals: Totals,
     /// CPU cores on this machine.
     pub cores: usize,
     pub source: Source,
@@ -57,6 +62,10 @@ pub fn read(repo: Option<&Path>) -> Snapshot {
         .as_ref()
         .and_then(|s| s.lane_stats(repo).ok())
         .unwrap_or_default();
+    let records = store
+        .as_ref()
+        .and_then(|s| s.lane_records(repo).ok())
+        .unwrap_or_default();
     let log = crate::log::read(500, None).unwrap_or_default();
     let rows: Vec<Row> = lanes
         .into_iter()
@@ -75,18 +84,34 @@ pub fn read(repo: Option<&Path>) -> Snapshot {
             }
         })
         .collect();
-    let savings = insight::savings(
-        &rows
-            .iter()
-            .map(|r| (&r.lane, r.stats.as_ref(), Some(&r.details)))
-            .collect::<Vec<_>>(),
-    );
+    let (savings, totals) = add_up(&rows, &records);
     Snapshot {
         rows,
         savings,
+        totals,
         cores: std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(1),
         source: Source::StateFile,
     }
+}
+
+/// What the lanes in `rows` save now, and what every lane in `records` saved in total. A lane
+/// whose folder has gone takes no disk and saves none, so it isn't counted now.
+pub fn add_up(rows: &[Row], records: &[LaneRecord]) -> (Savings, Totals) {
+    let savings = insight::savings(
+        &rows
+            .iter()
+            .map(|r| {
+                let stats = r.stats.as_ref().filter(|_| !r.gone);
+                (&r.lane, stats, Some(&r.details))
+            })
+            .collect::<Vec<_>>(),
+    );
+    let live: HashMap<String, u64> = rows
+        .iter()
+        .filter(|r| !r.gone)
+        .map(|r| (r.lane.id.clone(), r.details.changed_bytes))
+        .collect();
+    (savings, insight::totals(records, &live))
 }

@@ -398,6 +398,91 @@ fn new_list_and_rm_work_end_to_end() {
 }
 
 #[test]
+fn savings_count_lanes_after_they_are_removed() {
+    let dir = config_dir("savings");
+    let repo = repo_with_commit("savings");
+    let savings = |cwd: &std::path::Path, extra: &[&str]| {
+        let mut args = vec!["savings", "--json"];
+        args.extend_from_slice(extra);
+        let out = lane_in(&dir, cwd, &args);
+        assert_eq!(out.status.code(), Some(0), "{out:?}");
+        json(&out)
+    };
+
+    // Nothing made yet: nothing claimed.
+    let none = savings(&repo, &[]);
+    assert_eq!(
+        (
+            none["now"]["lanes"].as_u64(),
+            none["total"]["lanes"].as_u64()
+        ),
+        (Some(0), Some(0))
+    );
+    let text = String::from_utf8_lossy(&lane_in(&dir, &repo, &["savings"]).stdout).into_owned();
+    assert!(text.contains("Nothing yet. Make a lane"), "{text}");
+
+    let made = json(&lane_in(&dir, &repo, &["new", "fix-auth", "--json"]));
+    let stats = &made["stats"];
+    let bytes = stats["bytes"].as_u64().unwrap();
+    assert!(bytes > 0, "{made}");
+    let cloned = stats["method"] == "clone";
+    // A file the lane adds: on a disk that clones, the only disk it takes.
+    let path = PathBuf::from(made["lane"]["path"].as_str().unwrap());
+    std::fs::write(path.join("notes.txt"), vec![b'x'; 5_000]).unwrap();
+
+    let here = savings(&repo, &[]);
+    assert_eq!(
+        here["repo"].as_str().map(PathBuf::from),
+        Some(PathBuf::from(made["lane"]["repo"].as_str().unwrap()))
+    );
+    assert_eq!(here["now"]["measured"], 1);
+    assert_eq!(here["now"]["as_worktrees"].as_u64(), Some(bytes));
+    let taken = if cloned { 5_000 } else { bytes };
+    assert_eq!(here["now"]["as_lanes"].as_u64(), Some(taken), "{here}");
+    assert_eq!(
+        (
+            here["total"]["lanes"].as_u64(),
+            here["total"]["removed"].as_u64()
+        ),
+        (Some(1), Some(0))
+    );
+
+    // Removed, the lane still counts in the total, with the disk it took when it went.
+    assert_eq!(
+        lane_in(&dir, &repo, &["rm", "fix-auth"]).status.code(),
+        Some(0)
+    );
+    let after = savings(&repo, &[]);
+    assert_eq!(after["now"]["lanes"], 0);
+    let total = &after["total"];
+    assert_eq!(
+        (total["lanes"].as_u64(), total["removed"].as_u64()),
+        (Some(1), Some(1))
+    );
+    assert_eq!(total["disk_measured"], 1);
+    assert_eq!(total["as_worktrees"].as_u64(), Some(bytes));
+    assert_eq!(total["as_lanes"].as_u64(), Some(taken), "{after}");
+    assert_eq!(total["not_written"].as_u64(), Some(bytes - taken));
+
+    // Every repo, outside a repo or with --all.
+    let elsewhere = not_a_repo("savings-elsewhere");
+    let all = savings(&elsewhere, &[]);
+    assert!(all["repo"].is_null());
+    assert_eq!(all["total"]["lanes"], 1);
+    assert_eq!(savings(&repo, &["--all"])["total"]["lanes"], 1);
+    let text =
+        String::from_utf8_lossy(&lane_in(&dir, &elsewhere, &["savings"]).stdout).into_owned();
+    assert!(
+        text.starts_with("What lanes saved on this machine"),
+        "{text}"
+    );
+    assert!(text.contains("Since "), "{text}");
+
+    let bad = lane_in(&dir, &repo, &["savings", "--everything"]);
+    assert_eq!(bad.status.code(), Some(2));
+}
+
+#[test]
 fn new_without_a_name_and_adopt_of_the_repo_are_usage_errors() {
     let dir = config_dir("usage-e2e");
     let repo = repo_with_commit("usage-e2e");

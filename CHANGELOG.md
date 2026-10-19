@@ -10,6 +10,11 @@ Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or
 
 - `09:18` **Changed**: the website offers 0.0.9, and the guide says to run `lane setup --yes` once on Windows after updating from 0.0.8, so Copilot's hooks are written again (`7282628`).
 
+### 2026-10-18
+
+- `19:18` **Added**: `lane savings` shows what lanes saved compared with a worktree plus its own install for each: disk and waiting, for the lanes you have now and in total since the first (`--all` for every repo, `--json`). Removed lanes still count: `lane rm` keeps a lane's record, with the disk it took when it went. `lane new` says what the new lane saved, and the terminal app adds the totals once lanes have been removed. (`371e5f5`)
+- `19:18` **Changed**: time saved is now a lower bound: each skipped install less the time the lane took to make, never below zero, where it used to be the whole install. A lane whose folder has gone no longer counts toward what lanes save now. (`371e5f5`)
+
 ## 0.0.9 (2026-10-18)
 
 **GitHub Copilot on Windows, fixed.** Copilot's hooks on Windows do nothing when `lane` isn't there, so removing Lanes no longer leaves the Copilot CLI turning down every tool, and VS Code on Windows now turns down copies of the repo like everywhere else. Still a preview.

@@ -159,6 +159,9 @@ pub struct Made {
     /// The lane's `.env`, when one was written (from `env.template`, or `_base`'s own).
     #[serde(default)]
     pub env_file: Option<PathBuf>,
+    /// What the lane cost to make and what it saved.
+    #[serde(default)]
+    pub stats: Option<crate::state::LaneStats>,
 }
 
 fn io_error(what: &str, path: &Path, e: io::Error) -> Error {
@@ -234,16 +237,14 @@ pub fn new_lane(
                 true => None,
                 false => store_base_install_ms(tx, &repo.root),
             };
-            tx.set_lane_stats(
-                &reserved.id,
-                &crate::state::LaneStats {
-                    method: if clone.copied == 0 { "clone" } else { "copy" }.into(),
-                    files: clone.files as u64,
-                    bytes: clone.bytes,
-                    made_ms: started.elapsed().as_millis() as u64,
-                    install_ms,
-                },
-            )?;
+            let stats = crate::state::LaneStats {
+                method: if clone.copied == 0 { "clone" } else { "copy" }.into(),
+                files: clone.files as u64,
+                bytes: clone.bytes,
+                made_ms: started.elapsed().as_millis() as u64,
+                install_ms,
+            };
+            tx.set_lane_stats(&reserved.id, &stats)?;
             let mut lane = reserved.clone();
             lane.status = Status::Ready;
             lane.base_commit = Some(base.commit.clone());
@@ -253,6 +254,7 @@ pub fn new_lane(
                 clone,
                 fixed_paths,
                 env_file,
+                stats: Some(stats),
             })
         }),
         Err(e) => {
@@ -783,10 +785,15 @@ pub fn remove(
             "Forget the lane without touching files: `lane rm {name} --keep-files`."
         )));
     }
+    // What the lane took by now, kept for the totals of what lanes saved: measured before it goes.
+    let extra = lane
+        .path
+        .exists()
+        .then(|| crate::insight::changed_bytes(&lane.path));
     if !keep_files {
         remove_folder(repo, &lane.path)?;
     }
-    store.write(request, |tx| tx.remove_lane(&repo.root, name))
+    store.write(request, |tx| tx.remove_lane(&repo.root, name, extra))
 }
 
 /// Remove a lane's folder and its worktree record, even with read-only files in it.

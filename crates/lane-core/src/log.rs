@@ -153,7 +153,7 @@ fn now() -> String {
 }
 
 /// Unix seconds as an RFC 3339 UTC time (days to a civil date, after Howard Hinnant).
-fn utc(secs: i64) -> String {
+pub fn utc(secs: i64) -> String {
     let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
