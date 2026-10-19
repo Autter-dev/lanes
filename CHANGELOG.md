@@ -2,12 +2,21 @@
 
 A running log of notable changes to Lanes, newest first. All times are UTC.
 
-Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or **Security**) and, once committed, its commit. When a release ships, its entries move under a version heading.
+Each entry has a time, a type (**Added**, **Changed**, **Fixed**, **Removed** or **Security**) and, once committed, its commit. When a release ships, its entries move under a version heading, like `## 0.1.0 (2026-10-20)`. A release candidate gets one of its own, like `## 0.1.0-rc.1 (2026-10-20)`.
+
+Lanes uses [semantic versioning](https://semver.org), and 0.0.x versions are previews. Before 1.0, a minor version (0.2.0) can make breaking changes to commands, `lane.toml` or `--json` output, and a patch (0.1.1) only fixes things. Exit codes and documented `--json` fields don't change. Release candidates (0.1.0-rc.1) are only on GitHub Releases, as pre-releases, and on npm's `next` tag. More in the README's [Versions](README.md#versions).
 
 ## Unreleased
 
 ### 2026-10-19
 
+- `09:46` **Added**: release candidates, like 0.1.0-rc.1, so a version can be tried on every channel before it ships.
+  - A tag like `v0.1.0-rc.1` makes a GitHub pre-release titled "Lanes 0.1.0-rc.1 (release candidate)". GitHub never makes a pre-release the latest release, so the install scripts, Homebrew and Scoop stay on the last release, and the candidate's release notes give the commands that install it. 0.0.x releases are still titled "(preview)"; from 0.1.0 on, none are.
+  - npm gets a release candidate under the dist-tag `next`, so `npm install -g @autter/lanes@next` installs it and `npm install -g @autter/lanes` stays on the latest release.
+  - The release workflow and `cargo test` turn down a version that isn't a release (0.1.0) or a release candidate (0.1.0-rc.1).
+  - Release notes come from the version's own `CHANGELOG.md` section: 0.1.0's notes never pick up 0.1.0-rc.1's section.
+  - The Installers workflow takes a version: every channel installs it on every system and checks that `lane --version` says it. After a release candidate's release, it checks that candidate; Homebrew and Scoop, which only have the latest release, skip it and say why.
+  - The README and this changelog say how versions work: before 1.0, a minor version can make breaking changes to commands, `lane.toml` or `--json` output, a patch only fixes things, and exit codes and documented `--json` fields don't change. The website leaves release candidates off its releases page and says "preview" only for 0.0.x.
 - `09:18` **Changed**: the website offers 0.0.9, and the guide says to run `lane setup --yes` once on Windows after updating from 0.0.8, so Copilot's hooks are written again (`7282628`).
 
 ## 0.0.9 (2026-10-18)

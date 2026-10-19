@@ -21,13 +21,21 @@ export const site = {
 
 const releases = 'https://github.com/Autter-dev/lanes/releases';
 
-// The version people get. When a release ships, set its version here and live to true.
+// The version people get. When a release ships, set its version here and live to true. Never a
+// release candidate (0.1.0-rc.1): those are only on GitHub Releases, as pre-releases, and npm's
+// `next` tag, and the site keeps offering the latest release.
 export const release = {
   version: '0.0.9',
   live: true,
   page: `${releases}/latest`,
   file: (name: string) => `${releases}/download/v${release.version}/${name}`,
 };
+
+// 0.0.x versions are previews; from 0.1.0 on, nothing is labelled a preview.
+export const isPreview = (version: string) => version.startsWith('0.0.');
+
+// A release candidate, like 0.1.0-rc.1, or any other pre-release version.
+export const isPrerelease = (version: string) => version.includes('-');
 
 // lanes.autter.dev/install.sh and /install.ps1 redirect to the scripts on the latest release
 // (public/_redirects); the GitHub URLs work too, and in sandboxes that only allow github.com.

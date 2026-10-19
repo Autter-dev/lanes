@@ -4,6 +4,10 @@ name: Release
 # and publish a GitHub release with the installers and the files Homebrew, Scoop and winget need.
 # npm publishes too once the repo variable NPM_PUBLISH is "true" (see packaging/README.md).
 #
+# A tag like v0.1.0-rc.1 publishes a release candidate: a GitHub pre-release, which never becomes
+# the latest release, and npm's `next` tag. Homebrew, Scoop, winget, the install scripts and
+# `npm install -g @autter/lanes` stay on the latest release.
+#
 # Run it by hand (Actions → Release → Run workflow) to build and package everything without
 # publishing anything.
 
@@ -33,6 +37,12 @@ jobs:
           version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
           if [ -z "$version" ]; then
             echo "::error::No version under [workspace.package] in Cargo.toml."
+            exit 1
+          fi
+          # A release (0.1.0) or a release candidate (0.1.0-rc.1): the archive names, the
+          # installers, the release title and npm's dist-tag all expect one of these.
+          if ! printf '%s\n' "$version" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.(0|[1-9][0-9]*))?$'; then
+            echo "::error::Cargo.toml's version ($version) isn't a release like 0.1.0 or a release candidate like 0.1.0-rc.1. Set one of those under [workspace.package]."
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -166,9 +176,15 @@ jobs:
             gh release upload "v$VERSION" "${assets[@]}" --clobber
           else
             title="Lanes $VERSION"
-            # 0.0.x releases are previews. They're still marked latest, so the install commands find them.
-            case "$VERSION" in 0.0.*) title="$title (preview)" ;; esac
-            gh release create "v$VERSION" --verify-tag --title "$title" --notes-file notes.md "${assets[@]}"
+            flags=()
+            case "$VERSION" in
+              # A release candidate is a pre-release. GitHub never makes a pre-release the latest
+              # release, so releases/latest (the install scripts, Homebrew, Scoop) stays where it is.
+              *-*) title="$title (release candidate)"; flags=(--prerelease) ;;
+              # 0.0.x releases are previews. They're still marked latest, so the install commands find them.
+              0.0.*) title="$title (preview)" ;;
+            esac
+            gh release create "v$VERSION" --verify-tag "${flags[@]}" --title "$title" --notes-file notes.md "${assets[@]}"
           fi
 
   npm:

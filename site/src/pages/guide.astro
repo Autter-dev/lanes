@@ -1,7 +1,7 @@
 ---
 import Base from '../layouts/Base.astro';
 import InstallCommand from '../components/InstallCommand.astro';
-import { release, site } from '../data/site';
+import { isPreview, release, site } from '../data/site';
 import { notYet, steps, systems, upkeep, type Block } from '../data/guide';
 
 // `code` and [links](url) in guide text, with everything else escaped.
@@ -106,7 +106,7 @@ const id = (step: string, i: number, b: Block) => `g-${step}-${i}${b.only ? `-${
       <div class="start">
         <div class="start__copy">
           <h2 class="h2" id="guide-next" data-split="lines">Not here yet.</h2>
-          <p class="lede">Lanes is a preview. These are on the way, and the changelog says when each one lands.</p>
+          <p class="lede">{isPreview(release.version) && 'Lanes is a preview. '}These are on the way, and the changelog says when each one lands.</p>
           <div class="start__actions">
             <a class="btn" href={`${site.repo}/issues`}>Stuck? Open an issue</a>
             <a class="btn btn--ghost" href={site.changelog}>Read the changelog</a>

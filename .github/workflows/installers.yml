@@ -1,10 +1,20 @@
 name: Installers
 
-# Installs the latest release the way users do, through every live channel and on every system,
-# and runs it. Runs after each published release, and by hand from the Actions tab.
+# Installs a release the way users do, through every live channel and on every system, and runs
+# it. Runs after each published release, and by hand from the Actions tab.
+#
+# Without a version, it installs the latest release. With one (the `version` input, or the tag of
+# the release candidate that was just released), every job installs that version and checks that
+# `lane --version` says `lane <version> (by Autter)`. Homebrew and Scoop only have the latest
+# release, which is never a release candidate, so they skip one.
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: Version to install and check, like 0.1.0 or 0.1.0-rc.1. Leave it empty for the latest release.
+        required: false
+        default: ""
   workflow_run:
     workflows: [Release]
     types: [completed]
@@ -13,32 +23,97 @@ permissions:
   contents: read
 
 jobs:
+  version:
+    name: Version
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          # After a Release run: the tag it ran for, like v0.1.0 or v0.1.0-rc.1.
+          RELEASE_TAG: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          version="${INPUT_VERSION#v}"
+          # After a release candidate, check that candidate: the latest release is still the one
+          # before it. After a release, check the latest release, the way users get it.
+          if [ -z "$version" ]; then
+            case "$RELEASE_TAG" in v*-*) version="${RELEASE_TAG#v}" ;; esac
+          fi
+          if [ -n "$version" ] && ! printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::\"$version\" isn't a Lanes version. Give one like 0.1.0 or 0.1.0-rc.1, or leave it empty for the latest release."
+            exit 1
+          fi
+          case "$version" in
+            "") echo "Installing the latest release." ;;
+            *-*) echo "Installing $version, a release candidate. Homebrew and Scoop only have the latest release, so they skip it." ;;
+            *) echo "Installing $version." ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          case "$version" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
   script:
     name: Script (${{ matrix.os }})
-    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    needs: version
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
     steps:
       - name: Install from lanes.autter.dev
-        run: curl -fsSL https://lanes.autter.dev/install.sh | sh
+        run: |
+          set --
+          if [ -n "$VERSION" ]; then set -- --version "$VERSION"; fi
+          curl -fsSL https://lanes.autter.dev/install.sh | sh -s -- "$@"
       - name: Run it
         run: |
+          says() {
+            got=$("$1" --version)
+            echo "$got"
+            want="$(basename "$1") $VERSION (by Autter)"
+            if [ -n "$VERSION" ] && [ "$got" != "$want" ]; then
+              echo "::error::$1 --version says \"$got\", not \"$want\"."
+              exit 1
+            fi
+          }
           export PATH="$HOME/.local/bin:$PATH"
-          lane --version
-          laned --version
+          says lane
+          says laned
           lane setup --json > setup.json
           head -c 300 setup.json
       - name: Install from GitHub into another folder
         run: |
-          curl -fsSL https://github.com/Autter-dev/lanes/releases/latest/download/lanes-installer.sh | sh -s -- --dir "$RUNNER_TEMP/lanes-bin"
-          "$RUNNER_TEMP/lanes-bin/lane" --version
+          says() {
+            got=$("$1" --version)
+            echo "$got"
+            want="$(basename "$1") $VERSION (by Autter)"
+            if [ -n "$VERSION" ] && [ "$got" != "$want" ]; then
+              echo "::error::$1 --version says \"$got\", not \"$want\"."
+              exit 1
+            fi
+          }
+          if [ -n "$VERSION" ]; then
+            # That release's own installer, which installs its own version by default.
+            url="https://github.com/Autter-dev/lanes/releases/download/v$VERSION/lanes-installer.sh"
+          else
+            url="https://github.com/Autter-dev/lanes/releases/latest/download/lanes-installer.sh"
+          fi
+          curl -fsSL "$url" | sh -s -- --dir "$RUNNER_TEMP/lanes-bin"
+          says "$RUNNER_TEMP/lanes-bin/lane"
+          says "$RUNNER_TEMP/lanes-bin/laned"
 
   powershell:
     name: Script (Windows, ${{ matrix.shell }})
-    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    needs: version
     strategy:
       fail-fast: false
       matrix:
@@ -47,62 +122,138 @@ jobs:
     defaults:
       run:
         shell: ${{ matrix.shell }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
     steps:
       - name: Install from lanes.autter.dev
         run: |
+          function Says([string]$Exe) {
+            $got = (& $Exe --version | Out-String).Trim()
+            Write-Host $got
+            $want = "$Exe $env:VERSION (by Autter)"
+            if ($env:VERSION -and $got -cne $want) {
+              Write-Host "::error::$Exe --version says `"$got`", not `"$want`"."
+              exit 1
+            }
+          }
           $env:LANES_INSTALL_DIR = "$env:RUNNER_TEMP\lanes-$env:SHELL_NAME"
+          if ($env:VERSION) { $env:LANES_VERSION = $env:VERSION }
           irm https://lanes.autter.dev/install.ps1 | iex
-          lane --version
-          laned --version
+          Says lane
+          Says laned
           lane setup --json | Select-Object -First 8
         env:
           SHELL_NAME: ${{ matrix.shell }}
 
   homebrew:
     name: Homebrew (${{ matrix.os }})
-    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    needs: version
     strategy:
       fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
     steps:
+      - name: Skip a release candidate
+        if: needs.version.outputs.prerelease == 'true'
+        run: echo "::notice title=Homebrew skipped::The tap only has the latest release, never a release candidate like $VERSION. The install script and npm jobs check $VERSION."
       - uses: Homebrew/actions/setup-homebrew@main
-      - run: |
+        if: needs.version.outputs.prerelease != 'true'
+      - if: needs.version.outputs.prerelease != 'true'
+        run: |
+          says() {
+            got=$("$1" --version)
+            echo "$got"
+            want="$1 $VERSION (by Autter)"
+            if [ -n "$VERSION" ] && [ "$got" != "$want" ]; then
+              echo "::error::$1 --version says \"$got\", not \"$want\". The tap copies the latest release within the hour; run its Update Lanes workflow to skip the wait."
+              exit 1
+            fi
+          }
           brew install autter-dev/tap/lanes
-          lane --version
-          laned --version
+          says lane
+          says laned
 
   scoop:
     name: Scoop (Windows)
-    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    needs: version
     runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - shell: pwsh
+      - name: Skip a release candidate
+        if: needs.version.outputs.prerelease == 'true'
+        shell: bash
+        run: echo "::notice title=Scoop skipped::The bucket only has the latest release, never a release candidate like $VERSION. The install script and npm jobs check $VERSION."
+      - if: needs.version.outputs.prerelease != 'true'
+        shell: pwsh
         run: |
+          function Says([string]$Exe) {
+            $got = (& $Exe --version | Out-String).Trim()
+            Write-Host $got
+            $want = "$Exe $env:VERSION (by Autter)"
+            if ($env:VERSION -and $got -cne $want) {
+              Write-Host "::error::$Exe --version says `"$got`", not `"$want`". The bucket copies the latest release within the hour; run its Update Lanes workflow to skip the wait."
+              exit 1
+            }
+          }
           # The runner is an administrator account, which Scoop's installer refuses without this flag.
           iex "& {$(irm get.scoop.sh)} -RunAsAdmin"
           $env:Path = "$env:USERPROFILE\scoop\shims;$env:Path"
           scoop bucket add autter https://github.com/Autter-dev/scoop-bucket
           scoop install lanes
-          lane --version
-          laned --version
+          Says lane
+          Says laned
 
   npm:
     name: npm (${{ matrix.os }})
-    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    needs: version
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
       - shell: bash
         run: |
-          npm install -g @autter/lanes
-          lane --version
-          laned --version
+          says() {
+            got=$("$1" --version)
+            echo "$got"
+            want="$1 $VERSION (by Autter)"
+            if [ -n "$VERSION" ] && [ "$got" != "$want" ]; then
+              echo "::error::$1 --version says \"$got\", not \"$want\"."
+              exit 1
+            fi
+          }
+          if [ -n "$VERSION" ]; then
+            npm install -g "@autter/lanes@$VERSION"
+          else
+            npm install -g @autter/lanes
+          fi
+          says lane
+          says laned
           lane setup --json > setup.json && head -c 200 setup.json
+      - name: A release candidate is npm's next, not its latest
+        if: needs.version.outputs.prerelease == 'true' && matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          latest=$(npm view @autter/lanes dist-tags.latest)
+          next=$(npm view @autter/lanes dist-tags.next)
+          echo "latest: $latest"
+          echo "next: $next"
+          case "$latest" in
+            *-*)
+              echo "::error::npm's latest tag is $latest, a release candidate, so npm install -g @autter/lanes installs it. Point latest back with npm dist-tag add @autter/lanes@<release> latest, for every @autter/lanes package."
+              exit 1
+              ;;
+          esac
+          if [ "$next" != "$VERSION" ]; then
+            echo "::warning::npm's next tag is $next, not $VERSION. That's expected only if a newer release candidate is out."
+          fi

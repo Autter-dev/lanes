@@ -1,9 +1,10 @@
 // Every published release, newest first, read from the repo's CHANGELOG.md at build time. A
 // release is a `## <version> (<YYYY-MM-DD>)` section; its text before the first `###` is the
-// summary. Versions newer than release.version (still being built) are left out.
+// summary. Versions newer than release.version (still being built) are left out, and so are
+// release candidates (0.1.0-rc.1), which are only on GitHub Releases and npm's `next` tag.
 
 import changelog from '../../../CHANGELOG.md?raw';
-import { archivesFor, installVersion, release, releaseFile, releaseNotes } from './site';
+import { archivesFor, installVersion, isPrerelease, isPreview, release, releaseFile, releaseNotes } from './site';
 
 export type Release = {
   version: string;
@@ -69,7 +70,7 @@ function parse(): Release[] {
     const m = line.match(/^## \[?v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\]?\s*\((\d{4}-\d{2}-\d{2})\)/);
     if (!m) return;
     const [, version, date] = m;
-    if (compare(version, release.version) > 0) return;
+    if (isPrerelease(version) || compare(version, release.version) > 0) return;
     const rest = lines.slice(i + 1);
     const end = rest.findIndex((l) => /^##\s/.test(l));
     const body = (end < 0 ? rest : rest.slice(0, end)).join('\n');
@@ -78,7 +79,7 @@ function parse(): Release[] {
       version,
       date,
       latest: version === release.version,
-      preview: version.startsWith('0.0.'),
+      preview: isPreview(version),
       summary: render(summary),
       notes: releaseNotes(version),
       archives: archivesFor(version),
