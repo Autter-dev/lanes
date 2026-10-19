@@ -15,7 +15,9 @@ Now: the disk this repo's lanes take, against what worktrees with their own inst
 and the installs they skipped. In total: every lane since the first, removed ones too.
 
 Every number is measured on this machine and kept low. A worktree holds the whole tree and waits
-for its own install; a cloned lane holds only the files it changed. Time saved is each skipped
+for its own install. A cloned lane shares its files' data, but the disk still keeps a record of
+every file, so it's counted as the files it changed plus 11 KB a file on Windows (measured on a
+Dev Drive) or 4 KB elsewhere. A repo of many small files saves less. Time saved is each skipped
 install less the time the lane took to make. A lane copied in full (a disk that can't clone)
 saves no disk. Nothing here leaves your machine.
 

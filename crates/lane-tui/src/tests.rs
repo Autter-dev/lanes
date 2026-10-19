@@ -460,7 +460,8 @@ fn home_input_with(
     rows: Vec<Row>,
     records: &[LaneRecord],
 ) -> home::Input {
-    let (savings, totals) = lane_core::snapshot::add_up(&rows, records);
+    // No per-file cost here, so the numbers read the same on every system.
+    let (savings, totals) = lane_core::snapshot::add_up(&rows, records, 0);
     home::Input {
         version: "0.0.7",
         telemetry: false,
@@ -579,6 +580,14 @@ fn home_lists_every_lane_with_its_agent_status_url_changes_tests_and_disk() {
     ] {
         assert!(text.contains(header), "{header} missing:\n{text}");
     }
+    // A clone's extra disk: what it changed, plus each of its files' own record on the disk.
+    let disk = |changed: u64| {
+        lane_core::insight::bytes(lane_core::insight::lane_disk(
+            &stats("clone", 900_000_000, Some(48_000)),
+            changed,
+            lane_core::insight::PER_FILE_BYTES,
+        ))
+    };
     let fix = text.lines().find(|l| l.contains("fix-auth")).unwrap();
     for cell in [
         "Claude Code",
@@ -586,12 +595,12 @@ fn home_lists_every_lane_with_its_agent_status_url_changes_tests_and_disk() {
         "fix-auth.localhost:4100",
         "3 files",
         "✓ passed",
-        "2.0 MB",
+        &disk(2_000_000),
     ] {
         assert!(fix.contains(cell), "{cell} missing: {fix}");
     }
     let dark = text.lines().find(|l| l.contains("dark-mode")).unwrap();
-    for cell in ["Codex", "ready", "1 file", "✗ failed", "10 KB"] {
+    for cell in ["Codex", "ready", "1 file", "✗ failed", &disk(10_000)] {
         assert!(dark.contains(cell), "{cell} missing: {dark}");
     }
     let old = text.lines().find(|l| l.contains("old-disk")).unwrap();

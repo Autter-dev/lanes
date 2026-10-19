@@ -92,6 +92,7 @@ fn main() {
             .iter()
             .map(|r| (&r.lane, r.stats.as_ref(), Some(&r.details)))
             .collect::<Vec<_>>(),
+        insight::PER_FILE_BYTES,
     );
     let keys = [None, Some(KeyCode::Char('?')), Some(KeyCode::Char(':'))];
     for key in keys {

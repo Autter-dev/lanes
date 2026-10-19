@@ -471,7 +471,12 @@ fn savings_count_lanes_after_they_are_removed() {
     );
     assert_eq!(here["now"]["measured"], 1);
     assert_eq!(here["now"]["as_worktrees"].as_u64(), Some(bytes));
-    let taken = if cloned { 5_000 } else { bytes };
+    // A clone takes what it changed plus each file's own record on the disk.
+    let files = stats["files"].as_u64().unwrap();
+    let taken = match cloned {
+        true => (5_000 + files * lane_core::insight::PER_FILE_BYTES).min(bytes),
+        false => bytes,
+    };
     assert_eq!(here["now"]["as_lanes"].as_u64(), Some(taken), "{here}");
     assert_eq!(
         (

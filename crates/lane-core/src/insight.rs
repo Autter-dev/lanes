@@ -165,6 +165,23 @@ pub struct Totals {
     pub ms_saved: u64,
 }
 
+/// What a cloned file costs the disk even though its data is shared: the filesystem's own record
+/// for it. Measured on a Windows Dev Drive (ReFS) on 2026-10-19: a lane of Astro (79,972 files,
+/// every one cloned) took 817 MiB, about 10.5 KiB a file with its folders and links; 11 KiB keeps
+/// the estimate on the safe side. On other disks, one 4 KiB block a file until it's measured there.
+pub const PER_FILE_BYTES: u64 = if cfg!(windows) { 11 * 1024 } else { 4 * 1024 };
+
+/// The disk a lane takes of its own: all of it for a copy; for a clone, the files it changed plus
+/// what each of its files costs (`per_file`). Never more than its whole tree: files a lane adds, a
+/// worktree would hold too.
+pub fn lane_disk(stats: &LaneStats, changed_bytes: u64, per_file: u64) -> u64 {
+    let own = match stats.method.as_str() {
+        "clone" => changed_bytes.saturating_add(stats.files.saturating_mul(per_file)),
+        _ => stats.bytes,
+    };
+    own.min(stats.bytes)
+}
+
 /// The waiting one lane saved, at least: the install it skipped, less the time it took to make.
 pub fn waiting_saved(stats: &LaneStats) -> u64 {
     stats
@@ -172,8 +189,9 @@ pub fn waiting_saved(stats: &LaneStats) -> u64 {
         .map_or(0, |install| install.saturating_sub(stats.made_ms))
 }
 
-/// Add up what the lanes saved.
-pub fn savings(rows: &[(&Lane, Option<&LaneStats>, Option<&Details>)]) -> Savings {
+/// Add up what the lanes saved, with `per_file` as each cloned file's own cost
+/// ([`PER_FILE_BYTES`] on this machine).
+pub fn savings(rows: &[(&Lane, Option<&LaneStats>, Option<&Details>)], per_file: u64) -> Savings {
     let mut s = Savings {
         lanes: rows.len(),
         ..Savings::default()
@@ -182,16 +200,11 @@ pub fn savings(rows: &[(&Lane, Option<&LaneStats>, Option<&Details>)]) -> Saving
         let Some(stats) = stats else { continue };
         s.measured += 1;
         s.as_worktrees += stats.bytes;
-        let extra = match stats.method.as_str() {
-            "clone" => details.map_or(0, |d| d.changed_bytes),
-            _ => {
-                s.copies += 1;
-                stats.bytes
-            }
-        };
-        // A lane never counts as taking more than a worktree would: files it adds, a worktree
-        // would hold too.
-        s.as_lanes += extra.min(stats.bytes);
+        if stats.method != "clone" {
+            s.copies += 1;
+        }
+        let changed = details.map_or(0, |d| d.changed_bytes);
+        s.as_lanes += lane_disk(stats, changed, per_file);
         if let Some(ms) = stats.install_ms {
             s.installs_skipped += 1;
             s.install_ms_skipped += ms;
@@ -205,7 +218,7 @@ pub fn savings(rows: &[(&Lane, Option<&LaneStats>, Option<&Details>)]) -> Saving
 /// Add up what every lane saved since the first. `live` is what each lane still here takes now
 /// (its changed files' size, by lane id); a lane missing from it has lost its folder, so its disk
 /// isn't counted until `lane rm` records it.
-pub fn totals(records: &[LaneRecord], live: &HashMap<String, u64>) -> Totals {
+pub fn totals(records: &[LaneRecord], live: &HashMap<String, u64>, per_file: u64) -> Totals {
     let mut t = Totals {
         since: records.iter().map(|r| r.at).min(),
         lanes: records.len(),
@@ -220,15 +233,15 @@ pub fn totals(records: &[LaneRecord], live: &HashMap<String, u64>) -> Totals {
         if r.removed_at.is_some() {
             t.removed += 1;
         }
-        let extra = match (copied, r.removed_at) {
-            (true, _) => Some(r.stats.bytes),
+        let changed = match (copied, r.removed_at) {
+            (true, _) => Some(0),
             (false, Some(_)) => r.extra_bytes,
             (false, None) => live.get(&r.lane_id).copied(),
         };
-        if let Some(extra) = extra {
+        if let Some(changed) = changed {
             t.disk_measured += 1;
             t.as_worktrees += r.stats.bytes;
-            t.as_lanes += extra.min(r.stats.bytes);
+            t.as_lanes += lane_disk(&r.stats, changed, per_file);
         }
         if let Some(ms) = r.stats.install_ms {
             t.installs_skipped += 1;
@@ -331,11 +344,14 @@ mod tests {
             changed_bytes: 2_000_000,
             ..Details::default()
         };
-        let s = savings(&[
-            (&a, Some(&clone), Some(&changed)),
-            (&b, Some(&copy), None),
-            (&c, None, None),
-        ]);
+        let s = savings(
+            &[
+                (&a, Some(&clone), Some(&changed)),
+                (&b, Some(&copy), None),
+                (&c, None, None),
+            ],
+            0,
+        );
         assert_eq!(s.lanes, 3);
         assert_eq!(s.measured, 2);
         assert_eq!(s.as_worktrees, 1_000_000_000);
@@ -384,7 +400,7 @@ mod tests {
             record("copied", &slow, Some(None)),
         ];
         let live = HashMap::from([("here".to_string(), 1_000_000)]);
-        let t = totals(&records, &live);
+        let t = totals(&records, &live, 0);
         assert_eq!(t.since, Some(1_004));
         assert_eq!((t.lanes, t.removed, t.cloned, t.copied), (5, 3, 4, 1));
         // Disk: the lane here, the one measured as it went, and the copy (all of it, always).
@@ -395,7 +411,7 @@ mod tests {
         // Time: every lane that skipped an install, at least the install less the making time.
         assert_eq!((t.installs_skipped, t.install_ms_skipped), (5, 240_000));
         assert_eq!(t.ms_saved, 4 * 47_100);
-        assert_eq!(totals(&[], &live), Totals::default());
+        assert_eq!(totals(&[], &live, 0), Totals::default());
     }
 
     #[test]
@@ -413,11 +429,47 @@ mod tests {
             ..Details::default()
         };
         let a = lane("a");
-        let s = savings(&[(&a, Some(&tiny), Some(&added))]);
+        let s = savings(&[(&a, Some(&tiny), Some(&added))], 0);
         assert_eq!((s.as_worktrees, s.as_lanes, s.saved), (22, 22, 0));
         let gone = record("a", &tiny, Some(Some(5_000)));
-        let t = totals(&[gone], &HashMap::new());
+        let t = totals(&[gone], &HashMap::new(), 0);
         assert_eq!((t.as_worktrees, t.as_lanes, t.not_written), (22, 22, 0));
+    }
+
+    #[test]
+    fn every_cloned_file_costs_the_disk_something() {
+        // A clone shares its files' data, but the filesystem still keeps a record of each one.
+        let clone = LaneStats {
+            method: "clone".into(),
+            files: 80_000,
+            bytes: 1_000_000_000,
+            made_ms: 900,
+            install_ms: None,
+        };
+        let changed = Details {
+            changed_bytes: 2_000_000,
+            ..Details::default()
+        };
+        let a = lane("a");
+        let s = savings(&[(&a, Some(&clone), Some(&changed))], 11 * 1024);
+        assert_eq!(s.as_lanes, 2_000_000 + 80_000 * 11 * 1024);
+        assert_eq!(s.saved, 1_000_000_000 - s.as_lanes);
+        // So many small files that their records outweigh the data: nothing saved, never less.
+        let tiny = LaneStats {
+            bytes: 50_000_000,
+            ..clone.clone()
+        };
+        let s = savings(&[(&a, Some(&tiny), Some(&changed))], 11 * 1024);
+        assert_eq!((s.as_lanes, s.saved), (50_000_000, 0));
+        // A copy takes everything, whatever the per-file cost.
+        let copy = LaneStats {
+            method: "copy".into(),
+            ..clone.clone()
+        };
+        assert_eq!(lane_disk(&copy, 0, 11 * 1024), 1_000_000_000);
+        let gone = record("a", &clone, Some(Some(2_000_000)));
+        let t = totals(&[gone], &HashMap::new(), 11 * 1024);
+        assert_eq!(t.as_lanes, 2_000_000 + 80_000 * 11 * 1024);
     }
 
     #[test]

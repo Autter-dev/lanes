@@ -84,7 +84,7 @@ pub fn read(repo: Option<&Path>) -> Snapshot {
             }
         })
         .collect();
-    let (savings, totals) = add_up(&rows, &records);
+    let (savings, totals) = add_up(&rows, &records, insight::PER_FILE_BYTES);
     Snapshot {
         rows,
         savings,
@@ -98,7 +98,7 @@ pub fn read(repo: Option<&Path>) -> Snapshot {
 
 /// What the lanes in `rows` save now, and what every lane in `records` saved in total. A lane
 /// whose folder has gone takes no disk and saves none, so it isn't counted now.
-pub fn add_up(rows: &[Row], records: &[LaneRecord]) -> (Savings, Totals) {
+pub fn add_up(rows: &[Row], records: &[LaneRecord], per_file: u64) -> (Savings, Totals) {
     let savings = insight::savings(
         &rows
             .iter()
@@ -107,11 +107,12 @@ pub fn add_up(rows: &[Row], records: &[LaneRecord]) -> (Savings, Totals) {
                 (&r.lane, stats, Some(&r.details))
             })
             .collect::<Vec<_>>(),
+        per_file,
     );
     let live: HashMap<String, u64> = rows
         .iter()
         .filter(|r| !r.gone)
         .map(|r| (r.lane.id.clone(), r.details.changed_bytes))
         .collect();
-    (savings, insight::totals(records, &live))
+    (savings, insight::totals(records, &live, per_file))
 }

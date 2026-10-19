@@ -643,10 +643,13 @@ fn new(args: &[String]) -> Result<()> {
 fn saved_line(stats: &lane_core::state::LaneStats) -> Option<String> {
     use lane_core::insight;
     let mut parts = vec![];
-    if stats.method == "clone" && stats.bytes > 0 {
+    let disk = stats
+        .bytes
+        .saturating_sub(insight::lane_disk(stats, 0, insight::PER_FILE_BYTES));
+    if stats.method == "clone" && disk > 0 {
         parts.push(format!(
-            "{} of disk a worktree would have written",
-            insight::bytes(stats.bytes)
+            "about {} of disk a worktree would have written",
+            insight::bytes(disk)
         ));
     }
     if let Some(install) = stats.install_ms {

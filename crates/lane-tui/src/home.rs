@@ -649,7 +649,11 @@ impl Home {
                     n => format!("{n} files"),
                 };
                 let extra = match &r.stats {
-                    Some(st) if st.method == "clone" => insight::bytes(r.details.changed_bytes),
+                    Some(st) if st.method == "clone" => insight::bytes(insight::lane_disk(
+                        st,
+                        r.details.changed_bytes,
+                        insight::PER_FILE_BYTES,
+                    )),
                     Some(st) => format!("{} (copy)", insight::bytes(st.bytes)),
                     None => "—".into(),
                 };
@@ -777,8 +781,8 @@ impl Home {
             "As lanes",
             s.as_lanes,
             match s.copies {
-                0 => "what the lanes really take: only the files they changed",
-                _ => "the files lanes changed, and the lanes copied in full",
+                0 => "what the lanes take: the files they changed, and a little for every file",
+                _ => "what lanes changed, a little for every file, and the lanes copied in full",
             },
             th.accent(),
         ));
