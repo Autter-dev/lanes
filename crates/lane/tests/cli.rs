@@ -489,6 +489,120 @@ fn exec_gives_each_lane_its_own_ports_and_passes_the_exit_code_through() {
     );
 }
 
+/// `argv` that runs for a minute and starts a process of its own, like a dev server.
+fn a_minute() -> Vec<&'static str> {
+    if cfg!(windows) {
+        vec!["cmd", "/C", "ping -n 61 127.0.0.1 > nul"]
+    } else {
+        vec!["sh", "-c", "sleep 60; exit 0"]
+    }
+}
+
+/// Start `lane` from `cwd` without waiting for it, set up the way `lane_in` runs it.
+fn lane_started(dir: &PathBuf, cwd: &std::path::Path, args: &[&str]) -> std::process::Child {
+    Command::new(env!("CARGO_BIN_EXE_lane"))
+        .args(args)
+        .current_dir(cwd)
+        .env("LANE_CONFIG_DIR", dir)
+        .env("LANE_STATE_DIR", dir.join("state"))
+        .env("LANE_AGENTS_HOME", dir.join("home"))
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .env_remove("LANE_REQUEST_ID")
+        .env_remove("DO_NOT_TRACK")
+        .env_remove("LANE_TELEMETRY")
+        .env_remove("CI")
+        .env("LANE_TELEMETRY_URL", NO_COUNT)
+        .env("LANE_DAEMON", "0")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("lane runs")
+}
+
+/// Poll until `done` holds, or panic with `what` after 15 seconds.
+fn eventually(what: &str, mut done: impl FnMut() -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while !done() {
+        assert!(std::time::Instant::now() < deadline, "{what}");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn rm_stops_what_lane_exec_runs_in_the_lane_then_removes_it_and_is_safe_to_retry() {
+    let dir = config_dir("rm-exec");
+    let repo = repo_with_commit("rm-exec");
+    let made = json(&lane_in(&dir, &repo, &["new", "web", "--json"]));
+    let id = made["lane"]["id"].as_str().unwrap().to_string();
+    let path = PathBuf::from(made["lane"]["path"].as_str().unwrap());
+
+    let mut args = vec!["exec", "web", "--"];
+    args.extend(a_minute());
+    let mut exec = lane_started(&dir, &repo, &args);
+    // `lane exec` notes what it runs in Lanes' state while it waits for it.
+    let noted = dir.join("state").join("running").join(&id);
+    eventually("lane exec never noted its command", || {
+        std::fs::read_dir(&noted).is_ok_and(|d| {
+            d.flatten()
+                .any(|e| e.path().extension().is_some_and(|x| x == "json"))
+        })
+    });
+
+    // `rm` stops it, and what it started, before removing the folder. Windows won't delete a
+    // folder a process is working in, so the folder going means they've stopped there too.
+    let started = std::time::Instant::now();
+    let out = lane_in(
+        &dir,
+        &repo,
+        &["rm", "web", "--json", "--request-id", "rm-web"],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let removed = json(&out);
+    assert_eq!(removed["removed"]["name"], "web");
+    let stopped = removed["stopped"].as_array().unwrap();
+    assert_eq!(stopped.len(), 1, "{removed}");
+    assert!(
+        stopped[0]["command"]
+            .as_str()
+            .unwrap()
+            .starts_with(a_minute()[0]),
+        "{removed}"
+    );
+    assert!(!path.exists(), "the folder is gone");
+    eventually("lane exec kept waiting", || {
+        exec.try_wait().unwrap().is_some()
+    });
+    assert!(
+        !exec.wait().unwrap().success(),
+        "its command was stopped, not finished"
+    );
+    assert!(started.elapsed() < std::time::Duration::from_secs(30));
+    eventually("lane exec left its note behind", || !noted.exists());
+
+    // A retry with the same request id gets the same answer; without one, `rm` says the lane's
+    // gone and what to do. Nothing else changes.
+    let again = lane_in(
+        &dir,
+        &repo,
+        &["rm", "web", "--json", "--request-id", "rm-web"],
+    );
+    assert_eq!(again.status.code(), Some(0));
+    assert_eq!(json(&again)["removed"]["id"], made["lane"]["id"]);
+    let plain = lane_in(&dir, &repo, &["rm", "web", "--json"]);
+    assert_eq!(plain.status.code(), Some(1));
+    let error = &json(&plain)["error"];
+    assert_eq!(error["code"], "not_found");
+    assert!(error["hint"].as_str().unwrap().contains("lane list"));
+    let listed = json(&lane_in(&dir, &repo, &["list", "--json"]));
+    assert!(listed["lanes"].as_array().unwrap().is_empty());
+}
+
 #[test]
 fn env_prints_the_lanes_variables_for_each_shell() {
     let dir = config_dir("env");
@@ -2580,9 +2694,32 @@ fn lane_daemon_starts_reports_and_stops_laned() {
     assert!(stderr.contains("installing from lane.toml"), "{stderr}");
     let writes = || json(&lane(&dir, &["daemon", "status", "--json"]))["writes"].clone();
     assert_eq!(writes(), 1, "laned made it");
+    assert_eq!(
+        json(&lane(&dir, &["daemon", "status", "--json"]))["lanes"],
+        1,
+        "the new lane has an actor"
+    );
+    // `lane exec` tells laned what it runs, and `rm` through laned stops that first.
+    let path = PathBuf::from(json(&made)["lane"]["path"].as_str().unwrap());
+    let mut args = vec!["exec", "fix-auth", "--"];
+    args.extend(a_minute());
+    let mut exec = lane_started(&dir, &repo, &args);
+    let noted = dir.join("state").join("running");
+    eventually("lane exec never noted its command", || {
+        std::fs::read_dir(&noted).is_ok_and(|mut d| d.next().is_some())
+    });
     let removed = lane_in(&dir, &repo, &["rm", "fix-auth", "--json"]);
-    assert!(removed.status.success());
+    assert!(
+        removed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&removed.stderr)
+    );
     assert_eq!(json(&removed)["removed"]["name"], "fix-auth");
+    assert_eq!(json(&removed)["stopped"].as_array().unwrap().len(), 1);
+    assert!(!path.exists());
+    eventually("lane exec kept waiting", || {
+        exec.try_wait().unwrap().is_some()
+    });
     let missing = lane_in(&dir, &repo, &["rm", "fix-auth", "--json"]);
     assert_eq!(
         missing.status.code(),

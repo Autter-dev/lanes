@@ -8,7 +8,8 @@
 //!   `git status` works at once, fixes paths that point at `_base`, and marks the lane `ready`.
 //!   If anything fails, everything it made is removed again, so a retry starts clean.
 //! - **`lane adopt`** turns a worktree the repo already has into a lane.
-//! - **`lane rm`** removes a lane's folder and worktree record, and frees its ports.
+//! - **`lane rm`** stops what `lane exec` runs in the lane, removes its folder and worktree
+//!   record, and frees its ports.
 //!
 //! One `lane new` runs at a time per repo (a lock in the lanes folder), so `_base` never moves
 //! under a clone. Lanes never create branches.
@@ -17,6 +18,7 @@ use crate::clone::{self, Method};
 use crate::error::{Error, ErrorKind, Result};
 use crate::git;
 use crate::project::Project;
+use crate::running::{Running, Runs};
 use crate::state::{self, Lane, NewLane, Request, Status, Store};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
@@ -273,7 +275,10 @@ fn store_base_install_ms(tx: &crate::state::Tx<'_>, root: &Path) -> Option<u64> 
 /// the repo into the lane so an agent started in the lane has them too.
 fn copy_local_agent_files(root: &Path, lane: &Path) -> Result<()> {
     for rel in crate::agents::LOCAL_AGENT_FILES {
-        let (from, to) = (root.join(rel), lane.join(rel));
+        let (from, to) = (
+            crate::agents::in_repo(root, rel),
+            crate::agents::in_repo(lane, rel),
+        );
         if from.is_file() && !to.exists() {
             if let Some(dir) = to.parent() {
                 fs::create_dir_all(dir).map_err(|e| io_error("create", dir, e))?;
@@ -745,24 +750,36 @@ pub fn lane_name(folder: &str) -> String {
     }
 }
 
-/// Remove the lane `name`: its folder and worktree record (unless `keep_files`), then its record
-/// and ports. Safe to retry with a request id.
+/// A removed lane, and what ran in it until then.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Removed {
+    pub lane: Lane,
+    /// Commands `lane exec` ran in it, stopped before its folder went.
+    #[serde(default)]
+    pub stopped: Vec<Running>,
+}
+
+/// Remove the lane `name`: stop what `lane exec` runs in it, remove its folder and worktree
+/// record (unless `keep_files`), then its record and ports. Safe to retry with a request id.
 pub fn remove(
     store: &mut Store,
     repo: &Repo,
     name: &str,
     keep_files: bool,
     request_id: Option<&str>,
-) -> Result<Lane> {
+) -> Result<Removed> {
     let command = format!("rm {name}");
     let request = request_id.map(|id| Request {
         id,
         command: &command,
     });
     if let Some(r) = request
-        && let Some(done) = store.request_result::<Lane>(r)?
+        && let Some(lane) = store.request_result::<Lane>(r)?
     {
-        return Ok(done);
+        return Ok(Removed {
+            lane,
+            stopped: Vec::new(),
+        });
     }
     let lane = store.lane(&repo.root, name)?.ok_or_else(|| {
         Error::new(
@@ -783,10 +800,16 @@ pub fn remove(
             "Forget the lane without touching files: `lane rm {name} --keep-files`."
         )));
     }
+    // Its processes stop first: they'd hold the folder open (Windows won't delete it then), and
+    // its ports are about to be free for another lane. Asked first, then forced.
+    let stopped = Runs::current()
+        .map(|runs| runs.stop(&lane.id, &[]))
+        .unwrap_or_default();
     if !keep_files {
         remove_folder(repo, &lane.path)?;
     }
-    store.write(request, |tx| tx.remove_lane(&repo.root, name))
+    let lane = store.write(request, |tx| tx.remove_lane(&repo.root, name))?;
+    Ok(Removed { lane, stopped })
 }
 
 /// Remove a lane's folder and its worktree record, even with read-only files in it.
@@ -802,14 +825,30 @@ fn remove_folder(repo: &Repo, path: &Path) -> Result<()> {
 }
 
 fn remove_dir(path: &Path) -> io::Result<()> {
-    match fs::remove_dir_all(path) {
-        Ok(()) => Ok(()),
-        Err(_) => {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut cleared = false;
+    loop {
+        match fs::remove_dir_all(path) {
+            Ok(()) => return Ok(()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
             // Windows won't delete read-only files: clear the flag everywhere, then try again.
-            clear_readonly(path);
-            fs::remove_dir_all(path)
+            Err(_) if !cleared => {
+                clear_readonly(path);
+                cleared = true;
+            }
+            Err(e) if in_use(&e) && std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(e) => return Err(e),
         }
     }
+}
+
+/// Windows won't delete a file a process has open, or a folder one is working in. Those let go
+/// a moment after the processes holding them have stopped.
+fn in_use(e: &io::Error) -> bool {
+    // Access denied, sharing and lock violations, and a folder whose files are still going.
+    cfg!(windows) && matches!(e.raw_os_error(), Some(5 | 32 | 33 | 145))
 }
 
 fn clear_readonly(path: &Path) {

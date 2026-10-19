@@ -91,7 +91,7 @@ pub(crate) fn setup(dir: &Path, skills: &Path, record: &Path, on: bool) -> Resul
             file.display()
         )
     });
-    let skill = super::user::skill(&skills.join("lanes/SKILL.md"), on)?;
+    let skill = super::user::skill(&skills.join("lanes").join("SKILL.md"), on)?;
     Ok(vec![
         Change {
             path: file,
@@ -253,7 +253,7 @@ mod tests {
                 .unwrap()
                 .contains("// Mine.")
         );
-        assert!(skills.join("lanes/SKILL.md").is_file());
+        assert!(skills.join("lanes").join("SKILL.md").is_file());
         assert!(
             setup(&dir, &skills, &record, true)
                 .unwrap()

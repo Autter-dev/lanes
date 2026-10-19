@@ -446,3 +446,184 @@ fn a_write_finishes_even_if_the_caller_hangs_up() {
         std::thread::sleep(Duration::from_millis(200));
     }
 }
+
+// ---------- What runs in a lane ----------
+
+/// `argv` that runs for about `secs` seconds and starts a process of its own: a tree, like a
+/// dev server's.
+fn runs_for(secs: u32) -> Vec<String> {
+    if cfg!(windows) {
+        vec![
+            "cmd".into(),
+            "/C".into(),
+            format!("ping -n {} 127.0.0.1 > nul", secs + 1),
+        ]
+    } else {
+        vec!["sh".into(), "-c".into(), format!("sleep {secs}; exit 0")]
+    }
+}
+
+/// Run `argv` in `lane` the way `lane exec` does, on another thread. Its process id comes back
+/// once laned has been told of it; the thread ends with the command.
+fn exec_in(
+    state: &Path,
+    lane: &lane_core::state::Lane,
+    argv: Vec<String>,
+) -> (u32, std::thread::JoinHandle<std::process::ExitStatus>) {
+    let (runs, lane) = (lane_core::running::Runs::at(state), lane.clone());
+    let (tx, rx) = std::sync::mpsc::channel();
+    let thread = std::thread::spawn(move || {
+        let mut cmd = lane_core::lane_env::command(&lane, &argv).unwrap();
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let exec = runs.start(&lane, &mut cmd, &argv.join(" "), false).unwrap();
+        tx.send(exec.pid()).unwrap();
+        exec.wait().unwrap()
+    });
+    (rx.recv().expect("the command starts"), thread)
+}
+
+fn pids(view: &daemon::LaneView) -> Vec<u32> {
+    view.processes.iter().map(|p| p.pid).collect()
+}
+
+#[test]
+fn each_lane_has_an_actor_that_knows_what_runs_in_it_and_rm_stops_that_first() {
+    use lane_core::error::ErrorKind;
+    use lane_core::running::Runs;
+    use lane_core::writes::Write;
+
+    let state = state_dir("actor");
+    let at = Endpoint::at(&state);
+    let _laned = spawn(&state, 60);
+    let root = repo(&state, &[]);
+    let mut client = connect(&at);
+    let new = Write::New {
+        repo: root.clone(),
+        name: "web".into(),
+        agent: None,
+        request_id: None,
+    };
+    let lane = client
+        .write(&new, &mut |_, _| {})
+        .unwrap()
+        .unwrap()
+        .made()
+        .unwrap()
+        .lane;
+
+    // `new` gave the lane an actor, which holds its folder, ports and environment.
+    assert_eq!(client.status().unwrap().lanes, 1);
+    let view = client.lane(&lane.id).unwrap();
+    assert_eq!((&view.lane.path, view.lane.ports), (&lane.path, lane.ports));
+    let port = lane.ports.start.to_string();
+    assert!(
+        view.env.iter().any(|(k, v)| k == "PORT" && *v == port),
+        "{:?}",
+        view.env
+    );
+    assert!(view.processes.is_empty());
+
+    // A command run in it is on its list while it runs, and off it once it ends.
+    let (pid, short) = exec_in(&state, &lane, runs_for(2));
+    assert_eq!(pids(&client.lane(&lane.id).unwrap()), [pid]);
+    assert!(short.join().unwrap().success());
+    assert!(
+        client.lane(&lane.id).unwrap().processes.is_empty(),
+        "the actor's list empties when the command exits"
+    );
+
+    // `rm` stops a long one, and what it started, before removing the folder.
+    let (pid, long) = exec_in(&state, &lane, runs_for(60));
+    assert_eq!(pids(&client.lane(&lane.id).unwrap()), [pid]);
+    let started = Instant::now();
+    let remove = Write::Remove {
+        repo: root.clone(),
+        name: "web".into(),
+        keep_files: false,
+        request_id: None,
+    };
+    let removed = client
+        .write(&remove, &mut |_, _| {})
+        .unwrap()
+        .unwrap()
+        .removed()
+        .unwrap();
+    assert_eq!(removed.lane.id, lane.id);
+    assert_eq!(
+        removed.stopped.iter().map(|p| p.pid).collect::<Vec<_>>(),
+        [pid]
+    );
+    assert!(!lane.path.exists(), "the folder is gone");
+    let status = long.join().unwrap();
+    assert!(!status.success(), "stopped, not finished: {status:?}");
+    assert!(started.elapsed() < Duration::from_secs(30));
+    assert!(Runs::at(&state).list(&lane.id).is_empty());
+
+    // The actor went with the lane.
+    assert_eq!(client.status().unwrap().lanes, 0);
+    let gone = client.lane(&lane.id).unwrap_err();
+    assert_eq!(gone.kind(), std::io::ErrorKind::NotFound, "{gone}");
+
+    // Removing it again is safe: the engine's own answer, with what to do next.
+    let again = client.write(&remove, &mut |_, _| {}).unwrap().unwrap_err();
+    assert_eq!(again.kind, ErrorKind::NotFound);
+    assert!(again.hint.is_some(), "{again}");
+}
+
+#[test]
+fn a_lane_exec_that_leaves_without_saying_is_forgotten() {
+    use interprocess::local_socket::Stream;
+    use interprocess::local_socket::prelude::*;
+    use lane_core::running::Running;
+    use std::io::{BufRead, BufReader, Write as _};
+
+    let state = state_dir("forget");
+    let at = Endpoint::at(&state);
+    add_lane(&state, "web", 4100);
+    let id = Store::open_existing_at(&state.join("state.db"))
+        .unwrap()
+        .unwrap()
+        .lanes(None)
+        .unwrap()[0]
+        .id
+        .clone();
+    let _laned = spawn(&state, 60);
+    let mut client = connect(&at);
+    {
+        // Say a process started, then go: the way a killed `lane exec` leaves.
+        let raw = Stream::connect(at.name().unwrap()).unwrap();
+        let request = Request::Started {
+            lane: id.clone(),
+            process: Running {
+                pid: 999_999,
+                command: "npm run dev".into(),
+                started: 1,
+            },
+        };
+        let mut line = serde_json::to_string(&request).unwrap();
+        line.push('\n');
+        (&raw).write_all(line.as_bytes()).unwrap();
+        let mut reply = String::new();
+        BufReader::new(&raw).read_line(&mut reply).unwrap();
+        assert!(reply.contains(r#""reply":"ok""#), "{reply}");
+        assert_eq!(pids(&client.lane(&id).unwrap()), [999_999]);
+    }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !client.lane(&id).unwrap().processes.is_empty() {
+        assert!(Instant::now() < deadline, "never forgotten");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // An unknown lane gets an answer, not a hang.
+    assert!(client.lane("ln_nope").is_err());
+    let unknown = client.started(
+        "ln_nope",
+        &Running {
+            pid: 1,
+            command: "x".into(),
+            started: 1,
+        },
+    );
+    assert!(unknown.is_err());
+}

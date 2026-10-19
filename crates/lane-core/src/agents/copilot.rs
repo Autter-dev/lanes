@@ -250,7 +250,10 @@ pub(crate) fn setup(
             ..Change::default()
         });
     }
-    changes.push(super::user::skill(&skills.join("lanes/SKILL.md"), on)?);
+    changes.push(super::user::skill(
+        &skills.join("lanes").join("SKILL.md"),
+        on,
+    )?);
     Ok(changes)
 }
 
@@ -560,7 +563,7 @@ mod tests {
             "{text}"
         );
         assert_eq!(fs::read_to_string(&insiders).unwrap(), off_by_you);
-        assert!(skills.join("lanes/SKILL.md").is_file());
+        assert!(skills.join("lanes").join("SKILL.md").is_file());
         assert!(
             setup(&copilot, &vscode, &skills, &record, Some(&lane), true)
                 .unwrap()

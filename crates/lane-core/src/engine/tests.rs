@@ -163,7 +163,7 @@ fn rm_removes_the_folder_the_worktree_record_and_the_ports() {
     let (dir, mut store) = repo("rm");
     let repo = Repo::open(&dir).unwrap();
     let a = new_lane(&mut store, &repo, "a", None, None).unwrap().lane;
-    let gone = remove(&mut store, &repo, "a", false, None).unwrap();
+    let gone = remove(&mut store, &repo, "a", false, None).unwrap().lane;
     assert_eq!(gone.id, a.id);
     assert!(!a.path.exists());
     let listed = git_in(&dir, &["worktree", "list", "--porcelain"]);

@@ -18,6 +18,7 @@ pub mod next;
 pub mod process;
 pub mod project;
 pub mod repo;
+pub mod running;
 pub mod snapshot;
 pub mod state;
 pub mod telemetry;

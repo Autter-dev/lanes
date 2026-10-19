@@ -139,17 +139,17 @@ pub fn is_set_up(agent: Agent) -> bool {
     match agent.id {
         "claude" => claude_dir().is_ok_and(|d| {
             claude_hooks_present(&read_json(&d.join("settings.json")).unwrap_or(Value::Null))
-                && is_ours(&d.join("skills/lanes/SKILL.md"))
+                && is_ours(&d.join("skills").join("lanes").join("SKILL.md"))
         }),
         "codex" => {
             codex_dir().is_ok_and(|d| {
                 codex_hooks_present(&read_json(&d.join("hooks.json")).unwrap_or(Value::Null))
-            }) && shared_skills().is_ok_and(|d| is_ours(&d.join("lanes/SKILL.md")))
+            }) && shared_skills().is_ok_and(|d| is_ours(&d.join("lanes").join("SKILL.md")))
         }
         "cursor" => {
             cursor_dir().is_ok_and(|d| {
                 cursor_hooks_present(&read_json(&d.join("hooks.json")).unwrap_or(Value::Null))
-            }) && shared_skills().is_ok_and(|d| is_ours(&d.join("lanes/SKILL.md")))
+            }) && shared_skills().is_ok_and(|d| is_ours(&d.join("lanes").join("SKILL.md")))
         }
         "gemini" => {
             gemini_dir().is_ok_and(|d| {
@@ -157,11 +157,11 @@ pub fn is_set_up(agent: Agent) -> bool {
                     .ok()
                     .and_then(|t| super::jsonc::Doc::parse(&t).ok())
                     .is_some_and(|doc| gemini::is_set_up(doc.value()))
-            }) && shared_skills().is_ok_and(|d| is_ours(&d.join("lanes/SKILL.md")))
+            }) && shared_skills().is_ok_and(|d| is_ours(&d.join("lanes").join("SKILL.md")))
         }
         "copilot" => {
             copilot_dir().is_ok_and(|d| copilot::is_set_up(&d))
-                && shared_skills().is_ok_and(|d| is_ours(&d.join("lanes/SKILL.md")))
+                && shared_skills().is_ok_and(|d| is_ours(&d.join("lanes").join("SKILL.md")))
         }
         _ => false,
     }
@@ -181,7 +181,7 @@ pub(crate) fn claude(dir: &Path, on: bool) -> Result<Vec<Change>> {
         let text = serde_json::to_string_pretty(&value).expect("settings serialize") + "\n";
         write_atomic(&settings, &text)?;
     }
-    let skill = skill(&dir.join("skills/lanes/SKILL.md"), on)?;
+    let skill = skill(&dir.join("skills").join("lanes").join("SKILL.md"), on)?;
     Ok(vec![
         Change {
             path: settings,
@@ -295,7 +295,7 @@ pub(crate) fn codex(dir: &Path, skills: &Path, on: bool) -> Result<Vec<Change>> 
         let text = serde_json::to_string_pretty(&value).expect("hooks serialize") + "\n";
         write_atomic(&file, &text)?;
     }
-    let skill = skill(&skills.join("lanes/SKILL.md"), on)?;
+    let skill = skill(&skills.join("lanes").join("SKILL.md"), on)?;
     Ok(vec![
         Change {
             path: file,
@@ -323,7 +323,7 @@ pub(crate) fn cursor(dir: &Path, skills: &Path, on: bool) -> Result<Vec<Change>>
         let text = serde_json::to_string_pretty(&value).expect("hooks serialize") + "\n";
         write_atomic(&file, &text)?;
     }
-    let skill = skill(&skills.join("lanes/SKILL.md"), on)?;
+    let skill = skill(&skills.join("lanes").join("SKILL.md"), on)?;
     Ok(vec![
         Change {
             path: file,
@@ -416,7 +416,7 @@ mod tests {
         assert!(super::super::claude_hooks_present(&settings));
         assert_eq!(settings["model"], "opus");
         assert_eq!(
-            fs::read_to_string(dir.join("skills/lanes/SKILL.md")).unwrap(),
+            fs::read_to_string(dir.join("skills").join("lanes").join("SKILL.md")).unwrap(),
             SKILL
         );
         assert!(
@@ -440,7 +440,7 @@ mod tests {
     #[test]
     fn someone_elses_skill_is_left_alone() {
         let dir = temp("theirs");
-        let path = dir.join("skills/lanes/SKILL.md");
+        let path = dir.join("skills").join("lanes").join("SKILL.md");
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(
             &path,
@@ -481,7 +481,7 @@ Mine.
             "lane hook cursor session-start"
         );
         assert_eq!(file["hooks"]["afterFileEdit"][0]["command"], "./format.sh");
-        assert!(skills.join("lanes/SKILL.md").is_file());
+        assert!(skills.join("lanes").join("SKILL.md").is_file());
         assert!(
             cursor(&dir, &skills, true)
                 .unwrap()
@@ -526,7 +526,7 @@ Mine.
         );
         assert_eq!(file["hooks"]["PreToolUse"][0]["matcher"], "^Bash$");
         assert_eq!(
-            fs::read_to_string(skills.join("lanes/SKILL.md")).unwrap(),
+            fs::read_to_string(skills.join("lanes").join("SKILL.md")).unwrap(),
             SKILL
         );
         assert!(
