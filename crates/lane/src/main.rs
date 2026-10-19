@@ -313,6 +313,7 @@ Options:
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let env = Env::current();
+    move_old_folders(&args, &env);
 
     let code = match args.first().map(String::as_str) {
         None => open_app(&env),
@@ -352,6 +353,26 @@ fn main() -> ExitCode {
         let _ = telemetry::maybe_send(&env, &config);
     }
     code
+}
+
+/// On Windows, Lanes before 0.1.0 kept its state and settings in AppData, where an app installed
+/// from a package (like the Claude desktop app) has its own copy: bring them across to
+/// `%USERPROFILE%\.lane` before anything reads it. Quick once that's done; `lane doctor` also
+/// looks in every package. A person at a terminal gets one line when anything came across;
+/// agents, scripts and `--json` get nothing, and it's all in the log.
+fn move_old_folders(args: &[String], env: &Env) {
+    let first = args.first().map(String::as_str);
+    if matches!(first, Some("-h" | "--help" | "help" | "-V" | "--version")) {
+        return;
+    }
+    let report = lane_core::moved::run(first == Some("doctor"));
+    report.log();
+    if !args::wants_json(args)
+        && env.can_ask()
+        && let Some(line) = report.summary()
+    {
+        eprintln!("lane: {line}");
+    }
 }
 
 /// Run a command and turn its error, if any, into output and an exit code.

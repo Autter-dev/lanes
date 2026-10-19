@@ -1,4 +1,4 @@
-//! User settings: `~/.config/lane/config.toml` (`%APPDATA%\lane\config.toml` on Windows).
+//! User settings: `~/.config/lane/config.toml` (`%USERPROFILE%\.lane\config.toml` on Windows).
 //!
 //! Saves are atomic (write a temporary file, then rename), so a retry or a crash never leaves a
 //! half-written file. `LANE_CONFIG_DIR` overrides the folder.
@@ -87,9 +87,24 @@ pub fn config_dir() -> Result<PathBuf, ConfigError> {
     if let Some(dir) = std::env::var_os("LANE_CONFIG_DIR").filter(|d| !d.is_empty()) {
         return Ok(PathBuf::from(dir));
     }
+    if cfg!(windows) {
+        return windows_home().ok_or(ConfigError::NoConfigDir);
+    }
     use etcetera::BaseStrategy;
     let base = etcetera::choose_base_strategy().map_err(|_| ConfigError::NoConfigDir)?;
     Ok(base.config_dir().join("lane"))
+}
+
+/// Where Lanes keeps its settings on Windows, with its state in `state` inside:
+/// `%USERPROFILE%\.lane`. Not AppData, because Windows gives an app installed from a package
+/// (the Claude desktop app is one) a private copy of AppData, and the programs it starts write
+/// there: a `lane` started by that app would see other lanes than your terminal's. Lanes before
+/// 0.1.0 used AppData; [`crate::moved`] brings what's there across.
+pub fn windows_home() -> Option<PathBuf> {
+    etcetera::home_dir()
+        .ok()
+        .filter(|h| !h.as_os_str().is_empty())
+        .map(|h| h.join(".lane"))
 }
 
 /// The settings file.
