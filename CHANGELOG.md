@@ -8,6 +8,10 @@ Lanes uses [semantic versioning](https://semver.org), and 0.0.x versions are pre
 
 ## Unreleased
 
+### 2026-10-30
+
+- `18:15` **Security**: the install count worker and the site pin fixed releases of npm packages with advisories: undici 6.29.1 (GHSA-2m5v-pch6-74hx, GHSA-qrxm-fqhp-jwvm, GHSA-xjj6-f33q-929c, GHSA-4qv8-2p9j-2685, GHSA-9fm3-97px-rjf6, GHSA-4w7w-5xrc-9h26, GHSA-55wc-3pg8-jfw6, GHSA-f72v-6w45-q472) and fast-uri 2.4.8 (GHSA-w74x-v6f9-j3xg, GHSA-wjr9-j795-jxcr).
+
 ### 2026-10-19
 
 - `16:45` **Changed**: benchmark 1 measures wall time and disk in separate passes, so a full run fits a night or two per disk instead of days. The time pass runs 1 warmup and 10 runs back to back, removing the copies between runs without waiting. The disk pass runs 3 times per measurement, each run starting and ending on a settled disk, and goes first so the time pass's deletes never reach its numbers. The results file says which pass each number came from. `--pass time|disk|both` (`-Pass`) runs one or both, and `--disk-runs` (`-DiskRuns`) sets the disk runs. (`1fc6de1`)
