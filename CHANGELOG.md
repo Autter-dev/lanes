@@ -8,6 +8,10 @@ Lanes uses [semantic versioning](https://semver.org), and 0.0.x versions are pre
 
 ## Unreleased
 
+### 2026-11-14
+
+- `00:39` **Security**: `rmcp` moves from 3.5.1 to 3.6.0 (RUSTSEC-2026-0461), and `libsqlite3-sys` from 0.38.2 to 0.39.0, which bundles SQLite 3.54.0 (RUSTSEC-2026-0459). `libsqlite3-sys` 0.39 needs `rusqlite` 0.41, so that direct dependency moved from 0.40 to 0.41 too; no call sites changed. The new `crates/lane/tests/deps.rs` reads `Cargo.lock` and fails when either pin falls below its fixed version.
+
 ### 2026-10-30
 
 - `18:15` **Security**: the install count worker and the site pin fixed releases of npm packages with advisories: undici 6.29.1 (GHSA-2m5v-pch6-74hx, GHSA-qrxm-fqhp-jwvm, GHSA-xjj6-f33q-929c, GHSA-4qv8-2p9j-2685, GHSA-9fm3-97px-rjf6, GHSA-4w7w-5xrc-9h26, GHSA-55wc-3pg8-jfw6, GHSA-f72v-6w45-q472) and fast-uri 2.4.8 (GHSA-w74x-v6f9-j3xg, GHSA-wjr9-j795-jxcr).
