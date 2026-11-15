@@ -8,6 +8,10 @@ Lanes uses [semantic versioning](https://semver.org), and 0.0.x versions are pre
 
 ## Unreleased
 
+### 2026-11-15
+
+- `06:07` **Security**: the site moves `astro` from 7.4.0 to 7.4.7 (GHSA-r3h5-4585-7x3w), with the transitive packages 7.4.7 requires. The new `site_astro_is_at_or_above_the_fixed_version` test in `crates/lane/tests/deps.rs` reads `site/package-lock.json` and fails when the pin falls below 7.4.7.
+
 ### 2026-11-14
 
 - `00:39` **Security**: `rmcp` moves from 3.5.1 to 3.6.0 (RUSTSEC-2026-0461), and `libsqlite3-sys` from 0.38.2 to 0.39.0, which bundles SQLite 3.54.0 (RUSTSEC-2026-0459). `libsqlite3-sys` 0.39 needs `rusqlite` 0.41, so that direct dependency moved from 0.40 to 0.41 too; no call sites changed. The new `crates/lane/tests/deps.rs` reads `Cargo.lock` and fails when either pin falls below its fixed version.

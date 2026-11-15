@@ -1,7 +1,8 @@
-//! Dependency pins that carry a security advisory, read from the workspace lockfile.
+//! Dependency pins that carry a security advisory, read from the workspace lockfiles.
 //!
-//! `Cargo.lock` is what an installed `lane` is built from, so it is the file a fix has to change.
-//! The test names the fixed versions, so a stale lockfile fails here before a release ships it.
+//! `Cargo.lock` is what an installed `lane` is built from, and `site/package-lock.json` is what
+//! the website is built from, so those are the files a fix has to change. The test names the
+//! fixed versions, so a stale lockfile fails here before a release ships it.
 
 use std::path::PathBuf;
 
@@ -13,6 +14,20 @@ fn version_of(lock: &str, name: &str) -> String {
         .unwrap_or_else(|| panic!("no `{name}` package in Cargo.lock"));
     let rest = &lock[start + needle.len()..];
     rest[..rest.find('"').expect("a closed version string")].to_string()
+}
+
+/// The version of the `node_modules/<name>` entry in an npm `package-lock.json`.
+fn npm_version_of(lock: &str, name: &str) -> String {
+    let needle = format!("\"node_modules/{name}\": {{");
+    let start = lock
+        .find(&needle)
+        .unwrap_or_else(|| panic!("no `{name}` package in package-lock.json"));
+    let rest = &lock[start + needle.len()..];
+    let version = rest
+        .find("\"version\": \"")
+        .map(|i| &rest[i + "\"version\": \"".len()..])
+        .expect("a version in the package entry");
+    version[..version.find('"').expect("a closed version string")].to_string()
 }
 
 /// `a` at or above `b`, comparing the numeric `major.minor.patch` parts.
@@ -43,4 +58,14 @@ fn locked_packages_are_at_or_above_the_fixed_versions() {
             "{name} {version} is below the fixed {floor}; bump it in Cargo.lock"
         );
     }
+}
+
+#[test]
+fn site_astro_is_at_or_above_the_fixed_version() {
+    // GHSA-r3h5-4585-7x3w is fixed in astro 7.4.7. Keep this floor in step with the advisory.
+    let version = npm_version_of(include_str!("../../../site/package-lock.json"), "astro");
+    assert!(
+        at_least(&version, "7.4.7"),
+        "astro {version} is below the fixed 7.4.7; bump it in site/package-lock.json"
+    );
 }
